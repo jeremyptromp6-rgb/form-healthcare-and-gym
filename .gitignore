@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.expo/
+web-build/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+coverage/
+backups/
+form-github.zip
+
+# Local dev test-account passwords (see docs/RELEASE.md Q-24)
+apps/api/seed.example.json

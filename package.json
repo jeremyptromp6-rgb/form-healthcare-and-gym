@@ -1,0 +1,22 @@
+{
+  "name": "form",
+  "private": true,
+  "description": "FORM — Train. Eat. Level Up.",
+  "workspaces": [
+    "packages/*",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @form/api",
+    "dev:web": "npm --prefix apps/mobile run web",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm --prefix apps/mobile run typecheck",
+    "lint": "npm --prefix apps/mobile run lint",
+    "test": "npm run test --workspaces --if-present && npm --prefix apps/mobile test -- --ci",
+    "build": "npm run build -w @form/api && npm --prefix apps/mobile run build:web",
+    "smoke": "node scripts/smoke-api.mjs",
+    "validate": "npm run typecheck && npm run lint && npm test && npm run build && npm run smoke"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@form/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "esbuild src/server.ts src/reconcile.ts src/backup.ts --bundle --platform=node --format=esm --target=node22 --sourcemap --outdir=dist --external:fastify --external:@fastify/* --external:zod",
+    "start": "node --enable-source-maps dist/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "reconcile": "tsx src/reconcile.ts",
+    "backup": "tsx src/backup.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/jwt": "^10.2.2",
+    "@fastify/rate-limit": "^10.0.0",
+    "@form/domain": "*",
+    "fastify": "^5.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
