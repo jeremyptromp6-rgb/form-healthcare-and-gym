@@ -1,12 +1,19 @@
 # Render Blueprint for FORM's API (https://render.com/docs/blueprint-spec).
-# In Render: New → Blueprint → pick this repository. Render reads this file and creates the
-# service, generates a JWT secret, and attaches a disk so accounts and logs survive restarts.
+# In Render: New → Blueprint → pick this repository. Render reads this file, creates the service
+# and generates a JWT secret.
+#
+# TESTING SETUP (free plan): the server sleeps after ~15 minutes without requests (the next
+# request wakes it in about a minute), and free services have no disk — every account, workout
+# and food log is wiped whenever it restarts or redeploys. Fine for trying FORM out; not for
+# real use.
+#
+# To keep data (Starter): change `plan` to 0.5c-512mb, uncomment the `disk` block, and set
+# DATABASE_PATH to /var/data/form.db. Render then shows the monthly price before applying.
 services:
   - type: web
     name: form-api
     runtime: node
-    # The smallest paid instance: always on, and paid plans can have a persistent disk.
-    plan: 0.5c-512mb
+    plan: free
     region: oregon
     # devDependencies (esbuild, TypeScript) are needed to build, even with NODE_ENV=production.
     buildCommand: npm ci --include=dev && npm run build -w @form/api
@@ -14,10 +21,10 @@ services:
     healthCheckPath: /health
     # Deploy a new commit only after GitHub's CI checks pass.
     autoDeployTrigger: checksPass
-    disk:
-      name: form-data
-      mountPath: /var/data
-      sizeGB: 1
+    # disk:
+    #   name: form-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -26,9 +33,9 @@ services:
       # Signs session tokens: a random 256-bit value Render generates once and keeps.
       - key: JWT_SECRET
         generateValue: true
-      # On the persistent disk, so data is kept across restarts and deploys.
+      # Free plan: the service's own (temporary) filesystem. Starter: /var/data/form.db on the disk.
       - key: DATABASE_PATH
-        value: /var/data/form.db
+        value: ./form.db
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
         value: https://form-api.onrender.com
