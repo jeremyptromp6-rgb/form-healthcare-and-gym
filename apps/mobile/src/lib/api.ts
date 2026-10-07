@@ -83,6 +83,9 @@ export function kindForStatus(status: number): ApiErrorKind {
 }
 
 export async function request<T>(path: string, opts: { method?: string; body?: unknown; token?: string | null; timeoutMs?: number } = {}): Promise<T> {
+  if (!config.apiUrl) {
+    throw new ApiError('unavailable', 'not_configured', "This version of FORM isn't connected to a server yet, so signing in and syncing aren't available.", null, false);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? config.requestTimeoutMs);
   let res: Response;

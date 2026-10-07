@@ -1,5 +1,5 @@
 import { ApiError, kindForStatus, request } from './api';
-import { resolveApiUrl } from './config';
+import { apiSettings, resolveApiUrl } from './config';
 import { localDateKey, uuid } from './dates';
 import { shouldRetry } from './queryClient';
 
@@ -83,5 +83,15 @@ describe('dates', () => {
 
   it('generates RFC 4122 v4 ids', () => {
     expect(uuid()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});
+
+describe('apiSettings', () => {
+  it('never throws: a build without a safe address gets no URL and a reason instead', () => {
+    expect(apiSettings('https://api.form.fitness', false)).toEqual({ apiUrl: 'https://api.form.fitness', apiProblem: null });
+    const missing = apiSettings(undefined, false);
+    expect(missing.apiUrl).toBeNull();
+    expect(missing.apiProblem).toMatch(/https/);
+    expect(apiSettings('http://api.form.fitness', false).apiUrl).toBeNull();
   });
 });

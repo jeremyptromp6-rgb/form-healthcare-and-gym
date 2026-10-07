@@ -22,8 +22,25 @@ export function resolveApiUrl(raw: string | undefined, isDev: boolean): string {
   return value;
 }
 
+/**
+ * The API address, or why there isn't one. A missing or unsafe address never crashes the app at
+ * launch — the welcome page still works, and every request explains that this build has no server.
+ */
+export function apiSettings(raw: string | undefined, isDev: boolean): { apiUrl: string | null; apiProblem: string | null } {
+  try {
+    return { apiUrl: resolveApiUrl(raw, isDev), apiProblem: null };
+  } catch (e) {
+    return { apiUrl: null, apiProblem: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+const api = apiSettings(process.env.EXPO_PUBLIC_API_URL, typeof __DEV__ === 'undefined' ? true : __DEV__);
+if (api.apiProblem && typeof __DEV__ !== 'undefined' && __DEV__) console.warn(`[config] ${api.apiProblem}`);
+
 export const config = {
-  apiUrl: resolveApiUrl(process.env.EXPO_PUBLIC_API_URL, typeof __DEV__ === 'undefined' ? true : __DEV__),
+  apiUrl: api.apiUrl,
+  /** Set when this build has no usable API address (e.g. a downloadable APK built without one). */
+  apiProblem: api.apiProblem,
   requestTimeoutMs: 15_000,
   /**
    * On-device pose model (MediaPipe Pose Landmarker lite, ~5.5 MB, fetched once and cached by the
