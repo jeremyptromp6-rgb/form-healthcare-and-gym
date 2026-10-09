@@ -26,9 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # Optional: set a repository variable EXPO_PUBLIC_API_URL (https://…) to connect the app
-      # to a hosted FORM API. Without one, the app opens and explains that sign-in needs a server.
-      EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+      # The hosted FORM API (Render). A repository variable EXPO_PUBLIC_API_URL overrides it.
+      EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://form-api-e68m.onrender.com' }}
     steps:
       - uses: actions/checkout@v4
 

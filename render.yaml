@@ -38,7 +38,7 @@ services:
         value: ./form.db
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
-        value: https://form-api.onrender.com
+        value: https://form-api-e68m.onrender.com
       # Rule-based coaching (no AI provider key needed). Food photo scanning stays off until a
       # provider key is added; Pro purchases stay off until a real store is connected.
       - key: COACH_PROVIDER
