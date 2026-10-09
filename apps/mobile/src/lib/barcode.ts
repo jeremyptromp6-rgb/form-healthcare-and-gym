@@ -122,19 +122,33 @@ export function draftFromOpenFoodFacts(code: string, response: { status?: number
 export async function lookupBarcode(raw: string, opts: { type?: string; fetch?: typeof fetch; timeoutMs?: number } = {}): Promise<BarcodeLookup> {
   const doFetch = opts.fetch ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 12_000;
-  const code = normaliseBarcode(raw, opts.type);
+  let code = normaliseBarcode(raw, opts.type);
+  // Some scanners report a UPC-E code without saying so: 8 digits that only check out once expanded.
+  if (code.length === 8 && !isValidGtin(code) && isValidGtin(normaliseBarcode(code, 'upc_e'))) code = normaliseBarcode(code, 'upc_e');
   if (!isValidGtin(code)) return { ok: false, kind: 'invalid', message: MESSAGES.invalid };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await doFetch(`${OFF_URL}/${code}.json?fields=${FIELDS}`, {
+  const get = (c: string) =>
+    doFetch(`${OFF_URL}/${c}.json?fields=${FIELDS}`, {
       headers: Platform.OS === 'web' ? {} : { 'User-Agent': USER_AGENT },
       signal: controller.signal,
     });
+  try {
+    let res = await get(code);
+    let found = res.ok ? ((await res.json().catch(() => null)) as { status?: number; product?: OffProduct } | null) : null;
+    // A 12-digit UPC-A is often filed under its 13-digit form (a leading 0).
+    if (code.length === 12 && (res.status === 404 || (res.ok && found?.status !== 1))) {
+      const padded = await get(`0${code}`);
+      if (padded.ok || padded.status === 404) {
+        res = padded;
+        found = padded.ok ? ((await padded.json().catch(() => null)) as typeof found) : null;
+        if (found?.status === 1) code = `0${code}`;
+      }
+    }
     if (res.status === 429) return { ok: false, kind: 'rate_limited', message: MESSAGES.rate_limited };
     if (res.status === 404) return { ok: false, kind: 'not_found', message: MESSAGES.not_found };
     if (!res.ok) return { ok: false, kind: 'network', message: MESSAGES.network };
-    return draftFromOpenFoodFacts(code, (await res.json().catch(() => null)) as { status?: number; product?: OffProduct } | null);
+    return draftFromOpenFoodFacts(code, found);
   } catch {
     return { ok: false, kind: 'network', message: MESSAGES.network };
   } finally {

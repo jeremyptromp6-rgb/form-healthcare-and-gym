@@ -319,4 +319,19 @@ describe("authorization and development fallback", () => {
     const u = await setup();
     expect((await get(u.auth, "/system/features")).json().features.food_scan).toEqual({ available: false, reason: "provider_unconfigured" });
   });
+
+  it("public /status says which build runs and whether scanning is live, without secrets", async () => {
+    await setup(undefined, { foodRecognition: { ...testConfig.foodRecognition, provider: "gemini" } });
+    const before = process.env.GEMINI_API_KEY;
+    try {
+      delete process.env.GEMINI_API_KEY;
+      const off = await app.inject({ method: "GET", url: "/status" });
+      expect(off.statusCode).toBe(200);
+      expect(off.json()).toMatchObject({ features: { foodScan: false, cameraVerification: true }, foodRecognition: { state: "unconfigured", provider: "Gemini food recognition" } });
+      expect(off.body).not.toMatch(/GEMINI_API_KEY|missing/);
+    } finally {
+      if (before === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = before;
+    }
+  });
 });

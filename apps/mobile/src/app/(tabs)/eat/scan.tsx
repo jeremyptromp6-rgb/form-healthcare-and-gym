@@ -85,6 +85,19 @@ export default function ScanMeal() {
     setStep({ kind: 'start' });
   };
 
+  if (!feature.loading && feature.unknown) {
+    return (
+      <Screen title="Scan a meal">
+        <StateView
+          kind="error"
+          title="Couldn't reach FORM's server"
+          message="Check your connection and try again. The server can take up to a minute to wake up."
+          actionLabel={feature.checking ? 'Checking…' : 'Try again'}
+          onAction={() => void feature.recheck()}
+        />
+      </Screen>
+    );
+  }
   if (!feature.loading && !feature.available) {
     return (
       <Screen title="Scan a meal">

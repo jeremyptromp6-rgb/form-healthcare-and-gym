@@ -19,6 +19,9 @@ export interface EatDayViewProps {
   addingWater?: boolean;
   onScan: () => void;
   scanAvailable: boolean;
+  /** The server couldn't be asked whether scanning is on (offline, or still waking up). */
+  scanUnknown?: boolean;
+  scanChecking?: boolean;
   /** Weigh several ingredients and log them as one meal. */
   onWeighMeal: () => void;
   /** Scan a packaged food's barcode (Open Food Facts). */
@@ -167,13 +170,15 @@ export function EatDayView(p: EatDayViewProps) {
 
       <Row gap={space.sm}>
         <Button label="Weigh a meal" icon="scale-outline" variant="secondary" onPress={p.onWeighMeal} style={{ flex: 1 }} />
-        <Button label="Scan a meal" icon="camera-outline" variant="secondary" onPress={p.onScan} style={{ flex: 1 }} />
+        <Button label="Scan a meal" icon="camera-outline" variant="secondary" onPress={p.onScan} loading={p.scanChecking && !p.scanAvailable} style={{ flex: 1 }} />
       </Row>
       {p.onScanBarcode ? <Button label="Scan a barcode" icon="barcode-outline" variant="secondary" onPress={p.onScanBarcode} /> : null}
       {p.showScanInfo ? (
         <Card>
           {p.scanAvailable ? (
             <StateView kind="empty" compact title="Scanning gives an estimate" message="A photo can't weigh food. Scanned amounts are always marked as estimates." />
+          ) : p.scanUnknown ? (
+            <StateView kind="error" compact title="Couldn't reach FORM's server" message="Check your connection and tap Scan a meal again. The server can take up to a minute to wake up." />
           ) : (
             <StateView kind="unavailable" compact title="Food scanning isn't available yet" message="Search the food database, add a food from its label, or weigh it for the most accurate numbers." />
           )}

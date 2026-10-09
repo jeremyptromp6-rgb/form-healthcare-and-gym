@@ -13,7 +13,8 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   // Food scanner: "anthropic" (Claude vision), "gemini" (Google Gemini vision — has a free tier),
   // "development" (labelled sample, never in production) or "none".
-  FOOD_RECOGNITION_PROVIDER: z.enum(["none", "anthropic", "gemini", "development"]).default("none"),
+  // Typed into hosting dashboards by hand, so case and stray spaces are forgiven.
+  FOOD_RECOGNITION_PROVIDER: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() || undefined : v), z.enum(["none", "anthropic", "gemini", "development"]).default("none")),
   GEMINI_FOOD_MODEL: z.string().min(1).default("gemini-3.8-flash"),
   FOOD_RECOGNITION_MODEL: z.string().min(1).default("claude-opus-5-5"),
   FOOD_RECOGNITION_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),

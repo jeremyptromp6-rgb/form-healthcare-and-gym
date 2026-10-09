@@ -18,6 +18,7 @@ export default function Eat() {
   const [scanInfo, setScanInfo] = useState(false);
   const [waterError, setWaterError] = useState<string | null>(null);
   useRefetchOnFocus(day.refetch);
+  useRefetchOnFocus(foodScan.recheck);
   const nav = dayNavigation(date, today);
 
   return (
@@ -43,8 +44,15 @@ export default function Eat() {
               : undefined
           }
           addingWater={addWater.isPending}
-          onScan={() => (foodScan.available ? router.push(`/eat/scan?date=${date}` as Href) : setScanInfo((s) => !s))}
+          onScan={async () => {
+            if (foodScan.available) return router.push(`/eat/scan?date=${date}` as Href);
+            // The cached answer may be stale (scanning switched on since, or the server was asleep): ask again first.
+            if (await foodScan.recheck()) return router.push(`/eat/scan?date=${date}` as Href);
+            setScanInfo(true);
+          }}
           scanAvailable={foodScan.available}
+          scanUnknown={foodScan.unknown}
+          scanChecking={foodScan.checking}
           onWeighMeal={() => router.push(`/eat/meal?date=${date}` as Href)}
           onScanBarcode={() => router.push('/eat/barcode' as Href)}
           planning={

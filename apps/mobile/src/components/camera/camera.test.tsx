@@ -280,6 +280,23 @@ describe('native camera feed', () => {
     expect(mockWeb.inject).toHaveBeenCalledWith(expect.stringContaining('window.__skeletonColor'));
   });
 
+  it('real MediaPipe output for a person doing a squat (side-on) is tracked, with a knee angle', async () => {
+    // Captured from the engine's exact MediaPipe build and model, run on a photo of a mini squat.
+    const real: [number, number, number][] = [[0.4703,0.2144,0.9989],[0.4771,0.2007,0.9984],[0.4791,0.2005,0.9983],[0.4813,0.2003,0.9986],[0.4757,0.2009,0.9975],[0.4766,0.2006,0.997],[0.4779,0.2003,0.9976],[0.498,0.2084,0.9966],[0.4938,0.207,0.9946],[0.4749,0.2288,0.9976],[0.4733,0.2285,0.9966],[0.513,0.298,0.9999],[0.5024,0.2941,0.9993],[0.5151,0.4211,0.9925],[0.5087,0.4205,0.0582],[0.5119,0.5413,0.9561],[0.5091,0.5293,0.1045],[0.5131,0.5717,0.9166],[0.5071,0.5604,0.1146],[0.5108,0.5717,0.9167],[0.5089,0.5615,0.1178],[0.5102,0.5636,0.8926],[0.5087,0.5481,0.1184],[0.505,0.5151,0.9997],[0.5003,0.5073,0.9996],[0.4735,0.6567,0.9135],[0.4771,0.6463,0.4294],[0.5058,0.8123,0.9041],[0.5012,0.7913,0.6192],[0.5197,0.8412,0.8229],[0.5166,0.82,0.6584],[0.4559,0.8447,0.8808],[0.4566,0.8199,0.6863]];
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+    const h = handlers();
+    await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+    await engine({ t: 'camera', kind: 'live' });
+    await engine({ t: 'pose', kind: 'ready', backend: 'GPU' });
+    for (let i = 0; i < 12; i++) await engine({ t: 'frame', ts: 1000 + i * 33, w: 640, h: 480, ms: 30, b: 150, people: [real] });
+    const last = h.onReadout.mock.calls.map((c) => c[0]).filter(Boolean).at(-1) as LiveReadout;
+    expect(last.people).toBe(1);
+    expect(last.framing.issue).toBeNull();
+    expect(last.trackable).toBe(true);
+    expect(last.angleDeg).toBeGreaterThan(120);
+    expect(last.angleDeg).toBeLessThan(175);
+  });
+
   it('maps engine camera errors and offline model failures to honest states', async () => {
     mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
     const h = handlers();

@@ -45,14 +45,14 @@
         "expo-image-picker",
         {
           "photosPermission": "FORM uses a photo you choose only as your private profile picture.",
-          "cameraPermission": "FORM uses your camera to track your movement on this device during workouts. Video is never recorded or uploaded.",
+          "cameraPermission": "FORM uses your camera to track your movement during workouts (video stays on this device and is never recorded), to photograph meals you choose to scan, and to read food barcodes.",
           "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "FORM uses your camera to track your movement on this device during workouts. Video is never recorded or uploaded.",
+          "cameraPermission": "FORM uses your camera to track your movement during workouts (video stays on this device and is never recorded), to photograph meals you choose to scan, and to read food barcodes.",
           "microphonePermission": false,
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": true

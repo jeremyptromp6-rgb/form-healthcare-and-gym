@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
-import { createUnconfiguredProviders, type ProviderRegistry } from "@form/domain";
+import { createUnconfiguredProviders, featureAvailability, providerStatuses, type ProviderRegistry } from "@form/domain";
 import { aiCoachFromConfig } from "./providers/aiCoach";
 import { foodRecognitionFromConfig } from "./providers/foodRecognition";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -103,6 +103,18 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       app.log.error({ error: err instanceof Error ? err.name : "unknown" }, "health check failed");
       return reply.status(503).send({ ok: false });
     }
+  });
+  // Public, for operators: which build is running and which features are live. No user data and
+  // no secrets — only what the app already shows every signed-in user, plus provider names.
+  app.get("/status", async () => {
+    const statuses = providerStatuses(ctx.providers);
+    const features = featureAvailability(statuses);
+    const food = statuses.find((s) => s.kind === "food_recognition");
+    return {
+      version: (process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "").slice(0, 7) || null,
+      features: { foodScan: features.food_scan.available, aiCoach: features.ai_coach.available, cameraVerification: features.camera_verification.available },
+      foodRecognition: food ? { state: food.state, provider: food.provider } : null,
+    };
   });
   await app.register(async (pub) => authRoutes(pub, ctx));
   await app.register(async (pub) => clientErrorRoutes(pub, ctx));

@@ -114,6 +114,17 @@ describe('lookupBarcode', () => {
     expect(await lookupBarcode('3017620422003', { fetch: respond(status, {}) })).toMatchObject({ ok: false, kind });
   });
 
+  it('expands an unlabelled UPC-E code, and tries a UPC-A code in its 13-digit form', async () => {
+    const urls: string[] = [];
+    const fetchMock = jest.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify(url.includes('/0042100005264.json') ? NUTELLA : { status: 0 }), { status: url.includes('/0042100005264.json') ? 200 : 404 });
+    }) as unknown as typeof fetch;
+    const r = await lookupBarcode('04252614', { fetch: fetchMock });
+    expect(urls.map((u) => u.split('/product/')[1]!.split('.json')[0])).toEqual(['042100005264', '0042100005264']);
+    expect(r).toMatchObject({ ok: true, draft: { code: '0042100005264', name: 'Nutella' } });
+  });
+
   it('reports a connection failure', async () => {
     const failing = jest.fn(async () => Promise.reject(new TypeError('Network request failed'))) as unknown as typeof fetch;
     expect(await lookupBarcode('3017620422003', { fetch: failing })).toMatchObject({ ok: false, kind: 'network' });

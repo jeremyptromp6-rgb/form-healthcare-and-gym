@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { geminiFoodRecognition, geminiResponseSchema } from "../src/providers/foodRecognition";
+import { cleanApiKey, GEMINI_FALLBACK_MODEL, geminiFoodRecognition, geminiResponseSchema } from "../src/providers/foodRecognition";
 
 /**
  * The Gemini food-recognition provider against a stubbed transport: checks the request we send
@@ -102,6 +102,40 @@ describe("Gemini food recognition provider", () => {
   ] as const)("maps %s to %s", async (_name, respond, code) => {
     const { provider } = stubbed(respond);
     expect(await provider.recognize(IMAGE)).toMatchObject({ ok: false, code });
+  });
+
+  it("tries the fallback model when the configured one is unknown or out of quota", async () => {
+    for (const first of [404, 429]) {
+      let call = 0;
+      const { requests, provider } = stubbed(() => (++call === 1 ? json(first, { error: { code: first } }) : answer(JSON.stringify(RESULT))));
+      expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: RESULT });
+      expect(requests.map((r) => r.url.split("/models/")[1])).toEqual(["gemini-3.8-flash:generateContent", `${GEMINI_FALLBACK_MODEL}:generateContent`]);
+    }
+  });
+
+  it("drops the thinking setting with the older fields if a model rejects it", async () => {
+    let call = 0;
+    const { requests, provider } = stubbed(() => (++call === 1 ? json(400, { error: { message: "Thinking level is not supported for this model." } }) : answer(JSON.stringify(RESULT))));
+    expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: RESULT });
+    expect((requests[1]!.body.generationConfig as Record<string, unknown>).thinkingConfig).toBeUndefined();
+  });
+
+  it("cleans a pasted key and accepts GOOGLE_API_KEY", async () => {
+    expect(cleanApiKey('  "AIza-example"\n')).toBe("AIza-example");
+    const { requests, provider } = stubbed(() => answer(JSON.stringify(RESULT)), " AIza-example \n");
+    await provider.recognize(IMAGE);
+    expect(requests[0]!.headers.get("x-goog-api-key")).toBe("AIza-example");
+    const before = { gemini: process.env.GEMINI_API_KEY, google: process.env.GOOGLE_API_KEY };
+    try {
+      delete process.env.GEMINI_API_KEY;
+      process.env.GOOGLE_API_KEY = "google-named-key";
+      expect(geminiFoodRecognition({ model: "gemini-3.8-flash" }).status()).toMatchObject({ state: "ready" });
+    } finally {
+      if (before.gemini === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = before.gemini;
+      if (before.google === undefined) delete process.env.GOOGLE_API_KEY;
+      else process.env.GOOGLE_API_KEY = before.google;
+    }
   });
 
   it("reports a network failure as retryable", async () => {

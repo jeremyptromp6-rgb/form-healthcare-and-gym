@@ -137,8 +137,18 @@ type GeminiResponse = {
  * downstream checks as Claude: the reply must parse against RecognitionSchema or it's treated as
  * unavailable. The key travels in a header, never in the URL.
  */
-export function geminiFoodRecognition(opts: { model: string; timeoutMs?: number; apiKey?: string; fetch?: typeof fetch }): FoodRecognitionProvider {
-  const apiKey = opts.apiKey ?? process.env.GEMINI_API_KEY ?? "";
+/** A stable model tried when the configured one is unknown to the API or out of free-tier quota. */
+export const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
+
+/** The key as pasted into a dashboard: surrounding spaces, newlines and quotes are dropped. */
+export function cleanApiKey(raw: string | undefined): string {
+  return (raw ?? "").trim().replace(/^["']+|["']+$/g, "").trim();
+}
+
+export function geminiFoodRecognition(opts: { model: string; fallbackModel?: string | null; timeoutMs?: number; apiKey?: string; fetch?: typeof fetch }): FoodRecognitionProvider {
+  // GOOGLE_API_KEY is the name Google's own tools use; accept it too.
+  const apiKey = cleanApiKey(opts.apiKey ?? (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY));
+  const models = [...new Set([opts.model, ...(opts.fallbackModel === null ? [] : [opts.fallbackModel ?? GEMINI_FALLBACK_MODEL])])];
   const doFetch = opts.fetch ?? fetch;
   const schema = geminiResponseSchema();
   const unreadable = () => fail("invalid_input", "This photo couldn't be analysed. Try another photo, or log the food by search.", false);
@@ -151,11 +161,14 @@ export function geminiFoodRecognition(opts: { model: string; timeoutMs?: number;
       if (!apiKey) return fail("unconfigured", "Food recognition is not configured");
       const timeout = AbortSignal.timeout(opts.timeoutMs ?? 30_000);
       const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-      // The current structured-output field, or (if an API version rejects it) the older one.
+      // The current structured-output fields, or (if a model or API version rejects them) the
+      // older structured-output field without a thinking setting.
       const output = (legacy: boolean) =>
-        legacy ? { responseMimeType: "application/json", responseJsonSchema: schema } : { responseFormat: { text: { mimeType: "APPLICATION_JSON", schema } } };
-      const send = (legacy: boolean) =>
-        doFetch(`${GEMINI_URL}/${encodeURIComponent(opts.model)}:generateContent`, {
+        legacy
+          ? { responseMimeType: "application/json", responseJsonSchema: schema }
+          : { responseFormat: { text: { mimeType: "APPLICATION_JSON", schema } }, thinkingConfig: { thinkingLevel: "LOW" } };
+      const send = (model: string, legacy: boolean) =>
+        doFetch(`${GEMINI_URL}/${encodeURIComponent(model)}:generateContent`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
           signal: combined,
@@ -167,18 +180,23 @@ export function geminiFoodRecognition(opts: { model: string; timeoutMs?: number;
                 parts: [{ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.data).toString("base64") } }, { text: "Identify the foods in this photo. Reply with JSON only." }],
               },
             ],
-            generationConfig: { ...output(legacy), maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "LOW" } },
+            generationConfig: { ...output(legacy), maxOutputTokens: 4096 },
           }),
         });
-      let res: Response;
+      let res!: Response;
       try {
-        res = await send(false);
-        if (res.status === 400) {
-          const peek = (await res
-            .clone()
-            .json()
-            .catch(() => null)) as { error?: { message?: string } } | null;
-          if (/unknown name|response_?format/i.test(peek?.error?.message ?? "")) res = await send(true);
+        for (const [i, model] of models.entries()) {
+          res = await send(model, false);
+          if (res.status === 400) {
+            const peek = (await res
+              .clone()
+              .json()
+              .catch(() => null)) as { error?: { message?: string } } | null;
+            if (/unknown name|response_?format|thinking/i.test(peek?.error?.message ?? "")) res = await send(model, true);
+          }
+          // Unknown model, or this model's free-tier quota is used up: try the next one.
+          if ((res.status === 404 || res.status === 429) && i < models.length - 1) continue;
+          break;
         }
       } catch {
         if (signal?.aborted || timeout.aborted) return fail("network", "Food recognition took too long.");
