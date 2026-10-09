@@ -1,6 +1,7 @@
-import { NATIVE_POSE_UNAVAILABLE } from './mediapipe';
-
-/** Whether this build can run live pose tracking. Native builds need the development build's pose module. */
+/**
+ * Whether this build can run live pose tracking. Phones run MediaPipe inside the camera feed's
+ * WebView engine (see components/camera/poseEngineHtml.ts), so it's available on every build.
+ */
 export function livePoseSupport(): { available: boolean; message: string } {
-  return { available: false, message: NATIVE_POSE_UNAVAILABLE };
+  return { available: true, message: '' };
 }
