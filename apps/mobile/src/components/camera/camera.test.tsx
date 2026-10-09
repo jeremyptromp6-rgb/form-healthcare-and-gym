@@ -349,7 +349,7 @@ describe('native camera feed', () => {
   it('the engine page loads the same MediaPipe version and model, and knows the skeleton', () => {
     const html = poseEngineHtml({ modelUrl: 'https://example.test/pose.task', colors: { good: '#0f0', warn: '#ff0', other: '#f00' } });
     expect(html).toContain(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`);
-    expect(html).toContain("/vision_bundle.mjs");
+    expect(html).toContain("/vision_bundle.js");
     expect(html).toContain("/wasm");
     expect(html).toContain('https://example.test/pose.task');
     expect(html).toContain("facingMode: 'user'");
