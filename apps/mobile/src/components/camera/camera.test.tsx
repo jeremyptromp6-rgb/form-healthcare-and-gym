@@ -1,5 +1,8 @@
+/// <reference types="node" />
 import { FRAMING_MESSAGES, LivePoseSession, LiveRepVerifier, type FramingAssessment, type LiveRepState } from '@form/domain';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { useCameraPermissions } from 'expo-camera';
 import { Text } from 'react-native';
 import { createPoseProvider, NATIVE_POSE_UNAVAILABLE } from '@/lib/pose/mediapipe';
@@ -8,6 +11,7 @@ import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
 import { PoseCameraFeed } from './PoseCameraFeed';
+import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
 
 jest.mock('expo-camera', () => {
   const { Text: MockText } = jest.requireActual('react-native');
@@ -21,6 +25,25 @@ jest.mock('expo-camera', () => {
     ),
   };
 });
+
+// The WebView engine: a stand-in that records its props so tests can post engine messages.
+const mockWeb: { props: { onMessage?: (e: { nativeEvent: { data: string } }) => void; source?: { html: string } } | null; inject: jest.Mock } = { props: null, inject: jest.fn() };
+jest.mock('react-native-webview', () => {
+  const React = jest.requireActual('react');
+  const { View: MockView } = jest.requireActual('react-native');
+  return {
+    WebView: React.forwardRef(function MockWebView(props: { testID?: string }, ref: unknown) {
+      React.useImperativeHandle(ref, () => ({ injectJavaScript: mockWeb.inject }));
+      mockWeb.props = props as typeof mockWeb.props;
+      return <MockView testID={props.testID} />;
+    }),
+  };
+});
+const engine = async (m: object) => {
+  await act(async () => mockWeb.props!.onMessage!({ nativeEvent: { data: JSON.stringify(m) } }));
+};
+/** 33 MediaPipe landmarks of a person standing side-on, all clearly visible. */
+const standing = (): [number, number, number][] => Array.from({ length: 33 }, (_, i) => [0.5 + (i % 3) * 0.01, 0.1 + (i / 33) * 0.8, 0.95]);
 
 const LIVE: CameraStatus = { kind: 'live' };
 const READY: PoseStatus = { kind: 'ready', backend: 'GPU' };
@@ -240,14 +263,33 @@ describe('native camera feed', () => {
   const session = LivePoseSession.for('bodyweight_squat')!;
   const handlers = () => ({ onCamera: jest.fn(), onPose: jest.fn(), onReadout: jest.fn() });
 
-  it('reports pose as unsupported in this build and never produces readouts', async () => {
+  it('runs pose on the phone: engine frames feed the shared session and produce readouts', async () => {
     mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
     const h = handlers();
     await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
-    expect(h.onPose).toHaveBeenCalledWith({ kind: 'unsupported', message: NATIVE_POSE_UNAVAILABLE });
-    await fireEvent.press(screen.getByTestId('camera-view')); // camera ready
+    expect(screen.getByTestId('camera-view')).toBeTruthy();
+    await engine({ t: 'pose', kind: 'loading' });
+    await engine({ t: 'camera', kind: 'live' });
+    await engine({ t: 'pose', kind: 'ready', backend: 'GPU' });
+    expect(h.onPose).toHaveBeenCalledWith({ kind: 'loading' });
+    expect(h.onPose).toHaveBeenCalledWith({ kind: 'ready', backend: 'GPU' });
     expect(h.onCamera).toHaveBeenCalledWith({ kind: 'live' });
-    expect(h.onReadout).not.toHaveBeenCalled();
+    await engine({ t: 'frame', ts: 1000, w: 640, h: 480, ms: 18, b: 120, people: [standing()] });
+    expect(h.onReadout).toHaveBeenCalledWith(expect.objectContaining({ people: 1, latencyMs: 18 }));
+    // The skeleton colour follows tracking quality.
+    expect(mockWeb.inject).toHaveBeenCalledWith(expect.stringContaining('window.__skeletonColor'));
+  });
+
+  it('maps engine camera errors and offline model failures to honest states', async () => {
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+    const h = handlers();
+    await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+    await engine({ t: 'camera', kind: 'error', name: 'NotAllowedError' });
+    expect(h.onCamera).toHaveBeenCalledWith({ kind: 'denied', canAskAgain: true });
+    await engine({ t: 'camera', kind: 'error', name: 'NotReadableError' });
+    expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'in_use' });
+    await engine({ t: 'pose', kind: 'failed', offline: true });
+    expect(h.onPose).toHaveBeenCalledWith({ kind: 'failed', message: 'Camera coaching needs an internet connection the first time it loads.', retryable: true });
   });
 
   it('requests permission when active and reports a denial', async () => {
@@ -280,11 +322,24 @@ describe('native camera feed', () => {
     expect(screen.queryByTestId('camera-view')).toBeNull();
   });
 
-  it('the native pose provider is honestly unconfigured', async () => {
+  it('pose tracking is available on phones, through the camera view’s engine', async () => {
+    expect(livePoseSupport().available).toBe(true);
+    // The provider interface isn't how phones track; it says so rather than pretending.
     const provider = createPoseProvider();
-    expect(provider.status().state).toBe('unconfigured');
     expect((await provider.load()).ok).toBe(false);
-    expect((await provider.estimate({}, 0)).ok).toBe(false);
-    expect(livePoseSupport().available).toBe(false);
+  });
+
+  it('the engine page loads the same MediaPipe version and model, and knows the skeleton', () => {
+    const html = poseEngineHtml({ modelUrl: 'https://example.test/pose.task', colors: { good: '#0f0', warn: '#ff0', other: '#f00' } });
+    expect(html).toContain(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`);
+    expect(html).toContain("/vision_bundle.mjs");
+    expect(html).toContain("/wasm");
+    expect(html).toContain('https://example.test/pose.task');
+    expect(html).toContain("facingMode: 'user'");
+    expect(skeletonIndexEdges().length).toBeGreaterThan(8);
+    // Kept in step with the package the web build bundles.
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../../node_modules/@mediapipe/tasks-vision/package.json'), 'utf8')) as { version: string };
+    expect(MEDIAPIPE_VERSION).toBe(pkg.version);
+    expect(skeletonIndexEdges().every(([a, b]) => a >= 0 && a < 33 && b >= 0 && b < 33)).toBe(true);
   });
 });
