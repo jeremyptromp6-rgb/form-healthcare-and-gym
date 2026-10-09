@@ -109,7 +109,9 @@ export function scanErrorMessage(e: { kind: string; code: string; message: strin
   if (e.code === 'food_scan_unavailable') return { message: 'Food scanning isn’t available right now. Search for your food instead.', retry: false };
   if (e.code === 'scan_limit') return { message: e.message, retry: false };
   if (e.code === 'invalid_image' || e.code === 'image_too_large') return { message: 'That photo couldn’t be used. Take another one.', retry: false };
-  if (e.code === 'provider_rate_limited' || e.code === 'provider_network' || e.code === 'provider_unavailable') return { message: 'Recognition is busy. Try again in a moment.', retry: true };
+  if (e.code === 'provider_rate_limited') return { message: 'Lots of scans right now. Try again in a minute.', retry: true };
+  if (e.code === 'provider_network') return { message: 'Couldn’t reach the recognition service. Try again.', retry: true };
+  if (e.code === 'provider_unavailable') return { message: 'Recognition didn’t work this time. Try again, or search for the food.', retry: true };
   if (e.code === 'provider_invalid_input') return { message: 'This photo couldn’t be analysed. Try another photo, or search for the food.', retry: false };
   return { message: e.message, retry: false };
 }

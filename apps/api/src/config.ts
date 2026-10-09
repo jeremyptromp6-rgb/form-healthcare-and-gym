@@ -19,7 +19,7 @@ const envSchema = z.object({
   FOOD_RECOGNITION_MODEL: z.string().min(1).default("claude-opus-5-5"),
   FOOD_RECOGNITION_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   FOOD_SCANS_PER_HOUR: z.coerce.number().int().min(1).max(1000).default(30),
-  FOOD_RECOGNITION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(30_000),
+  FOOD_RECOGNITION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(45_000),
   // AI Coach: "anthropic" (Claude, with rule-based fallback), "rules" (deterministic coaching only, labelled as such) or "none".
   COACH_PROVIDER: z.enum(["none", "rules", "anthropic"]).default("rules"),
   COACH_MODEL: z.string().min(1).default("claude-opus-5-5"),

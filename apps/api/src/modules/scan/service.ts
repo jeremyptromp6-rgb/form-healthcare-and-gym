@@ -16,6 +16,7 @@ import { loadSettings } from "../users/repo";
 import type { AppContext } from "../../shared/context";
 import { reserveProviderCall } from "../../shared/providerBudget";
 import { providerFailure } from "../../shared/providers";
+import { lastRecognitionFailure } from "../../providers/foodRecognition";
 import { userClock } from "../../shared/userClock";
 import { can, proRequired } from "../billing/entitlements";
 import { scansToday } from "../billing/service";
@@ -125,7 +126,11 @@ async function recognizeAndStore(ctx: AppContext, userId: string, clientScanId: 
   // Validates type and size, strips EXIF/metadata. The bytes never touch the database or disk.
   const data = sanitizePhoto(image.mimeType, image.base64, SCAN_LIMITS.maxImageBytes);
   const result = await recognizeWithDeadline(ctx, { mimeType: image.mimeType, data });
-  if (!result.ok) throw providerFailure(result);
+  if (!result.ok) {
+    // Say why in the logs (never the photo or the user): the app only shows a short message.
+    ctx.log.warn({ provider: "food_recognition", code: result.code, detail: lastRecognitionFailure(ctx) }, result.message);
+    throw providerFailure(result);
+  }
 
   const review = buildScanReview(result.value, VERIFIED_FOODS);
   const row: ScanRow = {

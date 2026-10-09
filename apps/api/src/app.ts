@@ -4,7 +4,7 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { createUnconfiguredProviders, featureAvailability, providerStatuses, type ProviderRegistry } from "@form/domain";
 import { aiCoachFromConfig } from "./providers/aiCoach";
-import { foodRecognitionFromConfig } from "./providers/foodRecognition";
+import { foodRecognitionFromConfig, lastRecognitionFailure } from "./providers/foodRecognition";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppConfig } from "./config";
 import { openDb, schemaVersion } from "./db";
@@ -113,7 +113,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     return {
       version: (process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "").slice(0, 7) || null,
       features: { foodScan: features.food_scan.available, aiCoach: features.ai_coach.available, cameraVerification: features.camera_verification.available },
-      foodRecognition: food ? { state: food.state, provider: food.provider } : null,
+      foodRecognition: food ? { state: food.state, provider: food.provider, lastFailure: lastRecognitionFailure(ctx) } : null,
     };
   });
   await app.register(async (pub) => authRoutes(pub, ctx));

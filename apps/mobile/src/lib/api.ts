@@ -365,7 +365,8 @@ export const api = {
   updateFood: (token: string, id: string, patch: FoodLogPatch) => request<{ log: FoodLog }>(`/nutrition/logs/${id}`, { method: 'PATCH', body: patch, token }),
   deleteFood: (token: string, id: string) => request<void>(`/nutrition/logs/${id}`, { method: 'DELETE', token }),
   createScan: (token: string, body: { clientScanId: string; image: { mimeType: 'image/jpeg'; data: string } }) =>
-    request<{ scan: FoodScan }>('/nutrition/scans', { method: 'POST', body, token }),
+    // AI vision can take a while; the server gives up first (45 s) and says so.
+    request<{ scan: FoodScan }>('/nutrition/scans', { method: 'POST', body, token, timeoutMs: 60_000 }),
   getScan: (token: string, id: string) => request<{ scan: FoodScan }>(`/nutrition/scans/${id}`, { token }),
   confirmScan: (token: string, id: string, body: ScanConfirmation) =>
     request<{ duplicate: boolean; scan: FoodScan }>(`/nutrition/scans/${id}/confirm`, { method: 'POST', body, token }),

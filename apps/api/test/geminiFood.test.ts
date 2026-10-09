@@ -53,9 +53,13 @@ describe("Gemini food recognition provider", () => {
     expect(req.headers.get("x-goog-api-key")).toBe("test-gemini-key");
     const contents = req.body.contents as { parts: { inlineData?: { mimeType: string; data: string }; text?: string }[] }[];
     expect(contents[0]!.parts[0]!.inlineData).toEqual({ mimeType: "image/jpeg", data: Buffer.from(IMAGE.data).toString("base64") });
-    const config = req.body.generationConfig as { responseFormat: { text: { mimeType: string; schema: unknown } } };
-    expect(config.responseFormat.text.mimeType).toBe("APPLICATION_JSON");
-    expect(config.responseFormat.text.schema).toEqual(geminiResponseSchema());
+    // generateContent's own JSON Schema output, with low thinking and plenty of room for the answer.
+    expect(req.body.generationConfig).toEqual({
+      responseMimeType: "application/json",
+      responseJsonSchema: geminiResponseSchema(),
+      thinkingConfig: { thinkingLevel: "low" },
+      maxOutputTokens: 16_384,
+    });
     expect(JSON.stringify(geminiResponseSchema())).not.toMatch(/\$schema|additionalProperties/);
     expect(provider.status()).toEqual({ state: "ready", provider: "Gemini (gemini-3.8-flash)" });
   });
@@ -68,16 +72,55 @@ describe("Gemini food recognition provider", () => {
     expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: RESULT });
   });
 
-  it("falls back to the older structured-output fields if the API doesn't know responseFormat", async () => {
+  it("steps to simpler request shapes when one is rejected, down to plain JSON mode", async () => {
     let call = 0;
-    const { requests, provider } = stubbed(() =>
-      ++call === 1 ? json(400, { error: { message: 'Invalid JSON payload received. Unknown name "responseFormat" at \'generation_config\'.' } }) : answer(JSON.stringify(RESULT)),
-    );
+    const { requests, provider } = stubbed(() => (++call <= 3 ? json(400, { error: { status: "INVALID_ARGUMENT", message: `Invalid JSON payload (shape ${call})` } }) : answer(JSON.stringify(RESULT))));
     expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: RESULT });
-    expect(requests).toHaveLength(2);
-    const legacy = requests[1]!.body.generationConfig as Record<string, unknown>;
-    expect(legacy.responseFormat).toBeUndefined();
-    expect(legacy).toMatchObject({ responseMimeType: "application/json", responseJsonSchema: geminiResponseSchema() });
+    const configs = requests.map((r) => r.body.generationConfig as Record<string, unknown>);
+    expect(configs.map((c) => c.thinkingConfig)).toEqual([{ thinkingLevel: "low" }, { thinkingBudget: 1024 }, undefined, undefined]);
+    expect(configs.map((c) => "responseJsonSchema" in c)).toEqual([true, true, true, false]);
+    // Plain JSON mode spells the shape out in the instructions instead.
+    expect(JSON.stringify(requests[3]!.body.systemInstruction)).toContain("servingLowGrams");
+    expect(provider.lastFailure()).toBeNull();
+  });
+
+  it("reads JSON in a code fence, numbers as strings and missing optional fields", async () => {
+    const loose = {
+      imageQuality: "ok",
+      containsFood: true,
+      items: [{ label: "banana", confidence: "0.9", servingGrams: "118", per100g: { calories: 89, protein: 1.1, carbs: 22.8, fat: 0.3 } }, { label: "", servingGrams: 10, per100g: {} }],
+    };
+    const { provider } = stubbed(() => answer("```json\n" + JSON.stringify(loose) + "\n```"));
+    const r = await provider.recognize(IMAGE);
+    expect(r).toEqual({
+      ok: true,
+      value: {
+        imageQuality: "ok",
+        containsFood: true,
+        items: [
+          {
+            label: "banana",
+            confidence: 0.9,
+            alternatives: [],
+            servingGrams: 118,
+            servingLowGrams: 83,
+            servingHighGrams: 153,
+            per100g: { kcal: 89, proteinG: 1.1, carbsG: 22.8, fatG: 0.3 },
+            hiddenIngredients: [],
+            composite: false,
+          },
+        ],
+      },
+    });
+  });
+
+  it("records why the last recognition failed, without the key", async () => {
+    const { provider } = stubbed(() => json(403, { error: { status: "PERMISSION_DENIED", message: "Generative Language API has not been used in project 123 (key AIzaSyEXAMPLEEXAMPLE123)" } }));
+    expect(await provider.recognize(IMAGE)).toMatchObject({ ok: false, code: "unavailable" });
+    const info = provider.lastFailure()!;
+    expect(info).toMatchObject({ stage: "http error", model: "gemini-3.8-flash", status: 403 });
+    expect(info.detail).toContain("PERMISSION_DENIED: Generative Language API has not been used");
+    expect(info.detail).not.toContain("AIzaSyEXAMPLE");
   });
 
   it("is unconfigured without a key and never calls out", async () => {
@@ -98,7 +141,7 @@ describe("Gemini food recognition provider", () => {
     ["cut off", () => answer('{"imageQuality":"ok"', "MAX_TOKENS"), "unavailable"],
     ["no candidates", () => json(200, { candidates: [] }), "unavailable"],
     ["not JSON", () => answer("a banana"), "unavailable"],
-    ["wrong shape", () => answer(JSON.stringify({ imageQuality: "ok", containsFood: true, items: [{ label: "banana" }] })), "unavailable"],
+    ["wrong shape", () => answer(JSON.stringify(["banana"])), "unavailable"],
   ] as const)("maps %s to %s", async (_name, respond, code) => {
     const { provider } = stubbed(respond);
     expect(await provider.recognize(IMAGE)).toMatchObject({ ok: false, code });
@@ -113,11 +156,11 @@ describe("Gemini food recognition provider", () => {
     }
   });
 
-  it("drops the thinking setting with the older fields if a model rejects it", async () => {
+  it("uses a thinking budget if a model rejects a thinking level", async () => {
     let call = 0;
     const { requests, provider } = stubbed(() => (++call === 1 ? json(400, { error: { message: "Thinking level is not supported for this model." } }) : answer(JSON.stringify(RESULT))));
     expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: RESULT });
-    expect((requests[1]!.body.generationConfig as Record<string, unknown>).thinkingConfig).toBeUndefined();
+    expect((requests[1]!.body.generationConfig as Record<string, unknown>).thinkingConfig).toEqual({ thinkingBudget: 1024 });
   });
 
   it("cleans a pasted key and accepts GOOGLE_API_KEY", async () => {
