@@ -46,6 +46,7 @@ export default function Eat() {
           onScan={() => (foodScan.available ? router.push(`/eat/scan?date=${date}` as Href) : setScanInfo((s) => !s))}
           scanAvailable={foodScan.available}
           onWeighMeal={() => router.push(`/eat/meal?date=${date}` as Href)}
+          onScanBarcode={() => router.push('/eat/barcode' as Href)}
           planning={
             planner.available
               ? { onOpenPlan: () => router.push('/eat/plan' as Href), onOpenRecipes: () => router.push('/eat/recipes' as Href), onOpenGrocery: () => router.push('/eat/grocery' as Href) }

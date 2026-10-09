@@ -11,8 +11,10 @@ const envSchema = z.object({
   // Per-client ceiling across all routes (auth routes have their own, much stricter limits).
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(100_000).default(300),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-  // Food scanner: "anthropic" (Claude vision), "development" (labelled sample, never in production) or "none".
-  FOOD_RECOGNITION_PROVIDER: z.enum(["none", "anthropic", "development"]).default("none"),
+  // Food scanner: "anthropic" (Claude vision), "gemini" (Google Gemini vision — has a free tier),
+  // "development" (labelled sample, never in production) or "none".
+  FOOD_RECOGNITION_PROVIDER: z.enum(["none", "anthropic", "gemini", "development"]).default("none"),
+  GEMINI_FOOD_MODEL: z.string().min(1).default("gemini-3.8-flash"),
   FOOD_RECOGNITION_MODEL: z.string().min(1).default("claude-opus-5-5"),
   FOOD_RECOGNITION_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("medium"),
   FOOD_SCANS_PER_HOUR: z.coerce.number().int().min(1).max(1000).default(30),
@@ -59,8 +61,9 @@ export interface AppConfig {
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   rateLimitPerMinute: number;
   foodRecognition: {
-    provider: "none" | "anthropic" | "development";
+    provider: "none" | "anthropic" | "gemini" | "development";
     model: string;
+    geminiModel: string;
     effort: "low" | "medium" | "high" | "xhigh" | "max";
     scansPerHour: number;
     timeoutMs: number;
@@ -130,7 +133,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     tokenTtl: e.TOKEN_TTL,
     logLevel: e.LOG_LEVEL,
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
-    foodRecognition: { provider: e.FOOD_RECOGNITION_PROVIDER, model: e.FOOD_RECOGNITION_MODEL, effort: e.FOOD_RECOGNITION_EFFORT, scansPerHour: e.FOOD_SCANS_PER_HOUR, timeoutMs: e.FOOD_RECOGNITION_TIMEOUT_MS, globalPerDay: e.FOOD_SCANS_GLOBAL_PER_DAY },
+    foodRecognition: { provider: e.FOOD_RECOGNITION_PROVIDER, model: e.FOOD_RECOGNITION_MODEL, geminiModel: e.GEMINI_FOOD_MODEL, effort: e.FOOD_RECOGNITION_EFFORT, scansPerHour: e.FOOD_SCANS_PER_HOUR, timeoutMs: e.FOOD_RECOGNITION_TIMEOUT_MS, globalPerDay: e.FOOD_SCANS_GLOBAL_PER_DAY },
     legal: { termsUrl: e.LEGAL_TERMS_URL ?? null, privacyUrl: e.LEGAL_PRIVACY_URL ?? null },
     billing: {
       provider: e.BILLING_PROVIDER,

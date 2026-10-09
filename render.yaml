@@ -39,11 +39,15 @@ services:
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
         value: https://form-api-e68m.onrender.com
-      # Rule-based coaching (no AI provider key needed). Food photo scanning stays off until a
-      # provider key is added; Pro purchases stay off until a real store is connected.
+      # Rule-based coaching (no AI provider key needed). Pro purchases stay off until a real store
+      # is connected.
       - key: COACH_PROVIDER
         value: rules
+      # Meal photo scanning with Google Gemini's free tier. Add GEMINI_API_KEY (from Google AI
+      # Studio) in the Render dashboard → Environment; until then scanning reports unavailable.
       - key: FOOD_RECOGNITION_PROVIDER
-        value: none
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
       - key: BILLING_PROVIDER
         value: none

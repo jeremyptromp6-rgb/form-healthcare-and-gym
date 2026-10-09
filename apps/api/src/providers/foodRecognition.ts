@@ -9,12 +9,15 @@ import type { AppConfig } from "../config";
  *
  * - "anthropic": Claude vision identifies foods, estimates portions with a range, and gives
  *   per-100 g reference nutrition. The photo is sent in the request body only — never stored.
+ * - "gemini": Google Gemini vision, same output and the same checks. Gemini has a free tier;
+ *   Google may use free-tier requests to improve its products.
  * - "development": a labelled sample meal for local testing (refused in production).
  * - "none": the registry's unconfigured provider stays in place and scanning reports unavailable.
  */
 export function foodRecognitionFromConfig(config: AppConfig): Partial<ProviderRegistry> {
   const fr = config.foodRecognition;
   if (fr.provider === "anthropic") return { food: anthropicFoodRecognition({ model: fr.model, effort: fr.effort, timeoutMs: fr.timeoutMs }) };
+  if (fr.provider === "gemini") return { food: geminiFoodRecognition({ model: fr.geminiModel, timeoutMs: fr.timeoutMs }) };
   if (fr.provider === "development") return { food: developmentRecognitionProvider() };
   return {};
 }
@@ -103,6 +106,112 @@ export function anthropicFoodRecognition(opts: { model: string; effort: AppConfi
         if (error instanceof Anthropic.APIError) return fail("unavailable", "Food recognition is temporarily unavailable.");
         throw error;
       }
+    },
+  };
+}
+
+/** The recognition schema as plain JSON Schema for Gemini (without $schema / additionalProperties). */
+export function geminiResponseSchema(): unknown {
+  const strip = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(strip);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v)) if (k !== "$schema" && k !== "additionalProperties") out[k] = strip(val);
+      return out;
+    }
+    return v;
+  };
+  return strip(z.toJSONSchema(RecognitionSchema));
+}
+
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const BLOCKED_FINISH = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "IMAGE_SAFETY", "SPII", "RECITATION"]);
+
+type GeminiResponse = {
+  promptFeedback?: { blockReason?: string };
+  candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+};
+
+/**
+ * Google Gemini vision (REST generateContent). Same system prompt, structured output and
+ * downstream checks as Claude: the reply must parse against RecognitionSchema or it's treated as
+ * unavailable. The key travels in a header, never in the URL.
+ */
+export function geminiFoodRecognition(opts: { model: string; timeoutMs?: number; apiKey?: string; fetch?: typeof fetch }): FoodRecognitionProvider {
+  const apiKey = opts.apiKey ?? process.env.GEMINI_API_KEY ?? "";
+  const doFetch = opts.fetch ?? fetch;
+  const schema = geminiResponseSchema();
+  const unreadable = () => fail("invalid_input", "This photo couldn't be analysed. Try another photo, or log the food by search.", false);
+
+  return {
+    kind: "food_recognition",
+    development: false,
+    status: () => (apiKey ? { state: "ready", provider: `Gemini (${opts.model})` } : { state: "unconfigured", provider: "Gemini food recognition", missing: ["GEMINI_API_KEY"] }),
+    async recognize(image, { signal } = {}) {
+      if (!apiKey) return fail("unconfigured", "Food recognition is not configured");
+      const timeout = AbortSignal.timeout(opts.timeoutMs ?? 30_000);
+      const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+      // The current structured-output field, or (if an API version rejects it) the older one.
+      const output = (legacy: boolean) =>
+        legacy ? { responseMimeType: "application/json", responseJsonSchema: schema } : { responseFormat: { text: { mimeType: "APPLICATION_JSON", schema } } };
+      const send = (legacy: boolean) =>
+        doFetch(`${GEMINI_URL}/${encodeURIComponent(opts.model)}:generateContent`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+          signal: combined,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM }] },
+            contents: [
+              {
+                role: "user",
+                parts: [{ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.data).toString("base64") } }, { text: "Identify the foods in this photo. Reply with JSON only." }],
+              },
+            ],
+            generationConfig: { ...output(legacy), maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "LOW" } },
+          }),
+        });
+      let res: Response;
+      try {
+        res = await send(false);
+        if (res.status === 400) {
+          const peek = (await res
+            .clone()
+            .json()
+            .catch(() => null)) as { error?: { message?: string } } | null;
+          if (/unknown name|response_?format/i.test(peek?.error?.message ?? "")) res = await send(true);
+        }
+      } catch {
+        if (signal?.aborted || timeout.aborted) return fail("network", "Food recognition took too long.");
+        return fail("network", "Couldn't reach food recognition. Check your connection and try again.");
+      }
+      if (res.status === 429) return fail("rate_limited", "Food recognition is busy. Try again in a moment.");
+      if (res.status === 401 || res.status === 403) return fail("unavailable", "Food recognition is misconfigured.", false);
+      if (res.status === 400) {
+        const err = (await res.json().catch(() => null)) as { error?: { message?: string; details?: { reason?: string }[] } } | null;
+        const keyProblem = /api key/i.test(err?.error?.message ?? "") || (err?.error?.details ?? []).some((d) => d.reason === "API_KEY_INVALID");
+        return keyProblem ? fail("unavailable", "Food recognition is misconfigured.", false) : fail("invalid_input", "This photo couldn't be analysed. Try a clearer photo.", false);
+      }
+      if (!res.ok) return fail("unavailable", "Food recognition is temporarily unavailable.");
+      const body = (await res.json().catch(() => null)) as GeminiResponse | null;
+      if (body?.promptFeedback?.blockReason) return unreadable();
+      const candidate = body?.candidates?.[0];
+      if (!candidate) return fail("unavailable", "Food recognition returned no answer. Try again.");
+      if (candidate.finishReason && BLOCKED_FINISH.has(candidate.finishReason)) return unreadable();
+      if (candidate.finishReason === "MAX_TOKENS") return fail("unavailable", "Food recognition returned an incomplete answer. Try again.");
+      const text = (candidate.content?.parts ?? [])
+        .filter((p) => !p.thought && typeof p.text === "string")
+        .map((p) => p.text)
+        .join("");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return fail("unavailable", "Food recognition returned an unreadable answer. Try again.");
+      }
+      // Model output is untrusted: it must match the schema; the domain clamps the values after.
+      const checked = RecognitionSchema.safeParse(parsed);
+      if (!checked.success) return fail("unavailable", "Food recognition returned an unexpected answer. Try again.");
+      return { ok: true, value: checked.data as RecognitionResult };
     },
   };
 }

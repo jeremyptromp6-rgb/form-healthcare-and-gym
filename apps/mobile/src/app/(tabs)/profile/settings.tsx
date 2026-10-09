@@ -233,7 +233,7 @@ function ScannerPrivacy({ me }: { me: Me }) {
       <Card style={{ gap: space.md }}>
         <Toggle
           label="Allow meal photo recognition"
-          description="When you scan a meal, the photo (with its location data removed) is sent to the recognition service to identify the food. FORM doesn't keep the photo. Off: scanning asks first."
+          description="When you scan a meal, the photo (with its location data removed) is sent to the recognition service to identify the food. FORM doesn't keep the photo; the service handles it under its own terms and may use it to improve its products. Off: scanning asks first."
           value={me.settings.foodScanConsent}
           disabled={update.isPending}
           onChange={(v) => update.mutate({ foodScanConsent: v })}

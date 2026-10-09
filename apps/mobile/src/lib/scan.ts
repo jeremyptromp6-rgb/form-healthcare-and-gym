@@ -103,7 +103,7 @@ export function scanErrorMessage(e: { kind: string; code: string; message: strin
   // The Free daily allowance is used up: say so (the server's words), keep manual logging one tap away.
   if (e.code === 'pro_required') return { message: e.message, retry: false, pro: true };
   if (e.code === 'scan_consent_required')
-    return { message: 'Scanning sends this photo to an outside recognition service to identify the food. FORM doesn’t keep the photo. Allow scanning to continue — you can turn it off any time in Settings.', retry: false, needsConsent: true };
+    return { message: 'Scanning sends this photo to an outside recognition service to identify the food. FORM doesn’t keep the photo; the service may use it to improve its products. Allow scanning to continue — you can turn it off any time in Settings.', retry: false, needsConsent: true };
   if (e.kind === 'network') return { message: 'No connection — your photo is kept. Try again.', retry: true };
   if (e.code === 'scan_timeout') return { message: 'Recognition took too long. Try again.', retry: true };
   if (e.code === 'food_scan_unavailable') return { message: 'Food scanning isn’t available right now. Search for your food instead.', retry: false };

@@ -13,6 +13,7 @@ export default function EatStack() {
       <Stack.Screen name="log/[id]" options={{ title: 'Edit entry' }} />
       <Stack.Screen name="food/new" options={{ title: 'New food' }} />
       <Stack.Screen name="scan" options={{ title: 'Scan a meal' }} />
+      <Stack.Screen name="barcode" options={{ title: 'Scan a barcode' }} />
       <Stack.Screen name="meal" options={{ title: 'Weigh a meal' }} />
       <Stack.Screen name="plan" options={{ title: 'Meal plan' }} />
       <Stack.Screen name="recipes" options={{ title: 'Recipes' }} />
