@@ -4,13 +4,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { useCameraPermissions } from 'expo-camera';
+import { useState } from 'react';
 import { Text } from 'react-native';
 import { createPoseProvider, NATIVE_POSE_UNAVAILABLE } from '@/lib/pose/mediapipe';
 import { cameraErrorStatus, cameraScreenModel, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
 import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
-import { PoseCameraFeed } from './PoseCameraFeed';
+import { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
 import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
 
 jest.mock('expo-camera', () => {
@@ -27,7 +28,11 @@ jest.mock('expo-camera', () => {
 });
 
 // The WebView engine: a stand-in that records its props so tests can post engine messages.
-const mockWeb: { props: { onMessage?: (e: { nativeEvent: { data: string } }) => void; source?: { html: string } } | null; inject: jest.Mock } = { props: null, inject: jest.fn() };
+const mockWeb: { props: { onMessage?: (e: { nativeEvent: { data: string } }) => void; source?: { html: string } } | null; inject: jest.Mock; renders: number } = {
+  props: null,
+  inject: jest.fn(),
+  renders: 0,
+};
 jest.mock('react-native-webview', () => {
   const React = jest.requireActual('react');
   const { View: MockView } = jest.requireActual('react-native');
@@ -35,6 +40,7 @@ jest.mock('react-native-webview', () => {
     WebView: React.forwardRef(function MockWebView(props: { testID?: string }, ref: unknown) {
       React.useImperativeHandle(ref, () => ({ injectJavaScript: mockWeb.inject }));
       mockWeb.props = props as typeof mockWeb.props;
+      mockWeb.renders++;
       return <MockView testID={props.testID} />;
     }),
   };
@@ -295,6 +301,48 @@ describe('native camera feed', () => {
     expect(last.trackable).toBe(true);
     expect(last.angleDeg).toBeGreaterThan(120);
     expect(last.angleDeg).toBeLessThan(175);
+  });
+
+  it('never re-renders the engine view once it is up (a re-render reloads the page and restarts the camera)', async () => {
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+    const s = LivePoseSession.for('bodyweight_squat')!;
+    // A screen that re-renders on every status and readout, like the camera screen does.
+    function Screen() {
+      const [, setTick] = useState(0);
+      const bump = () => setTick((n) => n + 1);
+      return <PoseCameraFeed active session={s} retryToken={0} onCamera={bump} onPose={bump} onReadout={bump} />;
+    }
+    await render(<Screen />);
+    mockWeb.renders = 0;
+    const firstSource = mockWeb.props!.source;
+    await engine({ t: 'pose', kind: 'loading' });
+    await engine({ t: 'camera', kind: 'live' });
+    await engine({ t: 'pose', kind: 'ready', backend: 'CPU' });
+    for (let i = 0; i < 5; i++) await engine({ t: 'frame', ts: 1000 + i * 250, w: 640, h: 480, ms: 20, b: 120, people: [standing()] });
+    expect(mockWeb.renders).toBe(0);
+    expect(mockWeb.props!.source).toBe(firstSource);
+  });
+
+  it('start-up never spins forever: no camera → "didn\'t start", no model → retryable failure', async () => {
+    jest.useFakeTimers();
+    try {
+      mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+      const h = handlers();
+      await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+      await act(async () => jest.advanceTimersByTime(CAMERA_START_TIMEOUT_MS + 1000));
+      expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'start_timeout' });
+
+      const h2 = handlers();
+      await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={1} {...h2} />);
+      await engine({ t: 'camera', kind: 'live' });
+      await act(async () => jest.advanceTimersByTime(MODEL_LOAD_TIMEOUT_MS + 1000));
+      expect(h2.onCamera).not.toHaveBeenCalledWith({ kind: 'unavailable', reason: 'start_timeout' });
+      expect(h2.onPose).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed', retryable: true }));
+      // The failure offers a retry on the screen.
+      expect(cameraScreenModel({ kind: 'unavailable', reason: 'start_timeout' }, { kind: 'idle' }, null, false).overlay).toMatchObject({ action: 'retry', actionLabel: 'Try again' });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('maps engine camera errors and offline model failures to honest states', async () => {

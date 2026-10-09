@@ -12,7 +12,7 @@ export type CameraStatus =
   | { kind: 'off' }
   | { kind: 'requesting' }
   | { kind: 'denied'; canAskAgain: boolean }
-  | { kind: 'unavailable'; reason: 'no_camera' | 'in_use' | 'insecure' | 'unsupported' | 'ended' }
+  | { kind: 'unavailable'; reason: 'no_camera' | 'in_use' | 'insecure' | 'unsupported' | 'ended' | 'start_timeout' }
   | { kind: 'live' }
   /** Frames stopped arriving (app backgrounded, stream stalled). */
   | { kind: 'interrupted' };
@@ -56,6 +56,7 @@ const UNAVAILABLE: Record<Extract<CameraStatus, { kind: 'unavailable' }>['reason
   insecure: { title: 'Camera needs a secure connection', message: `Open FORM over https to use the camera. ${MANUAL}`, retry: false },
   unsupported: { title: "Camera isn't supported here", message: `This browser or device can't provide a camera feed. ${MANUAL}`, retry: false },
   ended: { title: 'Camera disconnected', message: 'The camera stopped. Reconnect it and try again.', retry: true },
+  start_timeout: { title: "The camera didn't start", message: `Try again. If it keeps happening, close other apps that use the camera and reopen FORM. ${MANUAL}`, retry: true },
 };
 
 export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readout: LiveReadout | null, paused: boolean): CameraScreenModel {
@@ -72,7 +73,7 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
         feedback: null,
       };
     case 'requesting':
-      return { overlay: { kind: 'loading', title: '', message: '', action: null, actionLabel: null }, feedback: { message: 'Waiting for camera permission…', tone: 'info' } };
+      return { overlay: { kind: 'loading', title: '', message: '', action: null, actionLabel: null }, feedback: { message: 'Starting your camera — if your phone asks, tap Allow.', tone: 'info' } };
     case 'denied':
       return {
         overlay: {

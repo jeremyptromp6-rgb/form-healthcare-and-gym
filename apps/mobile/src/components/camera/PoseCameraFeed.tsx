@@ -1,6 +1,6 @@
 import { fromMediaPipePose, type PoseDetection } from '@form/domain';
 import { useCameraPermissions } from 'expo-camera';
-import { useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { config } from '@/lib/config';
@@ -15,6 +15,10 @@ const WATCHDOG_MS = 500;
 const STALL_MS = 2000;
 /** A ready model that never gets a first frame this long after the camera went live → interrupted. */
 const FIRST_FRAME_TIMEOUT_MS = 6000;
+/** Permission granted but the camera never opened this long → "the camera didn't start". */
+export const CAMERA_START_TIMEOUT_MS = 15_000;
+/** Camera live but the pose model still loading this long (first load downloads ~18 MB) → retry. */
+export const MODEL_LOAD_TIMEOUT_MS = 90_000;
 
 type EngineMessage =
   | { t: 'camera'; kind: 'requesting' | 'live' | 'ended' | 'error'; name?: string }
@@ -63,9 +67,23 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     const s = live.current;
     Object.assign(s, { camera: false, ready: false, cameraAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, color: '' });
     session.interrupt();
+    const startedAt = Date.now();
+    let gaveUp = false;
     const timer = setInterval(() => {
-      if (!s.camera || !s.ready || s.interrupted) return;
       const now = Date.now();
+      // Start-up never spins forever: a camera that doesn't open, or a model that doesn't load, ends
+      // in a clear message with "Try again".
+      if (!gaveUp && !s.camera && now - startedAt > CAMERA_START_TIMEOUT_MS) {
+        gaveUp = true;
+        callbacks.current.onCamera({ kind: 'unavailable', reason: 'start_timeout' });
+        return;
+      }
+      if (!gaveUp && s.camera && !s.ready && now - s.cameraAt > MODEL_LOAD_TIMEOUT_MS) {
+        gaveUp = true;
+        callbacks.current.onPose({ kind: 'failed', message: 'Camera coaching is taking too long to load. Check your connection and try again.', retryable: true });
+        return;
+      }
+      if (!s.camera || !s.ready || s.interrupted) return;
       const neverStarted = s.lastFrameAt === 0 && now - s.cameraAt > FIRST_FRAME_TIMEOUT_MS;
       const stalled = s.lastFrameAt > 0 && now - s.lastFrameAt > STALL_MS;
       if (neverStarted || stalled) {
@@ -155,22 +173,52 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     }
   };
 
+  // The engine view gets the same (stable) props on every render of this feed, so it never
+  // re-renders: react-native-webview reloads an inline-HTML page whenever its source prop is set
+  // again, and a reload restarts the camera — which re-renders the screen, which reloaded it again.
+  const handler = useRef(onMessage);
+  useEffect(() => {
+    handler.current = onMessage;
+  });
+  const stableOnMessage = useCallback((e: WebViewMessageEvent) => handler.current(e), []);
+  const onEngineError = useCallback(() => callbacks.current.onCamera({ kind: 'unavailable', reason: 'unsupported' }), []);
+
   if (!running) return null;
+  return <EngineView key={retryToken} html={html} webRef={web} onMessage={stableOnMessage} onError={onEngineError} />;
+}
+
+const ENGINE_BASE_URL = 'https://form.app/';
+
+/** The WebView hosting the pose engine. Memoized: it renders once per mount (see above). */
+const EngineView = memo(function EngineView({
+  html,
+  webRef,
+  onMessage,
+  onError,
+}: {
+  html: string;
+  webRef: RefObject<WebView | null>;
+  onMessage: (e: WebViewMessageEvent) => void;
+  onError: () => void;
+}) {
+  const source = useMemo(() => ({ html, baseUrl: ENGINE_BASE_URL }), [html]);
   return (
     <WebView
-      key={retryToken}
-      ref={web}
+      ref={webRef}
       testID="camera-view"
-      style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]}
-      source={{ html, baseUrl: 'https://form.app/' }}
-      originWhitelist={['*']}
+      style={styles.engine}
+      source={source}
+      originWhitelist={ORIGINS}
       javaScriptEnabled
       onMessage={onMessage}
       mediaPlaybackRequiresUserAction={false}
       allowsInlineMediaPlayback
       mediaCapturePermissionGrantType="grant"
-      onError={() => callbacks.current.onCamera({ kind: 'unavailable', reason: 'unsupported' })}
+      onError={onError}
       accessibilityLabel="Live camera preview"
     />
   );
-}
+});
+
+const ORIGINS = ['*'];
+const styles = StyleSheet.create({ engine: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: '#000' } });

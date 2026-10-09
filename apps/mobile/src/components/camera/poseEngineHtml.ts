@@ -26,7 +26,7 @@ export function skeletonIndexEdges(): [number, number][] {
  * looks for anyone else every CROWD_CHECK_MS so the "only you in frame" rule still holds.
  * Uses only its arguments and the global `Vision` from MediaPipe's script build.
  *   engineCore(send, { cdn, modelUrl, crowdEveryMs }) → handle({ type: 'init' } | { type: 'frame', bitmap, ts })
- *   send({ type: 'ready', backend } | { type: 'backend', backend, ms } | { type: 'error', message } | { type: 'result', ts, people, ms } | { type: 'frameError', message })
+ *   send({ type: 'loaded' } | { type: 'ready', backend } | { type: 'backend', backend, ms } | { type: 'error', message } | { type: 'result', ts, people, ms } | { type: 'frameError', message })
  */
 export const ENGINE_CORE = `function engineCore(send, CFG) {
   var V = self.Vision;
@@ -57,6 +57,7 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
     var res = await fetch(CFG.modelUrl);
     if (!res.ok) throw new Error('model ' + res.status);
     var buf = new Uint8Array(await res.arrayBuffer());
+    send({ type: 'loaded' });
     var delegates = ['GPU', 'CPU'];
     for (var d = 0; d < delegates.length; d++) {
       try {
@@ -149,6 +150,7 @@ const sctx = sampler.getContext('2d', { willReadFrequently: true });
 window.__skeletonColor = CFG.colors.warn;
 let engine = null, mode = 'worker', ready = false, busy = false, busySince = 0, stream = null, stopped = false;
 let latency = 0, lastLumaAt = -1e9, luma = undefined;
+const START_TIMEOUT_MS = 20000;
 
 window.formStop = () => {
   stopped = true;
@@ -186,6 +188,8 @@ function onEngine(m) {
   if (stopped) return;
   if (m.type === 'ready') { ready = true; post({ t: 'pose', kind: 'ready', backend: m.backend }); pump(); return; }
   if (m.type === 'backend') { post({ t: 'pose', kind: 'ready', backend: m.backend }); return; }
+  // Downloaded but not started a while later: this phone's worker is stuck — run in the page instead.
+  if (m.type === 'loaded') { if (mode === 'worker') setTimeout(() => { if (!ready && mode === 'worker') startInline(); }, START_TIMEOUT_MS); return; }
   if (m.type === 'error') {
     if (mode === 'worker') startInline();
     else post({ t: 'pose', kind: 'failed', offline: navigator.onLine === false, message: m.message });

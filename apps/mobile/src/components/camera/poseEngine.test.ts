@@ -59,7 +59,7 @@ describe('phone pose engine core', () => {
   it('tracks one person per frame and keeps whichever backend is faster on real frames', async () => {
     const e = setup({ cost: { GPU: 50, CPU: 30 } });
     await e.init();
-    expect(e.sent[0]).toEqual({ type: 'ready', backend: 'GPU' });
+    expect(e.sent.slice(0, 2)).toEqual([{ type: 'loaded' }, { type: 'ready', backend: 'GPU' }]);
     expect(e.created).toEqual(['VIDEO:GPU:1', 'VIDEO:CPU:1', 'IMAGE:CPU:2']);
     for (let i = 0; i < 20; i++) e.frame();
     expect(e.sent.find((m) => m.type === 'backend')).toEqual({ type: 'backend', backend: 'CPU', ms: 30 });
@@ -78,7 +78,7 @@ describe('phone pose engine core', () => {
   it('uses the CPU alone when the GPU cannot start (no probing)', async () => {
     const e = setup({ cost: { GPU: 10, CPU: 30 }, failing: ['GPU'] });
     await e.init();
-    expect(e.sent[0]).toEqual({ type: 'ready', backend: 'CPU' });
+    expect(e.sent.find((m) => m.type === 'ready')).toEqual({ type: 'ready', backend: 'CPU' });
     for (let i = 0; i < 20; i++) e.frame();
     expect(e.sent.some((m) => m.type === 'backend')).toBe(false);
   });
