@@ -21,6 +21,8 @@ export interface EatDayViewProps {
   scanAvailable: boolean;
   /** Weigh several ingredients and log them as one meal. */
   onWeighMeal: () => void;
+  /** Scan a packaged food's barcode (Open Food Facts). */
+  onScanBarcode?: () => void;
   /** Meal planning, recipes and the grocery list — shown when those features are live. */
   planning?: { onOpenPlan: () => void; onOpenRecipes: () => void; onOpenGrocery: () => void } | null;
   showScanInfo: boolean;
@@ -167,6 +169,7 @@ export function EatDayView(p: EatDayViewProps) {
         <Button label="Weigh a meal" icon="scale-outline" variant="secondary" onPress={p.onWeighMeal} style={{ flex: 1 }} />
         <Button label="Scan a meal" icon="camera-outline" variant="secondary" onPress={p.onScan} style={{ flex: 1 }} />
       </Row>
+      {p.onScanBarcode ? <Button label="Scan a barcode" icon="barcode-outline" variant="secondary" onPress={p.onScanBarcode} /> : null}
       {p.showScanInfo ? (
         <Card>
           {p.scanAvailable ? (

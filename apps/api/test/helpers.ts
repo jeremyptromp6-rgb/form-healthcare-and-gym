@@ -17,7 +17,7 @@ export const testConfig: AppConfig = {
   tokenTtl: "1h",
   logLevel: "silent",
   rateLimitPerMinute: 300,
-  foodRecognition: { provider: "none", model: "claude-opus-5-5", effort: "medium", scansPerHour: 30, timeoutMs: 30_000, globalPerDay: 5_000 },
+  foodRecognition: { provider: "none", model: "claude-opus-5-5", geminiModel: "gemini-3.8-flash", effort: "medium", scansPerHour: 30, timeoutMs: 30_000, globalPerDay: 5_000 },
   legal: { termsUrl: null, privacyUrl: null },
   billing: {
     provider: "none",

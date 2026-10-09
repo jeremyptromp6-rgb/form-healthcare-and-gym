@@ -137,6 +137,7 @@ export default function AddFood() {
         <Button label="Quick add" icon="flash-outline" variant="secondary" onPress={() => setQuick(true)} style={{ flex: 1 }} />
         <Button label="New food" icon="add" variant="secondary" onPress={() => router.push('/eat/food/new' as Href)} style={{ flex: 1 }} />
       </Row>
+      <Button label="Scan a barcode" icon="barcode-outline" variant="secondary" onPress={() => router.push('/eat/barcode' as Href)} />
     </Screen>
   );
 }

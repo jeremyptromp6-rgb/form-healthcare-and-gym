@@ -109,7 +109,7 @@ export default function ScanMeal() {
               We identify the foods and estimate portions — you review and adjust before anything is logged. Scanned amounts are always estimates; weigh food when you need accuracy.
             </AppText>
             <AppText variant="caption" color={colors.textFaint}>
-              Your photo is sent to FORM’s server and its food-recognition provider (an outside image-recognition service) to identify the food. Location data is removed first, and FORM doesn’t keep the photo.
+              Your photo is sent to FORM’s server and its food-recognition provider (an outside image-recognition service) to identify the food. Location data is removed first, and FORM doesn’t keep the photo. The service handles it under its own terms — on a free plan it may use photos to improve its products, so don’t include people or anything private.
             </AppText>
           </Card>
           {step.notice ? (

@@ -55,7 +55,7 @@
           "cameraPermission": "FORM uses your camera to track your movement on this device during workouts. Video is never recorded or uploaded.",
           "microphonePermission": false,
           "recordAudioAndroid": false,
-          "barcodeScannerEnabled": false
+          "barcodeScannerEnabled": true
         }
       ],
       "expo-sharing"

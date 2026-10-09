@@ -33,7 +33,8 @@ camera preview, but pose tracking needs a development build with a native pose m
 
 Food scanning needs a recognition provider. Set `FOOD_RECOGNITION_PROVIDER=anthropic` and
 `ANTHROPIC_API_KEY` to use Claude vision (photos are sent to Anthropic; FORM strips EXIF and never
-stores them). For local UI work, `FOOD_RECOGNITION_PROVIDER=development` returns a fixed sample that
+stores them), or `FOOD_RECOGNITION_PROVIDER=gemini` and `GEMINI_API_KEY` for Google Gemini, which
+has a free tier (free-tier requests may be used by Google to improve its products). For local UI work, `FOOD_RECOGNITION_PROVIDER=development` returns a fixed sample that
 the app labels as not real recognition; production refuses it. With neither, scanning shows as
 unavailable.
 

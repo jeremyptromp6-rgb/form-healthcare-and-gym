@@ -1,24 +1,40 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { AppText, Button, Card, Field, InlineMessage, Row, Screen, Segmented } from '@/components/ui';
+import type { BarcodeFoodDraft } from '@/lib/barcode';
 import { uuid } from '@/lib/dates';
 import { parseAmount } from '@/lib/eat';
 import { useCreateUserFood } from '@/lib/queries';
 import { colors, space } from '@/theme/tokens';
 
+/** A barcode lookup's draft, if this screen was opened from the scanner (ignored if malformed). */
+function readDraft(raw: string | undefined): BarcodeFoodDraft | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as BarcodeFoodDraft;
+    return typeof d?.name === 'string' && (d.basis === 'g' || d.basis === 'ml') && typeof d.servingAmount === 'number' && d.perServing ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+const field = (n: number) => String(n);
+
 /** Create a food from its package label: nutrition per serving plus the serving size. */
 export default function NewFood() {
   const create = useCreateUserFood();
+  const params = useLocalSearchParams<{ draft?: string }>();
+  const [draft] = useState(() => readDraft(params.draft));
   const [clientFoodId] = useState(uuid);
-  const [name, setName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [basis, setBasis] = useState<'g' | 'ml'>('g');
-  const [servingLabel, setServingLabel] = useState('');
-  const [servingAmount, setServingAmount] = useState('');
-  const [kcal, setKcal] = useState('');
-  const [p, setP] = useState('');
-  const [c, setC] = useState('');
-  const [f, setF] = useState('');
+  const [name, setName] = useState(draft?.name ?? '');
+  const [brand, setBrand] = useState(draft?.brand ?? '');
+  const [basis, setBasis] = useState<'g' | 'ml'>(draft?.basis ?? 'g');
+  const [servingLabel, setServingLabel] = useState(draft?.servingLabel ?? '');
+  const [servingAmount, setServingAmount] = useState(draft ? field(draft.servingAmount) : '');
+  const [kcal, setKcal] = useState(draft ? field(draft.perServing.kcal) : '');
+  const [p, setP] = useState(draft ? field(draft.perServing.proteinG) : '');
+  const [c, setC] = useState(draft ? field(draft.perServing.carbsG) : '');
+  const [f, setF] = useState(draft ? field(draft.perServing.fatG) : '');
   const [error, setError] = useState<string | null>(null);
 
   const save = () => {
@@ -35,7 +51,12 @@ export default function NewFood() {
   };
 
   return (
-    <Screen title="New food" subtitle="From the nutrition label">
+    <Screen title="New food" subtitle={draft ? 'From a scanned barcode' : 'From the nutrition label'}>
+      {draft ? (
+        <InlineMessage tone="info" icon="barcode-outline">
+          {`Filled in from Open Food Facts (barcode ${draft.code}). It's an open, volunteer-built database — check the numbers against your pack, then save.`}
+        </InlineMessage>
+      ) : null}
       <Card style={{ gap: space.md }}>
         <Field label="Name" value={name} onChangeText={setName} placeholder="e.g. Protein bar, chocolate" />
         <Field label="Brand (optional)" value={brand} onChangeText={setBrand} />
