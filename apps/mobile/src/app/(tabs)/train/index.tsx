@@ -1,27 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { ExerciseArt, ExerciseThumb } from '@/components/art/ExerciseArt';
-import { AppText, Badge, IconTabs, StatStrip, WeekDays, Button, Card, Divider, ErrorState, HeroMedia, InlineMessage, ListRow, Row, Screen, StateView } from '@/components/ui';
+import { Pressable, View } from 'react-native';
+import { AppText, Badge, IconTabs, StatStrip, WeekDays, Card, Divider, ErrorState, ListRow, Row, Screen, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
 import { trainingWeek } from '@/lib/week';
 import { ExerciseLibrary } from '@/components/train/ExerciseLibrary';
+import { CameraCoachingRow, TodayView } from '@/components/train/TodayView';
 import { useFeature } from '@/lib/features';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useExercises, useRefetchOnFocus, useStartSession, useTodayWorkout, useWorkouts } from '@/lib/queries';
-import type { PlannedExercise, Progression } from '@/lib/types';
-import { formatRest, sessionTotals } from '@/lib/workoutSession';
-import { imagery } from '@/theme/imagery';
-import { colors, radius, space } from '@/theme/tokens';
-
-const PROGRESSION_BADGE: Partial<Record<Progression, { label: string; tone: 'primary' | 'warning' | 'neutral' }>> = {
-  increase_load: { label: 'Add weight', tone: 'primary' },
-  increase_reps: { label: 'Add reps', tone: 'primary' },
-  deload: { label: 'Lighter today', tone: 'warning' },
-  hold_for_rom: { label: 'Full range first', tone: 'warning' },
-  hold_for_form: { label: 'Form first', tone: 'warning' },
-};
+import { sessionTotals } from '@/lib/workoutSession';
+import { colors, space } from '@/theme/tokens';
 
 export default function Train() {
   const today = useTodayWorkout();
@@ -53,6 +43,12 @@ export default function Train() {
       },
     );
   };
+
+  const cameraMessage = verifying
+    ? 'Counts every full-range rep and checks your form on this device. Nothing is recorded.'
+    : poseSupport.available
+      ? "Camera coaching isn't available right now. You can still log every set yourself."
+      : poseSupport.message;
 
   const plan = today.data?.plan;
   const openSession = active.data;
@@ -94,90 +90,20 @@ export default function Train() {
       {tab === 'today' && today.isPending ? <StateView kind="loading" /> : null}
       {tab === 'today' && today.isError && !today.data ? <ErrorState error={today.error} onRetry={today.refetch} /> : null}
 
-      {tab === 'today' && plan ? (
-        <View style={{ gap: space.md }}>
-          <HeroMedia image={imagery.train} minHeight={200}>
-            {plan.exercises[0] ? (
-              <View style={styles.spotlight} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-                <ExerciseArt exerciseId={plan.exercises[0].exerciseId} decorative style={{ height: 130 }} />
-              </View>
-            ) : null}
-            <AppText variant="overline" color={colors.primary}>
-              Today&apos;s workout
-            </AppText>
-            <AppText variant="title" header style={{ fontSize: 32, lineHeight: 38 }}>
-              {plan.title}
-            </AppText>
-            <StatStrip
-              items={[
-                { label: 'Time', value: `~${plan.estimatedMinutes}`, unit: 'min' },
-                { label: 'Exercises', value: String(plan.exercises.length) },
-                { label: 'Sets', value: String(plan.exercises.reduce((n, e) => n + e.sets, 0)) },
-              ]}
-            />
-            <AppText variant="caption" color={colors.textMuted}>
-              {plan.generator.id === 'adaptive' ? 'Adapted to your reps, form, range of motion and consistency.' : 'Built from your goal, equipment and recent sessions.'}
-            </AppText>
-            {plan.generator.id === 'adaptive' ? <Badge label="Adaptive · Pro" tone="primary" icon="trending-up" /> : null}
-            {!openSession && plan.exercises.length > 0 ? (
-              <Button
-                label={today.data?.completedToday ? 'Train again' : 'Start workout'}
-                iconRight={today.data?.completedToday ? undefined : 'arrow-forward'}
-                variant={today.data?.completedToday ? 'secondary' : 'primary'}
-                onPress={begin}
-                loading={start.isPending}
-              />
-            ) : null}
-          </HeroMedia>
-          {startError ? <InlineMessage tone="danger">{startError}</InlineMessage> : null}
-          {today.data?.completedToday ? (
-            <InlineMessage tone="success" icon="checkmark-circle">
-              Done for today. Refuel and recover — you can still train again if you planned to.
-            </InlineMessage>
-          ) : null}
-          {plan.notes.map((n) => (
-            <InlineMessage key={n} tone="warning">
-              {n}
-            </InlineMessage>
-          ))}
-          {plan.exercises.length > 0 ? (
-            <Card style={{ paddingVertical: space.xs, paddingHorizontal: space.md }}>
-              {plan.exercises.map((e, i) => (
-                <View key={e.exerciseId}>
-                  {i > 0 ? <Divider /> : null}
-                  <PlanRow e={e} n={i + 1} />
-                </View>
-              ))}
-            </Card>
-          ) : null}
-          {plan.exercises.length === 0 ? (
-            <InlineMessage tone="info">No exercises match your equipment yet. Update your training setup in Profile.</InlineMessage>
-          ) : null}
-        </View>
-      ) : null}
+      {/* Without a plan (loading or error) TodayView isn't shown, so the camera row stands alone. */}
+      {tab === 'today' && !plan ? <CameraCoachingRow camera={{ verifying, message: cameraMessage }} /> : null}
 
-      {tab === 'today' ? (
-      <Card variant="raised" style={{ gap: space.sm }}>
-        <Row gap={space.sm}>
-          <View style={[styles.camIcon, { backgroundColor: verifying ? colors.water : colors.track }]}>
-            <Ionicons name="videocam" size={16} color={verifying ? colors.onPrimary : colors.textMuted} />
-          </View>
-          <AppText variant="bodyStrong" style={{ flex: 1 }}>
-            Coaching with your camera
-          </AppText>
-          <Badge label={verifying ? 'Ready' : 'Not available'} tone={verifying ? 'primary' : 'neutral'} />
-        </Row>
-        <AppText variant="caption" color={colors.textMuted}>
-          {verifying
-            ? 'For squats, push-ups, lunges and curls, FORM counts every full-range rep and tells you how your form looks. It all happens on this device — nothing is recorded.'
-            : poseSupport.available
-              ? "Camera coaching isn't available right now. You can still log every set yourself."
-              : poseSupport.message}
-        </AppText>
-        <AppText variant="caption" color={colors.textFaint}>
-          Reps the camera counts earn full XP. Reps you enter yourself earn a little less.
-        </AppText>
-      </Card>
+      {tab === 'today' && plan ? (
+        <TodayView
+          plan={plan}
+          completedToday={Boolean(today.data?.completedToday)}
+          canStart={!openSession}
+          starting={start.isPending}
+          startError={startError}
+          onStart={begin}
+          onOpenExercise={(id) => router.push(`/train/exercise/${id}` as Href)}
+          camera={{ verifying, message: cameraMessage }}
+        />
       ) : null}
 
       {tab === 'library' ? (
@@ -220,51 +146,6 @@ export default function Train() {
   );
 }
 
-function PlanRow({ e, n }: { e: PlannedExercise; n: number }) {
-  const badge = PROGRESSION_BADGE[e.progression];
-  const reps = e.targetReps.min === e.targetReps.max ? `${e.targetReps.min}` : `${e.targetReps.min}–${e.targetReps.max}`;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${e.name}: ${e.sets} sets of ${reps} reps${e.targetLoadKg ? ` at ${e.targetLoadKg} kilograms` : ''}`}
-      onPress={() => router.push(`/train/exercise/${e.exerciseId}` as Href)}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md + 2, minHeight: 64, borderRadius: radius.sm, opacity: pressed ? 0.7 : 1 })}>
-      <View>
-        <ExerciseThumb exerciseId={e.exerciseId} />
-        <View style={styles.stepNo}>
-          <AppText variant="label" color={colors.onPrimary} style={{ fontSize: 11, lineHeight: 14 }}>
-            {n}
-          </AppText>
-        </View>
-      </View>
-      <View style={{ flex: 1, gap: 4 }}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <AppText variant="bodyStrong" style={{ flex: 1 }}>
-          {e.name}
-        </AppText>
-        {badge ? <Badge label={badge.label} tone={badge.tone} /> : null}
-      </Row>
-      <Row gap={space.md} style={{ flexWrap: 'wrap' }}>
-        <AppText variant="label" color={colors.text} style={{ fontVariant: ['tabular-nums'] }}>
-          {e.sets} {e.sets === 1 ? 'set' : 'sets'} · {reps} reps{e.targetLoadKg ? ` · ${e.targetLoadKg} kg` : ''}
-        </AppText>
-        <Row gap={4}>
-          <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-          <AppText variant="label" color={colors.textMuted}>
-            {formatRest(e.restSeconds)} rest
-          </AppText>
-        </Row>
-      </Row>
-      {e.note ? (
-        <AppText variant="caption" color={colors.textFaint}>
-          {e.note}
-        </AppText>
-      ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
 /** This week at a glance: the days you trained, then totals across your recent workouts. */
 function HistorySummary({ workouts }: { workouts: { localDate: string; durationMinutes: number; xp: number }[] }) {
   const week = trainingWeek(
@@ -289,11 +170,5 @@ function HistorySummary({ workouts }: { workouts: { localDate: string; durationM
     </Card>
   );
 }
-
-const styles = StyleSheet.create({
-  spotlight: { alignSelf: 'center', alignItems: 'center', justifyContent: 'flex-end', width: 220, height: 136, marginBottom: -space.sm },
-  stepNo: { position: 'absolute', top: -6, left: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.card },
-  camIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-});
 
 const setsLogged = (n: number) => `${n} ${n === 1 ? 'set' : 'sets'} logged`;

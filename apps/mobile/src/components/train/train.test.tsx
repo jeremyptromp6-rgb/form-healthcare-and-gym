@@ -166,7 +166,9 @@ describe('ActiveWorkoutView', () => {
   it('shows the rest timer with skip and +30 s', async () => {
     const p = await renderActive(session({ rest: { endsAt: '2026-09-28T10:21:30Z', seconds: 90, remainingSeconds: 90 } }));
     expect(screen.getByLabelText('90 seconds of rest left')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Log set/ })).toBeNull();
+    // Logging stays available while resting (pro-logger norm); the timer floats above the table.
+    expect(screen.getByRole('button', { name: 'Log set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+15 s' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: '+30 s' }));
     expect(p.onAddRest).toHaveBeenCalledWith(120);
     await fireEvent.press(screen.getByRole('button', { name: 'Skip rest' }));

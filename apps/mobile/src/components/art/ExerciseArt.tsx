@@ -1,5 +1,7 @@
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AppState, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Ellipse, G, Line, Rect } from 'react-native-svg';
+import { useReducedMotion } from '@/lib/a11y';
 import { colors } from '@/theme/tokens';
 
 /**
@@ -10,7 +12,7 @@ import { colors } from '@/theme/tokens';
  */
 
 type P = readonly [number, number];
-interface Pose {
+export interface Pose {
   head: P;
   neck: P;
   hip: P;
@@ -308,6 +310,41 @@ const EDGE = '#5A3E2B';
 const EQUIP = '#8C705C';
 const EQUIP_EDGE = '#5E4838';
 
+/** The colours the art uses, so a legend elsewhere can match the picture instead of hard-coding a hex. */
+export const EXERCISE_ART_COLORS = { work: WORK, ghost: GHOST, body: BODY } as const;
+
+const lerpPoint = (a: P, b: P, t: number): P => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+/** Linear interpolation of every joint the two poses share (including a lunge's knee2/foot2). */
+export function lerpPose(a: Pose, b: Pose, t: number): Pose {
+  const out: Record<string, P> = {};
+  for (const key of Object.keys(a) as (keyof Pose)[]) {
+    const from = a[key];
+    const to = b[key];
+    if (from && to) out[key] = lerpPoint(from, to, t);
+  }
+  return out as unknown as Pose;
+}
+
+/** The eased pose at `t` (0 = start, 1 = end) for an exercise; null for an unknown id. */
+export function poseAt(exerciseId: string, t: number): Pose | null {
+  const d = DRAWINGS[exerciseId];
+  if (!d) return null;
+  const c = Math.min(1, Math.max(0, t));
+  return lerpPose(d.start, d.end, 0.5 - 0.5 * Math.cos(Math.PI * c));
+}
+
+const DEFAULT_LOOP_MS = 2400;
+const FRAME_MS = 1000 / 24;
+/** Where the cosine wave counts as at rest: about 15% of the loop is spent holding each extreme. */
+const REST = 0.055;
+
+/** Loop phase (0..1) to progress between start (0) and end (1): a cosine ease with a short hold at each end. */
+function loopProgress(phase: number): number {
+  const wave = 0.5 - 0.5 * Math.cos(2 * Math.PI * phase);
+  return Math.min(1, Math.max(0, (wave - REST) / (1 - 2 * REST)));
+}
+
 function Limb({ a, b, seg, work, color, flat }: { a: P; b: P; seg: Segment; work: Segment[]; color?: string; flat?: boolean }) {
   const w = WIDTH[seg];
   const c = color ?? (work.includes(seg) ? WORK : BODY);
@@ -428,6 +465,8 @@ export function ExerciseArt({
   size = 'card',
   decorative,
   style,
+  animated = false,
+  loopMs = DEFAULT_LOOP_MS,
 }: {
   exerciseId: string;
   name?: string;
@@ -435,8 +474,42 @@ export function ExerciseArt({
   /** Hide from screen readers when the surrounding row already names the exercise. */
   decorative?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** Play the movement start to finish on a loop (skipped under reduced motion). Leave off in lists. */
+  animated?: boolean;
+  /** Length of one full start-finish-start loop. */
+  loopMs?: number;
 }) {
+  const reduceMotion = useReducedMotion();
+  const play = animated && !reduceMotion;
+  const [phase, setPhase] = useState(0);
+  // The frame loop runs only while the app is in the foreground, so a backgrounded app burns no CPU.
+  useEffect(() => {
+    if (!play) return;
+    const period = Math.max(300, loopMs);
+    let id: ReturnType<typeof setInterval> | undefined;
+    let began = 0;
+    let elapsed = 0; // carried across a pause so the figure resumes where it left off
+    const start = () => {
+      if (id !== undefined) return;
+      began = Date.now() - elapsed;
+      id = setInterval(() => setPhase(((Date.now() - began) / period) % 1), FRAME_MS);
+    };
+    const stop = () => {
+      if (id === undefined) return;
+      clearInterval(id);
+      id = undefined;
+      elapsed = Date.now() - began;
+    };
+    const state = AppState.currentState;
+    if (state !== 'background' && state !== 'inactive') start();
+    const sub = AppState.addEventListener('change', (next) => (next === 'active' ? start() : stop()));
+    return () => {
+      sub.remove();
+      stop();
+    };
+  }, [play, loopMs]);
   const d = DRAWINGS[exerciseId] ?? DRAWINGS.bodyweight_squat!;
+  const live = play ? lerpPose(d.start, d.end, loopProgress(phase)) : d.end;
   const height = size === 'thumb' ? 56 : size === 'card' ? 140 : 200;
   const behind: Equipment[] = d.equipment.filter((e) => e === 'bench' || e === 'seat' || e === 'bar' || e === 'band' || e === 'cable');
   const inFront = d.equipment.filter((e) => !behind.includes(e) && e !== 'floor');
@@ -456,17 +529,17 @@ export function ExerciseArt({
           })}>
       <Svg width="100%" height="100%" viewBox="0 0 200 140">
         <Ellipse cx={100} cy={131} rx={70} ry={4} fill="#7A4A26" opacity={0.12} />
-        {d.equipment.includes('floor') ? <Gear kind="floor" pose={d.end} /> : null}
+        {d.equipment.includes('floor') ? <Gear kind="floor" pose={live} /> : null}
         {behind.map((k) => (
-          <Gear key={k} kind={k} pose={d.end} />
+          <Gear key={k} kind={k} pose={live} />
         ))}
         <Figure pose={d.start} work={d.work} ghost />
-        {d.equipment.includes('plate') && exerciseId === 'squat' ? <Gear kind="plate" pose={{ ...d.end, hand: d.end.neck }} /> : null}
-        <Figure pose={d.end} work={d.work} />
+        {d.equipment.includes('plate') && exerciseId === 'squat' ? <Gear kind="plate" pose={{ ...live, hand: live.neck }} /> : null}
+        <Figure pose={live} work={d.work} />
         {inFront
           .filter((k) => !(k === 'plate' && exerciseId === 'squat'))
           .map((k) => (
-            <Gear key={k} kind={k} pose={d.end} />
+            <Gear key={k} kind={k} pose={live} />
           ))}
       </Svg>
     </View>

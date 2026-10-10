@@ -6,3 +6,4 @@ export * from './feedback';
 export * from './choices';
 export * from './rows';
 export * from './gym';
+export * from './exercise';

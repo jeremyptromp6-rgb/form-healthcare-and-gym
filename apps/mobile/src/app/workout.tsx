@@ -1,5 +1,5 @@
 import { router, type Href } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMarkWorkoutRecordsSeen } from '@/components/recognition/Celebrations';
@@ -61,8 +61,10 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const [selected, setSelected] = useState<number | null>(null);
   const [override, setOverride] = useState<{ key: string; reps: number; loadKg: number } | null>(null);
   // A failed save keeps its client id, so "Retry" can never create a second copy of the set.
-  const [pending, setPending] = useState<{ key: string; clientSetId: string } | null>(null);
+  // Keyed `${exerciseId}:${loggedCount}` so every exercise's pending set has its own id.
+  const pending = useRef(new Map<string, string>());
   const [logError, setLogError] = useState<string | null>(null);
+  const [logErrorIndex, setLogErrorIndex] = useState<number | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [pain, setPain] = useState<PainLevel>('none');
   const [finishError, setFinishError] = useState<string | null>(null);
@@ -78,32 +80,46 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const draft = override?.key === draftKey ? override : exercise ? nextSetDefaults(exercise) : { reps: 10, loadKg: 0 };
   const loadStepKg = library.data?.exercises.find((e) => e.id === exercise?.exerciseId)?.loadIncrementKg || 2.5;
 
-  const onLogSet = () => {
-    if (!exercise) return;
-    const clientSetId = pending?.key === draftKey ? pending.clientSetId : uuid();
-    setPending({ key: draftKey, clientSetId });
+  /** Logs the next set of exercise `i` with exactly `values` — the focused exercise or any other. */
+  const logAt = (i: number, values: { reps: number; loadKg: number }) => {
+    const target = session.exercises[i];
+    if (!target || logSet.isPending) return;
+    const key = `${target.exerciseId}:${target.loggedSets.length}`;
+    const clientSetId = pending.current.get(key) ?? uuid();
+    pending.current.set(key, clientSetId);
     setLogError(null);
+    setLogErrorIndex(null);
     logSet.mutate(
       {
         clientSetId,
-        exerciseId: exercise.exerciseId,
-        reps: draft.reps,
-        loadKg: exercise.loadable ? draft.loadKg : 0,
-        targetReps: exercise.targetReps?.max,
-        targetLoadKg: exercise.targetLoadKg ?? undefined,
-        restSeconds: exercise.restSeconds,
+        exerciseId: target.exerciseId,
+        reps: values.reps,
+        loadKg: target.loadable ? values.loadKg : 0,
+        targetReps: target.targetReps?.max,
+        targetLoadKg: target.targetLoadKg ?? undefined,
+        restSeconds: target.restSeconds,
       },
       {
         onSuccess: ({ session: next }) => {
-          setPending(null);
-          const updated = next.exercises[index];
+          pending.current.delete(key);
+          if (i !== index) {
+            // Show what was just logged on another exercise.
+            setSelected(i);
+            return;
+          }
+          const updated = next.exercises[i];
           // Move on automatically once this exercise's planned sets are done.
           if (updated && exerciseDone(updated)) setSelected(null);
         },
-        onError: (e) => setLogError(e.kind === 'network' ? "Not saved — no connection. Your set is kept; tap Retry." : e.message),
+        onError: (e) => {
+          setLogError(e.kind === 'network' ? "Not saved — no connection. Your set is kept; tap Retry." : e.message);
+          setLogErrorIndex(i);
+        },
       },
     );
   };
+  // The focused row's check passes the values it just typed; the Log button logs the current draft.
+  const onLogSet = (typed?: { reps: number; loadKg: number }) => logAt(index, typed ?? draft);
 
   if (finishing) {
     return (
@@ -158,8 +174,10 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
       onChangeDraft={(d) => setOverride({ key: draftKey, ...d })}
       loadStepKg={loadStepKg}
       onLogSet={onLogSet}
+      onLogSetAt={logAt}
       logging={logSet.isPending}
       logError={logError}
+      logErrorIndex={logErrorIndex}
       onDeleteSet={(setId) => deleteSet.mutate(setId)}
       onPause={() => action.mutate('pause')}
       onResume={() => action.mutate('resume')}

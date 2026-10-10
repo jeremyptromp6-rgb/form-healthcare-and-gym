@@ -2,12 +2,30 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { MUSCLE_LABEL, MUSCLES, MuscleThumb, type Muscle } from '@/components/art/BodyMap';
-import { ExerciseArt } from '@/components/art/ExerciseArt';
-import { AppText, SearchPill, StateView } from '@/components/ui';
-import type { Exercise } from '@/lib/types';
-import { colors, radius, space } from '@/theme/tokens';
+import { AppText, ExerciseList, ExerciseRow, FilterChipRow, SearchPill, StateView, type FilterOption } from '@/components/ui';
+import type { Exercise, Experience } from '@/lib/types';
+import { colors, space } from '@/theme/tokens';
 
-const DIFFICULTY: Record<string, string> = { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' };
+const LEVELS: Experience[] = ['beginner', 'intermediate', 'advanced'];
+const BODYWEIGHT = 'bodyweight';
+
+/** "cable_machine" -> "Cable machine". */
+const humanize = (token: string) => {
+  const t = token.replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+const muscleLabel = (m: string) => MUSCLE_LABEL[m as Muscle] ?? humanize(m);
+
+/** An alternative with no equipment, or one that names bodyweight, needs nothing from the gym. */
+const isBodyweightAlt = (alt: string[]) => alt.length === 0 || alt.some((t) => t.toLowerCase() === BODYWEIGHT);
+/** Does any of the exercise's equipment alternatives use this token (or, for bodyweight, none)? */
+const usesEquipment = (e: Exercise, token: string) =>
+  e.equipment.some((alt) => (token === BODYWEIGHT ? isBodyweightAlt(alt) : alt.some((t) => t.toLowerCase() === token)));
+/** The first alternative, spelled out: "Barbell + Squat rack", or "Bodyweight". */
+const mainEquipment = (e: Exercise) => {
+  const alt = e.equipment[0];
+  return !alt || isBodyweightAlt(alt) ? 'Bodyweight' : alt.map(humanize).join(' + ');
+};
 
 /** Muscles that at least one exercise in the library trains, in the catalogue's order. */
 function musclesIn(exercises: Exercise[]): Muscle[] {
@@ -15,15 +33,54 @@ function musclesIn(exercises: Exercise[]): Muscle[] {
   return MUSCLES.filter((m) => used.has(m));
 }
 
-/** The exercise library: search, filter by muscle, and a grid of picture cards. Pure view. */
+/** Equipment named by the library's real data: Bodyweight first, then A to Z. */
+function equipmentIn(exercises: Exercise[]): FilterOption<string>[] {
+  const tokens = new Set<string>();
+  let bodyweight = false;
+  for (const e of exercises) {
+    for (const alt of e.equipment) {
+      if (isBodyweightAlt(alt)) bodyweight = true;
+      for (const t of alt) if (t.toLowerCase() !== BODYWEIGHT) tokens.add(t.toLowerCase());
+    }
+  }
+  const rest = [...tokens].sort().map((t) => ({ value: t, label: humanize(t) }));
+  return bodyweight ? [{ value: BODYWEIGHT, label: 'Bodyweight' }, ...rest] : rest;
+}
+
+/** The exercise library: search, filter by muscle, equipment and level, and a dense list. Pure view. */
 export function ExerciseLibrary({ exercises, onOpen }: { exercises: Exercise[]; onOpen: (id: string) => void }) {
   const [query, setQuery] = useState('');
   const [muscle, setMuscle] = useState<Muscle | null>(null);
+  const [equipment, setEquipment] = useState<string | null>(null);
+  const [level, setLevel] = useState<Experience | null>(null);
   const muscles = useMemo(() => musclesIn(exercises), [exercises]);
+  const equipmentOptions = useMemo(() => equipmentIn(exercises), [exercises]);
+  const levelOptions = useMemo<FilterOption<Experience>[]>(() => {
+    const have = new Set(exercises.map((e) => e.difficulty));
+    return LEVELS.filter((l) => have.has(l)).map((l) => ({ value: l, label: humanize(l) }));
+  }, [exercises]);
   const q = query.trim().toLowerCase();
   const shown = exercises.filter(
-    (e) => (!muscle || e.primaryMuscles.includes(muscle) || e.secondaryMuscles.includes(muscle)) && (!q || e.name.toLowerCase().includes(q) || e.primaryMuscles.some((m) => m.includes(q))),
+    (e) =>
+      (!muscle || e.primaryMuscles.includes(muscle) || e.secondaryMuscles.includes(muscle)) &&
+      (!equipment || usesEquipment(e, equipment)) &&
+      (!level || e.difficulty === level) &&
+      (!q || e.name.toLowerCase().includes(q) || e.primaryMuscles.some((m) => m.includes(q))),
   );
+
+  const activeFilters = [
+    equipment ? (equipmentOptions.find((o) => o.value === equipment)?.label ?? humanize(equipment)) : null,
+    level ? humanize(level) : null,
+  ].filter((l): l is string => l !== null);
+  const anyActive = q !== '' || muscle !== null || equipment !== null || level !== null;
+  const clearFilters = () => {
+    setQuery('');
+    setMuscle(null);
+    setEquipment(null);
+    setLevel(null);
+  };
+  // "All exercises" only when nothing narrows the list by muscle, equipment or level.
+  const heading = muscle ? MUSCLE_LABEL[muscle] : activeFilters.length > 0 ? 'Filtered' : 'All exercises';
 
   return (
     <View style={{ gap: space.md }}>
@@ -40,43 +97,46 @@ export function ExerciseLibrary({ exercises, onOpen }: { exercises: Exercise[]; 
           </FilterChip>
         ))}
       </ScrollView>
+      {equipmentOptions.length > 0 ? <FilterChipRow label="Filter by equipment" options={equipmentOptions} value={equipment} onChange={setEquipment} /> : null}
+      {levelOptions.length > 0 ? <FilterChipRow label="Filter by level" options={levelOptions} value={level} onChange={setLevel} /> : null}
       <AppText variant="label" color={colors.textMuted}>
-        {muscle ? `${MUSCLE_LABEL[muscle]} · ` : 'All exercises · '}
-        {shown.length} {shown.length === 1 ? 'exercise' : 'exercises'}
+        {heading} · {shown.length} {shown.length === 1 ? 'exercise' : 'exercises'}
       </AppText>
+      {activeFilters.length > 0 ? (
+        <AppText variant="caption" color={colors.textFaint} style={{ marginTop: -space.sm }}>
+          Filters: {activeFilters.join(' · ')}
+        </AppText>
+      ) : null}
       {shown.length === 0 ? (
-        <StateView kind="empty" compact title="No matches" message="Try another muscle or a different word." />
+        <StateView
+          kind="empty"
+          compact
+          title="No matches"
+          message="Try other filters or a different word."
+          actionLabel={anyActive ? 'Clear filters' : undefined}
+          onAction={anyActive ? clearFilters : undefined}
+        />
       ) : (
-        <View style={styles.grid}>
-          {shown.map((e) => (
-            <Pressable
-              key={e.id}
-              accessibilityRole="button"
-              accessibilityLabel={`${e.name}, ${e.primaryMuscles.join(', ')}${e.cameraVerifiable ? ', camera coaching' : ''}`}
-              onPress={() => onOpen(e.id)}
-              style={({ pressed }) => [styles.card, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}>
-              <View style={styles.cardArt}>
-                <ExerciseArt exerciseId={e.id} decorative style={{ height: 104 }} />
-                {e.cameraVerifiable ? (
-                  <View style={styles.camBadge}>
-                    <Ionicons name="videocam" size={12} color={colors.onPrimary} />
-                  </View>
-                ) : null}
-              </View>
-              <View style={{ padding: space.sm, gap: 2 }}>
-                <AppText variant="bodyStrong" numberOfLines={1}>
-                  {e.name}
-                </AppText>
-                <AppText variant="caption" color={colors.textMuted} numberOfLines={1} style={{ fontSize: 13 }}>
-                  {e.primaryMuscles.map((m) => MUSCLE_LABEL[m as Muscle] ?? m).join(' · ')}
-                </AppText>
-                <AppText variant="label" color={colors.textFaint} style={{ fontSize: 11 }}>
-                  {DIFFICULTY[e.difficulty] ?? e.difficulty}
-                </AppText>
-              </View>
-            </Pressable>
-          ))}
-        </View>
+        <ExerciseList>
+          {shown.map((e) => {
+            const muscleText = e.primaryMuscles.map(muscleLabel).join(' · ');
+            const levelText = humanize(e.difficulty);
+            const gear = mainEquipment(e);
+            return (
+              <ExerciseRow
+                key={e.id}
+                exerciseId={e.id}
+                name={e.name}
+                detail={muscleText}
+                meta={`${levelText} · ${gear}`}
+                metaIcon="barbell-outline"
+                cameraVerifiable={e.cameraVerifiable}
+                accessibilityLabel={`${e.name}, ${muscleText}, ${levelText}, ${gear}${e.cameraVerifiable ? ', camera coaching' : ''}`}
+                onPress={() => onOpen(e.id)}
+              />
+            );
+          })}
+        </ExerciseList>
       )}
     </View>
   );
@@ -101,10 +161,6 @@ function FilterChip({ label, selected, onPress, children }: { label: string; sel
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  card: { flexBasis: '47%', flexGrow: 1, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderTopColor: colors.edge },
-  cardArt: { height: 116, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cardRaised },
-  camBadge: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.water, alignItems: 'center', justifyContent: 'center' },
   ring: { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   ringOn: { borderColor: colors.primary },
   check: { position: 'absolute', top: -2, right: -2, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.bg },
