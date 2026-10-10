@@ -17,12 +17,12 @@ const STALL_MS = 2000;
 const FIRST_FRAME_TIMEOUT_MS = 6000;
 /** Permission granted but the camera never opened this long → "the camera didn't start". */
 export const CAMERA_START_TIMEOUT_MS = 15_000;
-/** Camera live but the pose model still loading this long (first load downloads ~18 MB) → retry. */
-export const MODEL_LOAD_TIMEOUT_MS = 90_000;
+/** Camera live but the pose model making no progress for this long (stalled download or start) → retry. */
+export const MODEL_LOAD_TIMEOUT_MS = 60_000;
 
 type EngineMessage =
   | { t: 'camera'; kind: 'requesting' | 'live' | 'ended' | 'error'; name?: string }
-  | { t: 'pose'; kind: 'loading' | 'ready' | 'failed'; backend?: 'GPU' | 'CPU'; offline?: boolean }
+  | { t: 'pose'; kind: 'loading' | 'ready' | 'failed'; backend?: 'GPU' | 'CPU'; offline?: boolean; stage?: 'runtime' | 'model' | 'starting'; pct?: number }
   | { t: 'frame'; ts: number; w: number; h: number; ms: number; b?: number; people: [number, number, number][][] };
 
 /**
@@ -39,7 +39,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     callbacks.current = { onCamera, onPose, onReadout };
   });
   const web = useRef<WebView>(null);
-  const live = useRef({ camera: false, ready: false, cameraAt: 0, lastFrameAt: 0, interrupted: false, lastReadout: 0, frames: 0, fpsSince: 0, fps: 0, color: '' });
+  const live = useRef({ camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, lastReadout: 0, frames: 0, fpsSince: 0, fps: 0, color: '' });
 
   const html = useMemo(() => poseEngineHtml({ modelUrl: config.poseModelUrl, colors: { good: colors.primary, warn: colors.warning, other: colors.danger } }), []);
 
@@ -65,7 +65,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
   useEffect(() => {
     if (!running) return;
     const s = live.current;
-    Object.assign(s, { camera: false, ready: false, cameraAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, color: '' });
+    Object.assign(s, { camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, color: '' });
     session.interrupt();
     const startedAt = Date.now();
     let gaveUp = false;
@@ -78,7 +78,8 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
         callbacks.current.onCamera({ kind: 'unavailable', reason: 'start_timeout' });
         return;
       }
-      if (!gaveUp && s.camera && !s.ready && now - s.cameraAt > MODEL_LOAD_TIMEOUT_MS) {
+      // A slow download that's still moving is never cut off; only one that has stopped making progress.
+      if (!gaveUp && s.camera && !s.ready && now - Math.max(s.cameraAt, s.progressAt) > MODEL_LOAD_TIMEOUT_MS) {
         gaveUp = true;
         callbacks.current.onPose({ kind: 'failed', message: 'Camera coaching is taking too long to load. Check your connection and try again.', retryable: true });
         return;
@@ -121,7 +122,10 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       return;
     }
     if (m.t === 'pose') {
-      if (m.kind === 'loading') cb.onPose({ kind: 'loading' });
+      if (m.kind === 'loading') {
+        s.progressAt = Date.now();
+        cb.onPose(m.stage ? { kind: 'loading', stage: m.stage, pct: m.pct } : { kind: 'loading' });
+      }
       else if (m.kind === 'ready') {
         s.ready = true;
         cb.onPose({ kind: 'ready', backend: m.backend ?? 'CPU' });

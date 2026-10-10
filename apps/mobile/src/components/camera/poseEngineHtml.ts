@@ -3,8 +3,10 @@ import { FRAMING_THRESHOLDS, MEDIAPIPE_POSE_INDEX, SKELETON_EDGES } from '@form/
 /** The MediaPipe build the phone engine loads — the same version the web app bundles. */
 export const MEDIAPIPE_VERSION = '1.0.1';
 
-/** How often the engine looks for a second person (the "only you in frame" check), in ms. */
-export const CROWD_CHECK_MS = 1500;
+/** Starting the GPU backend longer than this (some phones stall on it) → use the CPU instead. */
+export const GPU_START_TIMEOUT_MS = 10_000;
+/** A GPU slower than this per frame (median) gets compared against the CPU on real frames. */
+export const SLOW_FRAME_MS = 40;
 
 /** Skeleton edges as MediaPipe landmark indices, for drawing inside the engine page. */
 export function skeletonIndexEdges(): [number, number][] {
@@ -19,71 +21,98 @@ export function skeletonIndexEdges(): [number, number][] {
 /**
  * The pose model, as JavaScript SOURCE TEXT (not a function in this file): it runs inside the
  * WebView — in a Web Worker normally, or in the page itself as a fallback — and the app's own
- * JavaScript engine (Hermes) can't turn a compiled function back into source. It loads MediaPipe,
- * times the GPU and CPU backends on this phone's first real camera frames and keeps the faster,
- * then answers each camera frame with landmarks. Tracking runs for ONE person (MediaPipe only skips its expensive person
- * detector when it's tracking as many people as it was asked for); a second, image-mode model
- * looks for anyone else every CROWD_CHECK_MS so the "only you in frame" rule still holds.
+ * JavaScript engine (Hermes) can't turn a compiled function back into source.
+ *
+ * Built to start reliably on phones: MediaPipe's runtime (~12 MB) and the pose model (~6 MB) are
+ * downloaded ONCE, with progress reported, and handed to MediaPipe from memory. Only one pose
+ * model runs at a time (each instance is a full copy of the runtime — several at once is what
+ * made phones stall). It starts on the GPU, giving up on it after GPU_START_TIMEOUT_MS; if the GPU
+ * turns out slow on real frames, the CPU is tried alongside and the faster one kept. Tracking is
+ * for one person (MediaPipe skips its costly person detector only when it tracks as many people
+ * as asked for).
  * Uses only its arguments and the global `Vision` from MediaPipe's script build.
- *   engineCore(send, { cdn, modelUrl, crowdEveryMs }) → handle({ type: 'init' } | { type: 'frame', bitmap, ts })
- *   send({ type: 'loaded' } | { type: 'ready', backend } | { type: 'backend', backend, ms } | { type: 'error', message } | { type: 'result', ts, people, ms } | { type: 'frameError', message })
+ *   engineCore(send, { cdn, modelUrl, gpuTimeoutMs, slowFrameMs }) → handle({ type: 'init' } | { type: 'frame', bitmap, ts })
+ *   send({ type: 'progress', stage: 'runtime' | 'model' | 'starting', pct } | { type: 'ready', backend }
+ *     | { type: 'backend', backend, ms } | { type: 'error', message } | { type: 'result', ts, people, ms } | { type: 'frameError', message })
  */
 export const ENGINE_CORE = `function engineCore(send, CFG) {
   var V = self.Vision;
-  var track = null, crowd = null, lastTs = 0, crowdAt = -1e9, others = [], othersUntil = 0;
+  var track = null, trackDelegate = null, lastTs = 0;
+  var files = null, modelBuf = null;
   function r4(n) { return Math.round(n * 10000) / 10000; }
   function pack(l) { return l.map(function (p) { return [r4(p.x), r4(p.y), r4(p.visibility == null ? 0 : p.visibility)]; }); }
-  function center(p) {
-    var pts = [11, 12, 23, 24].map(function (i) { return p[i]; }).filter(Boolean);
-    if (!pts.length) return [0.5, 0.5];
-    var x = 0, y = 0;
-    pts.forEach(function (q) { x += q[0]; y += q[1]; });
-    return [x / pts.length, y / pts.length];
+  function median(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s.length ? s[s.length >> 1] : Infinity; }
+  function withTimeout(p, ms) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { reject(new Error('timeout')); }, ms);
+      p.then(function (v) { clearTimeout(t); resolve(v); }, function (e) { clearTimeout(t); reject(e); });
+    });
   }
-  function make(files, buf, delegate, runningMode, numPoses) {
+  // Downloads a file once, reporting progress; total is shared across the files so the bar moves smoothly.
+  var progress = { done: 0, total: 0 };
+  async function download(url, expected, stage) {
+    var res = await fetch(url);
+    if (!res.ok) throw new Error(stage + ' ' + res.status);
+    var size = Number(res.headers.get('content-length')) || expected;
+    progress.total += size - expected;
+    if (!res.body || !res.body.getReader) {
+      var whole = new Uint8Array(await res.arrayBuffer());
+      progress.done += whole.length;
+      send({ type: 'progress', stage: stage, pct: Math.min(99, Math.round((progress.done / progress.total) * 100)) });
+      return whole;
+    }
+    var reader = res.body.getReader(), chunks = [], got = 0, lastPct = -1;
+    for (;;) {
+      var r = await reader.read();
+      if (r.done) break;
+      chunks.push(r.value); got += r.value.length; progress.done += r.value.length;
+      var pct = Math.min(99, Math.round((progress.done / progress.total) * 100));
+      if (pct !== lastPct) { lastPct = pct; send({ type: 'progress', stage: stage, pct: pct }); }
+    }
+    var out = new Uint8Array(got), o = 0;
+    chunks.forEach(function (c) { out.set(c, o); o += c.length; });
+    return out;
+  }
+  function make(delegate) {
     return V.PoseLandmarker.createFromOptions(files, {
-      baseOptions: { modelAssetBuffer: buf.slice(), delegate: delegate },
-      runningMode: runningMode, numPoses: numPoses,
+      baseOptions: { modelAssetBuffer: modelBuf.slice(), delegate: delegate },
+      runningMode: 'VIDEO', numPoses: 1,
       minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
       outputSegmentationMasks: false
     });
   }
-  // Every backend that starts gets PROBE_FRAMES real camera frames; the faster one (median, after
-  // warm-up) keeps tracking and the others are closed. Both exist up front, so switching never stalls.
-  var PROBE_FRAMES = 10, WARMUP = 3, cands = [], probing = 0;
-  function median(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s.length ? s[s.length >> 1] : Infinity; }
   async function init() {
-    var files = await V.FilesetResolver.forVisionTasks(CFG.cdn + '/wasm');
-    var res = await fetch(CFG.modelUrl);
-    if (!res.ok) throw new Error('model ' + res.status);
-    var buf = new Uint8Array(await res.arrayBuffer());
-    send({ type: 'loaded' });
-    var delegates = ['GPU', 'CPU'];
-    for (var d = 0; d < delegates.length; d++) {
-      try {
-        cands.push({ delegate: delegates[d], lm: await make(files, buf, delegates[d], 'VIDEO', 1), times: [] });
-      } catch (e) {
-        // This backend isn't available here (e.g. no WebGL in a worker); the other one will do.
-      }
+    send({ type: 'progress', stage: 'runtime', pct: 0 });
+    files = await V.FilesetResolver.forVisionTasks(CFG.cdn + '/wasm');
+    // Rough sizes until the server says (runtime ~12 MB, model ~6 MB).
+    progress.total = 12e6 + 6e6;
+    var wasm = await download(files.wasmBinaryPath, 12e6, 'runtime');
+    files.wasmBinaryPath = URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' }));
+    modelBuf = await download(CFG.modelUrl, 6e6, 'model');
+    send({ type: 'progress', stage: 'starting', pct: 100 });
+    try {
+      track = await withTimeout(make('GPU'), CFG.gpuTimeoutMs);
+      trackDelegate = 'GPU';
+    } catch (e) {
+      track = await make('CPU');
+      trackDelegate = 'CPU';
     }
-    if (!cands.length) throw new Error('No pose backend could start');
-    track = cands[0].lm;
-    probing = cands.length > 1 ? 0 : -1;
-    // The crowd check runs once per CROWD_CHECK_MS; the CPU backend needs no extra GPU context.
-    try { crowd = await make(files, buf, 'CPU', 'IMAGE', 2); } catch (e) { try { crowd = await make(files, buf, cands[0].delegate, 'IMAGE', 2); } catch (e2) { crowd = null; } }
-    send({ type: 'ready', backend: cands[0].delegate });
+    send({ type: 'ready', backend: trackDelegate });
   }
-  function probe(ms) {
-    var cur = cands[probing];
-    cur.times.push(ms);
-    if (cur.times.length < PROBE_FRAMES) return;
-    if (probing < cands.length - 1) { probing++; track = cands[probing].lm; return; }
-    var best = cands[0];
-    cands.forEach(function (c) { if (median(c.times.slice(WARMUP)) < median(best.times.slice(WARMUP))) best = c; });
-    cands.forEach(function (c) { if (c !== best) c.lm.close(); });
-    track = best.lm;
-    probing = -1;
-    send({ type: 'backend', backend: best.delegate, ms: Math.round(median(best.times.slice(WARMUP))) });
+  // If the GPU is slow on real frames, start the CPU alongside (tracking carries on meanwhile),
+  // time it on real frames too, keep the faster and close the other.
+  var times = [], trial = null, trialTimes = [], decided = false;
+  function consider(ms) {
+    if (decided) return;
+    if (!trial) {
+      times.push(ms);
+      if (times.length < 15) return;
+      var gpu = median(times.slice(4));
+      if (trackDelegate !== 'GPU' || gpu <= CFG.slowFrameMs) { decided = true; send({ type: 'backend', backend: trackDelegate, ms: Math.round(gpu) }); return; }
+      trial = 'starting';
+      make('CPU').then(function (lm) { trial = lm; }, function () { decided = true; trial = null; });
+      return;
+    }
   }
   function frame(m) {
     if (!track) { m.bitmap.close(); return; }
@@ -92,19 +121,32 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
     lastTs = ts;
     try {
       var people = track.detectForVideo(m.bitmap, ts).landmarks.map(pack);
-      if (probing >= 0) probe(performance.now() - t0);
-      if (crowd && ts - crowdAt >= CFG.crowdEveryMs) {
-        crowdAt = ts;
-        var main = people[0] ? center(people[0]) : null;
-        others = crowd.detect(m.bitmap).landmarks.map(pack).filter(function (p) {
-          if (!main) return true;
-          var c = center(p);
-          return Math.hypot(c[0] - main[0], c[1] - main[1]) > 0.12;
-        });
-        othersUntil = ts + CFG.crowdEveryMs + 500;
+      var took = performance.now() - t0;
+      consider(took);
+      // The CPU trial runs on the same frames until it has a verdict. MediaPipe's pose models share
+      // one timeline, so every call needs a strictly later timestamp than the last — the trial gets
+      // the frame's time plus a hair, and the next frame's time is checked against it.
+      if (trial && trial !== 'starting' && !decided) {
+        var c0 = performance.now();
+        lastTs = ts + 0.01;
+        try {
+          trial.detectForVideo(m.bitmap, lastTs);
+          trialTimes.push(performance.now() - c0);
+        } catch (te) {
+          // The trial failed: keep tracking as before and stop trying.
+          try { trial.close(); } catch (ce) {}
+          trial = null; decided = true;
+          send({ type: 'backend', backend: trackDelegate, ms: Math.round(median(times.slice(4))) });
+        }
+        if (trial && trialTimes.length >= 12) {
+          var cpu = median(trialTimes.slice(3)), gpu = median(times.slice(4));
+          decided = true;
+          if (cpu < gpu) { track.close(); track = trial; trackDelegate = 'CPU'; } else { trial.close(); }
+          trial = null;
+          send({ type: 'backend', backend: trackDelegate, ms: Math.round(Math.min(cpu, gpu)) });
+        }
       }
-      if (others.length && ts < othersUntil) people = people.concat(others);
-      send({ type: 'result', ts: ts, people: people, ms: performance.now() - t0 });
+      send({ type: 'result', ts: ts, people: people, ms: took });
     } catch (e) {
       send({ type: 'frameError', message: String(e) });
     } finally {
@@ -126,13 +168,13 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
  * LivePoseSession counts reps and judges form exactly as on the web. Frames never leave the
  * phone; only joint coordinates cross into the app. Messages:
  *   { t: 'camera', kind: 'requesting' | 'live' | 'ended' | 'error', name? }
- *   { t: 'pose', kind: 'loading' | 'ready' | 'failed', backend?, offline? }
+ *   { t: 'pose', kind: 'loading', stage?: 'runtime' | 'model' | 'starting', pct? } | { t: 'pose', kind: 'ready' | 'failed', backend?, offline? }
  *   { t: 'frame', ts, w, h, ms, b, people: [[x, y, visibility] × 33][] }
  * The app sets `window.__skeletonColor` (tracking quality) and calls `window.formStop()`.
  */
 export function poseEngineHtml({ modelUrl, version = MEDIAPIPE_VERSION, colors }: { modelUrl: string; version?: string; colors: { good: string; warn: string; other: string } }): string {
   const cdn = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${version}`;
-  const cfg = JSON.stringify({ cdn, modelUrl, crowdEveryMs: CROWD_CHECK_MS, edges: skeletonIndexEdges(), visible: FRAMING_THRESHOLDS.visibleConfidence, colors });
+  const cfg = JSON.stringify({ cdn, modelUrl, engine: { gpuTimeoutMs: GPU_START_TIMEOUT_MS, slowFrameMs: SLOW_FRAME_MS }, edges: skeletonIndexEdges(), visible: FRAMING_THRESHOLDS.visibleConfidence, colors });
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}</style>
@@ -149,8 +191,9 @@ const sampler = document.createElement('canvas'); sampler.width = 32; sampler.he
 const sctx = sampler.getContext('2d', { willReadFrequently: true });
 window.__skeletonColor = CFG.colors.warn;
 let engine = null, mode = 'worker', ready = false, busy = false, busySince = 0, stream = null, stopped = false;
-let latency = 0, lastLumaAt = -1e9, luma = undefined;
-const START_TIMEOUT_MS = 20000;
+let latency = 0, lastLumaAt = -1e9, luma = undefined, frameErrors = [];
+const START_TIMEOUT_MS = 25000;
+const ENGINE_CFG = { cdn: CFG.cdn, modelUrl: CFG.modelUrl, gpuTimeoutMs: CFG.engine.gpuTimeoutMs, slowFrameMs: CFG.engine.slowFrameMs };
 
 window.formStop = () => {
   stopped = true;
@@ -162,7 +205,7 @@ window.formStop = () => {
 // ---- the model: a Web Worker, or (if a phone can't run one) this page itself ----
 function startWorker() {
   const src = 'importScripts(' + JSON.stringify(CFG.cdn + '/vision_bundle.js') + ');\\n' +
-    'const handle = (' + ENGINE_SRC + ')((m) => self.postMessage(m), ' + JSON.stringify({ cdn: CFG.cdn, modelUrl: CFG.modelUrl, crowdEveryMs: CFG.crowdEveryMs }) + ');\\n' +
+    'const handle = (' + ENGINE_SRC + ')((m) => self.postMessage(m), ' + JSON.stringify(ENGINE_CFG) + ');\\n' +
     'self.onmessage = (e) => handle(e.data);';
   const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
   w.onmessage = (e) => onEngine(e.data);
@@ -177,7 +220,7 @@ function startInline() {
   const s = document.createElement('script');
   s.src = CFG.cdn + '/vision_bundle.js'; s.crossOrigin = 'anonymous';
   s.onload = () => {
-    const handle = engineCore((m) => setTimeout(() => onEngine(m), 0), { cdn: CFG.cdn, modelUrl: CFG.modelUrl, crowdEveryMs: CFG.crowdEveryMs });
+    const handle = engineCore((m) => setTimeout(() => onEngine(m), 0), ENGINE_CFG);
     engine = { send: (m) => setTimeout(() => handle(m), 0), terminate: null };
     engine.send({ type: 'init' });
   };
@@ -188,14 +231,26 @@ function onEngine(m) {
   if (stopped) return;
   if (m.type === 'ready') { ready = true; post({ t: 'pose', kind: 'ready', backend: m.backend }); pump(); return; }
   if (m.type === 'backend') { post({ t: 'pose', kind: 'ready', backend: m.backend }); return; }
-  // Downloaded but not started a while later: this phone's worker is stuck — run in the page instead.
-  if (m.type === 'loaded') { if (mode === 'worker') setTimeout(() => { if (!ready && mode === 'worker') startInline(); }, START_TIMEOUT_MS); return; }
+  if (m.type === 'progress') {
+    post({ t: 'pose', kind: 'loading', stage: m.stage, pct: m.pct });
+    // Downloaded but not started a while later: this phone's worker is stuck — run in the page instead.
+    if (m.stage === 'starting' && mode === 'worker') setTimeout(() => { if (!ready && mode === 'worker' && !stopped) startInline(); }, START_TIMEOUT_MS);
+    return;
+  }
   if (m.type === 'error') {
     if (mode === 'worker') startInline();
     else post({ t: 'pose', kind: 'failed', offline: navigator.onLine === false, message: m.message });
     return;
   }
-  if (m.type === 'frameError') { busy = false; ready = false; post({ t: 'pose', kind: 'failed', offline: false, message: m.message }); return; }
+  if (m.type === 'frameError') {
+    busy = false;
+    // One bad frame is skipped; only repeated errors end the session (with "Try again").
+    const now = performance.now();
+    frameErrors = frameErrors.filter((t) => now - t < 5000).concat(now);
+    if (frameErrors.length > 3) { ready = false; post({ t: 'pose', kind: 'failed', offline: false, message: m.message }); }
+    else pump();
+    return;
+  }
   if (m.type === 'result') {
     busy = false;
     latency = latency === 0 ? m.ms : latency * 0.8 + m.ms * 0.2;

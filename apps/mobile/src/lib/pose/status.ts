@@ -19,7 +19,8 @@ export type CameraStatus =
 
 export type PoseStatus =
   | { kind: 'idle' }
-  | { kind: 'loading' }
+  /** Phones: which start-up step the engine is on, and how much of the download is done. */
+  | { kind: 'loading'; stage?: 'runtime' | 'model' | 'starting'; pct?: number }
   | { kind: 'ready'; backend: 'GPU' | 'CPU' }
   | { kind: 'failed'; message: string; retryable: boolean }
   /** This build/device has no on-device pose model. The feed may still show; nothing is tracked. */
@@ -58,6 +59,14 @@ const UNAVAILABLE: Record<Extract<CameraStatus, { kind: 'unavailable' }>['reason
   ended: { title: 'Camera disconnected', message: 'The camera stopped. Reconnect it and try again.', retry: true },
   start_timeout: { title: "The camera didn't start", message: `Try again. If it keeps happening, close other apps that use the camera and reopen FORM. ${MANUAL}`, retry: true },
 };
+
+/** Start-up in plain words, with the download's progress when there is one. */
+export function loadingMessage(pose: PoseStatus): string {
+  if (pose.kind !== 'loading' || !pose.stage) return 'Getting your camera coach ready…';
+  if (pose.stage === 'starting') return 'Almost ready — starting your camera coach…';
+  const pct = typeof pose.pct === 'number' ? ` — ${Math.max(0, Math.min(99, Math.round(pose.pct)))}%` : '';
+  return `Downloading your camera coach${pct}. This happens once; next time it starts quickly.`;
+}
 
 export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readout: LiveReadout | null, paused: boolean): CameraScreenModel {
   switch (camera.kind) {
@@ -105,7 +114,7 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
   if (pose.kind === 'unsupported') return { overlay: null, feedback: { message: `${pose.message} ${MANUAL}`, tone: 'info' } };
   if (paused) return { overlay: null, feedback: { message: 'Paused — resume when you’re ready.', tone: 'info' } };
   if (camera.kind === 'interrupted') return { overlay: null, feedback: { message: 'Waiting for the camera to come back…', tone: 'adjust' } };
-  if (pose.kind !== 'ready') return { overlay: null, feedback: { message: 'Getting your camera coach ready…', tone: 'info' } };
+  if (pose.kind !== 'ready') return { overlay: null, feedback: { message: loadingMessage(pose), tone: 'info' } };
   if (!readout) return { overlay: null, feedback: { message: 'Looking for you…', tone: 'info' } };
   // Priority: can't see you properly > the latest rep cue > where you are in the movement.
   if (!readout.framing.trackable) return { overlay: null, feedback: { message: readout.framing.message, tone: 'adjust' } };

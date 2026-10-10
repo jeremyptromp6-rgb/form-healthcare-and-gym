@@ -1,113 +1,134 @@
-import { CROWD_CHECK_MS, ENGINE_CORE, poseEngineHtml } from './poseEngineHtml';
+import { ENGINE_CORE, poseEngineHtml } from './poseEngineHtml';
 
 /**
  * The engine core is source text that runs inside the WebView. These tests evaluate that exact
- * text against a fake MediaPipe and a fake clock: backend choice on real frames, fallback when a
- * backend can't start, and the "only you in frame" crowd check.
+ * text against a fake MediaPipe, fake downloads and a fake clock: one-time downloads with
+ * progress, one pose model at a time, the GPU start timeout, and the GPU/CPU choice on real frames.
  */
 
-type Pt = { x: number; y: number; visibility: number };
-const person = (cx: number): Pt[] => Array.from({ length: 33 }, (_, i) => ({ x: cx + (i % 3) * 0.01, y: 0.1 + (i / 33) * 0.8, visibility: 0.95 }));
+type Behaviour = { cost: number; start?: 'ok' | 'hang' | 'fail' };
 
-function setup(opts: { cost: Record<string, number>; failing?: string[]; crowdSees?: () => Pt[][]; modelStatus?: number }) {
+function setup(opts: { GPU: Behaviour; CPU: Behaviour; modelStatus?: number }) {
   let now = 0;
   const clock = { now: () => now };
-  const closed: string[] = [];
   const created: string[] = [];
+  const closed: string[] = [];
+  let lastUs = -1;
   const Vision = {
-    FilesetResolver: { forVisionTasks: async () => ({}) },
+    FilesetResolver: { forVisionTasks: async (p: string) => ({ wasmLoaderPath: `${p}/vision_wasm_internal.js`, wasmBinaryPath: `${p}/vision_wasm_internal.wasm` }) },
     PoseLandmarker: {
-      createFromOptions: async (_files: unknown, o: { baseOptions: { delegate: string }; runningMode: string; numPoses: number }) => {
-        const delegate = o.baseOptions.delegate;
-        if (opts.failing?.includes(delegate)) throw new Error(`${delegate} unavailable`);
-        created.push(`${o.runningMode}:${delegate}:${o.numPoses}`);
-        return {
-          detectForVideo: () => {
-            now += opts.cost[delegate]!;
-            return { landmarks: [person(0.5)] };
+      createFromOptions: (files: { wasmBinaryPath: string }, o: { baseOptions: { delegate: 'GPU' | 'CPU' }; numPoses: number }) => {
+        const d = o.baseOptions.delegate;
+        const b = opts[d];
+        created.push(`${d}:${o.numPoses}:${files.wasmBinaryPath}`);
+        if (b.start === 'hang') return new Promise(() => undefined);
+        if (b.start === 'fail') return Promise.reject(new Error(`${d} unavailable`));
+        return Promise.resolve({
+          detectForVideo: (_img: unknown, tsMs: number) => {
+            const us = Math.round(tsMs * 1000);
+            if (us <= lastUs) throw new Error(`Packet timestamp mismatch: expected > ${lastUs}, received ${us}`);
+            lastUs = us;
+            now += b.cost;
+            return { landmarks: [Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, visibility: 0.9 }))] };
           },
-          detect: () => {
-            now += 5;
-            return { landmarks: opts.crowdSees ? opts.crowdSees() : [person(0.5)] };
-          },
-          close: () => closed.push(delegate),
-        };
+          close: () => closed.push(d),
+        });
       },
     },
   };
-  const fetchMock = async () => ({ ok: (opts.modelStatus ?? 200) === 200, status: opts.modelStatus ?? 200, arrayBuffer: async () => new ArrayBuffer(8) });
-  const sent: { type: string; [k: string]: unknown }[] = [];
-  const factory = new Function('self', 'fetch', 'performance', `return (${ENGINE_CORE});`)({ Vision }, fetchMock, clock) as (
+  const fetched: string[] = [];
+  const bodyOf = (bytes: number) => {
+    const chunks = [new Uint8Array(bytes / 2), new Uint8Array(bytes / 2)];
+    return { getReader: () => ({ read: async () => (chunks.length ? { done: false, value: chunks.shift()! } : { done: true, value: undefined }) }) };
+  };
+  const fetchMock = async (url: string) => {
+    fetched.push(url);
+    const isModel = url.endsWith('.task');
+    if (isModel && opts.modelStatus && opts.modelStatus !== 200) return { ok: false, status: opts.modelStatus, headers: { get: () => null } };
+    const bytes = isModel ? 600 : 1200;
+    return { ok: true, status: 200, headers: { get: (h: string) => (h === 'content-length' ? String(bytes) : null) }, body: bodyOf(bytes) };
+  };
+  const urls = { createObjectURL: () => 'blob:wasm' };
+  const factory = new Function('self', 'fetch', 'performance', 'URL', 'Blob', `return (${ENGINE_CORE});`)({ Vision }, fetchMock, clock, urls, class {}) as (
     send: (m: unknown) => void,
     cfg: object,
   ) => (m: object) => void;
-  const handle = factory((m) => sent.push(m as { type: string }), { cdn: 'https://cdn.test', modelUrl: 'https://model.test/pose.task', crowdEveryMs: CROWD_CHECK_MS });
+  const sent: { type: string; [k: string]: unknown }[] = [];
+  const handle = factory((m) => sent.push(m as { type: string }), { cdn: 'https://cdn.test', modelUrl: 'https://model.test/pose.task', gpuTimeoutMs: 40, slowFrameMs: 40 });
   let ts = 1000;
-  const frame = (dt = 33) => {
-    ts += dt;
-    handle({ type: 'frame', ts, bitmap: { close: () => undefined } });
+  const frames = async (n: number) => {
+    for (let i = 0; i < n; i++) {
+      ts += 33;
+      handle({ type: 'frame', ts, bitmap: { close: () => undefined } });
+      await Promise.resolve();
+    }
+  };
+  const until = async (type: string) => {
+    for (let i = 0; i < 200 && !sent.some((m) => m.type === type); i++) await new Promise((r) => setTimeout(r, 2));
   };
   const init = async () => {
     handle({ type: 'init' });
-    for (let i = 0; i < 10; i++) await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 0));
+    await until('ready');
+    if (!sent.some((m) => m.type === 'ready')) await until('error');
   };
-  return { init, frame, sent, closed, created, results: () => sent.filter((m) => m.type === 'result') as unknown as { people: number[][][] }[] };
+  return { init, frames, sent, created, closed, fetched, of: (t: string) => sent.filter((m) => m.type === t) };
 }
 
 describe('phone pose engine core', () => {
-  it('tracks one person per frame and keeps whichever backend is faster on real frames', async () => {
-    const e = setup({ cost: { GPU: 50, CPU: 30 } });
+  it('downloads the runtime and model once with progress, and runs ONE pose model (GPU when fast)', async () => {
+    const e = setup({ GPU: { cost: 20 }, CPU: { cost: 30 } });
     await e.init();
-    expect(e.sent.slice(0, 2)).toEqual([{ type: 'loaded' }, { type: 'ready', backend: 'GPU' }]);
-    expect(e.created).toEqual(['VIDEO:GPU:1', 'VIDEO:CPU:1', 'IMAGE:CPU:2']);
-    for (let i = 0; i < 20; i++) e.frame();
-    expect(e.sent.find((m) => m.type === 'backend')).toEqual({ type: 'backend', backend: 'CPU', ms: 30 });
-    expect(e.closed).toEqual(['GPU']);
-    expect(e.results()).toHaveLength(20);
+    expect(e.fetched).toEqual(['https://cdn.test/wasm/vision_wasm_internal.wasm', 'https://model.test/pose.task']);
+    const progress = e.of('progress').map((m) => [m.stage, m.pct]);
+    expect(progress[0]).toEqual(['runtime', 0]);
+    expect(progress.some(([s]) => s === 'model')).toBe(true);
+    expect(progress.at(-1)).toEqual(['starting', 100]);
+    // MediaPipe gets the downloaded runtime from memory, not a second download.
+    expect(e.created).toEqual(['GPU:1:blob:wasm']);
+    expect(e.of('ready')).toEqual([{ type: 'ready', backend: 'GPU' }]);
+    await e.frames(20);
+    expect(e.created).toHaveLength(1);
+    expect(e.of('backend')).toEqual([{ type: 'backend', backend: 'GPU', ms: 20 }]);
+    expect(e.of('result')).toHaveLength(20);
   });
 
-  it('keeps the GPU when it is the faster one', async () => {
-    const e = setup({ cost: { GPU: 12, CPU: 40 } });
+  it('gives up on a GPU that never finishes starting and uses the CPU', async () => {
+    const e = setup({ GPU: { cost: 10, start: 'hang' }, CPU: { cost: 30 } });
     await e.init();
-    for (let i = 0; i < 20; i++) e.frame();
-    expect(e.sent.find((m) => m.type === 'backend')).toMatchObject({ backend: 'GPU' });
+    expect(e.of('ready')).toEqual([{ type: 'ready', backend: 'CPU' }]);
+    await e.frames(3);
+    expect(e.of('result')).toHaveLength(3);
+  });
+
+  it('uses the CPU when the GPU cannot start at all', async () => {
+    const e = setup({ GPU: { cost: 10, start: 'fail' }, CPU: { cost: 30 } });
+    await e.init();
+    expect(e.of('ready')).toEqual([{ type: 'ready', backend: 'CPU' }]);
+  });
+
+  it('switches to the CPU when the GPU is slow on real frames and the CPU is faster', async () => {
+    const e = setup({ GPU: { cost: 70 }, CPU: { cost: 30 } });
+    await e.init();
+    await e.frames(40);
+    expect(e.of('backend')).toEqual([{ type: 'backend', backend: 'CPU', ms: 30 }]);
+    expect(e.closed).toEqual(['GPU']);
+    // Tracking never paused while the CPU was tried.
+    expect(e.of('result')).toHaveLength(40);
+  });
+
+  it('keeps a slow GPU when the CPU is slower still', async () => {
+    const e = setup({ GPU: { cost: 60 }, CPU: { cost: 90 } });
+    await e.init();
+    await e.frames(40);
+    expect(e.of('backend')).toEqual([{ type: 'backend', backend: 'GPU', ms: 60 }]);
     expect(e.closed).toEqual(['CPU']);
   });
 
-  it('uses the CPU alone when the GPU cannot start (no probing)', async () => {
-    const e = setup({ cost: { GPU: 10, CPU: 30 }, failing: ['GPU'] });
-    await e.init();
-    expect(e.sent.find((m) => m.type === 'ready')).toEqual({ type: 'ready', backend: 'CPU' });
-    for (let i = 0; i < 20; i++) e.frame();
-    expect(e.sent.some((m) => m.type === 'backend')).toBe(false);
-  });
-
-  it('reports a second person found by the periodic crowd check, then drops it once they leave', async () => {
-    let crowd: Pt[][] = [person(0.5), person(0.15)];
-    const e = setup({ cost: { GPU: 20, CPU: 20 }, crowdSees: () => crowd });
-    await e.init();
-    e.frame();
-    expect(e.results().at(-1)!.people).toHaveLength(2);
-    // Between checks the other person stays reported (the rep gate must not flicker open).
-    e.frame();
-    expect(e.results().at(-1)!.people).toHaveLength(2);
-    crowd = [person(0.5)];
-    e.frame(CROWD_CHECK_MS);
-    expect(e.results().at(-1)!.people).toHaveLength(1);
-  });
-
-  it('never counts the tracked person twice', async () => {
-    const e = setup({ cost: { GPU: 20, CPU: 20 }, crowdSees: () => [person(0.5)] });
-    await e.init();
-    e.frame();
-    expect(e.results().at(-1)!.people).toHaveLength(1);
-  });
-
   it('says so when the model cannot be downloaded', async () => {
-    const e = setup({ cost: { GPU: 20, CPU: 20 }, modelStatus: 503 });
+    const e = setup({ GPU: { cost: 20 }, CPU: { cost: 20 }, modelStatus: 503 });
     await e.init();
-    expect(e.sent).toEqual([{ type: 'error', message: 'model 503' }]);
+    expect(e.of('error')).toEqual([{ type: 'error', message: 'model 503' }]);
+    expect(e.created).toHaveLength(0);
   });
 
   it('the page embeds the core as text and runs the model in a worker, with an in-page fallback', () => {
@@ -116,6 +137,8 @@ describe('phone pose engine core', () => {
     expect(html).toContain('new Worker(');
     expect(html).toContain('startInline');
     expect(html).toContain('requestVideoFrameCallback');
+    // Download progress reaches the app.
+    expect(html).toContain("post({ t: 'pose', kind: 'loading', stage: m.stage, pct: m.pct })");
     // Nothing relies on Function.prototype.toString (Hermes returns bytecode, not source).
     expect(html).not.toContain('.toString()');
   });

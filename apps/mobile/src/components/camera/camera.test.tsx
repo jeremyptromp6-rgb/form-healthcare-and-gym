@@ -7,7 +7,7 @@ import { useCameraPermissions } from 'expo-camera';
 import { useState } from 'react';
 import { Text } from 'react-native';
 import { createPoseProvider, NATIVE_POSE_UNAVAILABLE } from '@/lib/pose/mediapipe';
-import { cameraErrorStatus, cameraScreenModel, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
+import { cameraErrorStatus, cameraScreenModel, loadingMessage, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
 import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
@@ -343,6 +343,31 @@ describe('native camera feed', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('shows download progress, and never cuts off a slow download that is still moving', async () => {
+    jest.useFakeTimers();
+    try {
+      mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+      const h = handlers();
+      await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+      await engine({ t: 'camera', kind: 'live' });
+      // A slow connection: progress every 40 s for 4 minutes — longer than the stall limit in total.
+      for (let pct = 10; pct <= 60; pct += 10) {
+        await act(async () => jest.advanceTimersByTime(40_000));
+        await engine({ t: 'pose', kind: 'loading', stage: 'runtime', pct });
+      }
+      expect(h.onPose).toHaveBeenLastCalledWith({ kind: 'loading', stage: 'runtime', pct: 60 });
+      expect(h.onPose).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }));
+      // Then it stops moving: after the stall limit, a retryable failure.
+      await act(async () => jest.advanceTimersByTime(MODEL_LOAD_TIMEOUT_MS + 1000));
+      expect(h.onPose).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed', retryable: true }));
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(loadingMessage({ kind: 'loading', stage: 'model', pct: 42 })).toBe('Downloading your camera coach — 42%. This happens once; next time it starts quickly.');
+    expect(loadingMessage({ kind: 'loading', stage: 'starting', pct: 100 })).toBe('Almost ready — starting your camera coach…');
+    expect(loadingMessage({ kind: 'loading' })).toBe('Getting your camera coach ready…');
   });
 
   it('maps engine camera errors and offline model failures to honest states', async () => {
