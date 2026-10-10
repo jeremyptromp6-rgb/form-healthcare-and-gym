@@ -6,7 +6,7 @@ import { ProfileSummary } from '@/components/profile/ProfileSummary';
 import { GOAL_ICONS } from '@/components/profile/sections';
 import { BodyQuestSummaryCard, RecordsList } from '@/components/recognition/RecognitionViews';
 import { RankEmblem, rankColor } from '@/components/art/RankEmblem';
-import { AppText, Badge, Button, Card, GradientCard, ErrorState, InlineMessage, ProgressBar, Row, Screen, SectionHeader, StatStrip, StateView } from '@/components/ui';
+import { AppText, Badge, Button, Card, Divider, ExerciseList, GradientCard, ErrorState, IconBubble, InlineMessage, ListRow, ProgressBar, Row, Screen, SectionAction, SectionHeader, StatStrip, StateView } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
 import { useFeature } from '@/lib/features';
 import { labelOf } from '@/lib/profileForm';
@@ -39,6 +39,8 @@ export default function ProfileHub() {
   const missing = m.onboarding.remaining;
   const edit = (s: OnboardingStep) => router.push(`/profile/edit/${s}` as Href);
   const latestWeight = weight.data?.entries[0];
+  const unlocked = achievements.data ? achievements.data.achievements.filter((a) => a.state === 'unlocked').length : 0;
+  const achievementTotal = achievements.data?.achievements.length ?? 0;
 
   return (
     <Screen title="Profile" subtitle={m.user.email} refreshing={me.isRefetching} onRefresh={refetch} right={<SettingsButton />}>
@@ -54,33 +56,34 @@ export default function ProfileHub() {
         </Row>
         {p ? (
           <Row gap={space.md} style={{ alignSelf: 'stretch' }}>
-          <RankEmblem rank={p.rank} size={46} />
-          <View style={{ flex: 1, gap: space.sm }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <AppText variant="bodyStrong">
-                Level {p.level} · <AppText variant="bodyStrong" color={rankColor(p.rank)}>{p.rank}</AppText>
-              </AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                {p.totalXp.toLocaleString()} XP
-              </AppText>
-            </Row>
-            <ProgressBar value={p.fractionToNext} height={6} label={`Progress to level ${p.level + 1}`} />
-          </View>
+            <RankEmblem rank={p.rank} size={46} />
+            <View style={{ flex: 1, gap: space.sm }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <AppText variant="bodyStrong">
+                  Level {p.level} · <AppText variant="bodyStrong" color={rankColor(p.rank)}>{p.rank}</AppText>
+                </AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {p.totalXp.toLocaleString()} XP
+                </AppText>
+              </Row>
+              <ProgressBar value={p.fractionToNext} height={6} label={`Progress to level ${p.level + 1}`} />
+            </View>
           </Row>
         ) : progress.isError ? (
           <AppText variant="caption" color={colors.textMuted}>
             Level and XP couldn&apos;t load. Pull to refresh.
           </AppText>
         ) : null}
+        <Divider />
+        <StatStrip
+          variant="flat"
+          items={[
+            { label: 'Streak', value: p ? String(p.streak.current) : '–', unit: p?.streak.current === 1 ? 'day' : 'days', tint: colors.accent },
+            { label: 'Records', value: records.data ? String(records.data.records.length) : '–' },
+            { label: 'Best streak', value: p ? String(p.streak.longest) : '–', unit: p?.streak.longest === 1 ? 'day' : 'days', tint: colors.purple },
+          ]}
+        />
       </GradientCard>
-
-      <StatStrip
-        items={[
-          { label: 'Streak', value: p ? String(p.streak.current) : '–', unit: p?.streak.current === 1 ? 'day' : 'days', tint: colors.accent },
-          { label: 'Records', value: records.data ? String(records.data.records.length) : '–' },
-          { label: 'Best streak', value: p ? String(p.streak.longest) : '–', unit: p?.streak.longest === 1 ? 'day' : 'days', tint: colors.purple },
-        ]}
-      />
 
       {missing.length > 0 ? (
         <Pressable accessibilityRole="button" onPress={() => edit(missing[0]!)}>
@@ -91,54 +94,57 @@ export default function ProfileHub() {
       ) : null}
 
       <ComingSoon />
-      {bodyQuest.data ? (
-        <BodyQuestSummaryCard
-          stage={bodyQuest.data.bodyQuest.stage}
-          highestStage={bodyQuest.data.bodyQuest.highestStage}
-          overall={bodyQuest.data.bodyQuest.overall}
-          statsWithData={bodyQuest.data.bodyQuest.statsWithData}
-          nextStage={bodyQuest.data.bodyQuest.next?.stage ?? null}
-          onPress={() => router.push('/progress/body-quest' as Href)}
-        />
-      ) : null}
-      {achievements.data ? (
-        <Pressable accessibilityRole="button" onPress={() => router.push('/progress/achievements' as Href)}>
-          <Card style={{ gap: space.sm }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Row gap={space.sm}>
-                <Ionicons name="medal" size={20} color={colors.accent} />
-                <AppText variant="bodyStrong">Achievements</AppText>
+      {bodyQuest.data || achievements.data ? (
+        <Card style={{ gap: space.md }}>
+          {bodyQuest.data ? (
+            <BodyQuestSummaryCard
+              flat
+              stage={bodyQuest.data.bodyQuest.stage}
+              highestStage={bodyQuest.data.bodyQuest.highestStage}
+              overall={bodyQuest.data.bodyQuest.overall}
+              statsWithData={bodyQuest.data.bodyQuest.statsWithData}
+              nextStage={bodyQuest.data.bodyQuest.next?.stage ?? null}
+              onPress={() => router.push('/progress/body-quest' as Href)}
+            />
+          ) : null}
+          {bodyQuest.data && achievements.data ? <Divider /> : null}
+          {achievements.data ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`Achievements: ${unlocked} of ${achievementTotal} unlocked. Open details`} onPress={() => router.push('/progress/achievements' as Href)} style={{ gap: space.sm }}>
+              <Row gap={space.md}>
+                <IconBubble icon="medal" tint={colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <AppText variant="bodyStrong">Achievements</AppText>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {`${unlocked} of ${achievementTotal}`}
+                  </AppText>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
               </Row>
-              <AppText variant="caption" color={colors.textMuted}>
-                {achievements.data.achievements.filter((a) => a.state === 'unlocked').length} of {achievements.data.achievements.length}
-              </AppText>
-            </Row>
-            <ProgressBar value={achievements.data.achievements.filter((a) => a.state === 'unlocked').length / Math.max(1, achievements.data.achievements.length)} height={6} color={colors.accent} />
-          </Card>
-        </Pressable>
+              <ProgressBar value={unlocked / Math.max(1, achievementTotal)} height={6} color={colors.accent} />
+            </Pressable>
+          ) : null}
+        </Card>
       ) : null}
 
       {summary.data ? <ActivitySummary s={summary.data} /> : null}
 
-      <SectionHeader title="Personal records" action={<SeeAll href="/progress" />} />
-      {records.data && records.data.records.length > 0 ? (
-        <RecordsList records={records.data.records} limit={3} />
-      ) : (
-        <Card style={{ gap: space.md }}>
-          {records.isError && !records.data ? (
-            <ErrorState error={records.error} onRetry={records.refetch} compact />
-          ) : !records.data ? (
-            <StateView kind="loading" compact />
-          ) : (
-            <AppText variant="caption" color={colors.textMuted}>
-              No records yet. They come from reps the camera verified, so every one is earned.
-            </AppText>
-          )}
-        </Card>
-      )}
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Personal records" action={<SeeAll href="/progress" />} />
+        {records.data && records.data.records.length > 0 ? (
+          <RecordsList records={records.data.records} limit={3} />
+        ) : records.isError && !records.data ? (
+          <ErrorState error={records.error} onRetry={records.refetch} compact />
+        ) : !records.data ? (
+          <StateView kind="loading" compact />
+        ) : (
+          <AppText variant="caption" color={colors.textMuted}>
+            No records yet. They come from reps the camera verified, so every one is earned.
+          </AppText>
+        )}
+      </View>
 
-      <SectionHeader title="Recent workouts" action={<SeeAll href="/progress" />} />
-      <Card style={{ gap: space.md }}>
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Recent workouts" action={<SeeAll href="/progress" />} />
         {workouts.isError && !workouts.data ? (
           <ErrorState error={workouts.error} onRetry={workouts.refetch} compact />
         ) : !workouts.data ? (
@@ -148,39 +154,52 @@ export default function ProfileHub() {
             No workouts yet.
           </AppText>
         ) : (
-          workouts.data.workouts.slice(0, 3).map((w) => (
-            <Row key={w.id} style={{ justifyContent: 'space-between' }}>
-              <AppText variant="body">
-                {new Date(`${w.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} · {w.durationMinutes} min
-              </AppText>
-              <AppText variant="bodyStrong" color={w.xp > 0 ? colors.primary : colors.textFaint}>
-                +{w.xp} XP
-              </AppText>
-            </Row>
-          ))
+          <ExerciseList>
+            {workouts.data.workouts.slice(0, 3).map((w) => (
+              <ListRow
+                key={w.id}
+                title={new Date(`${w.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                subtitle={`${w.durationMinutes} min`}
+                right={
+                  <AppText variant="bodyStrong" color={w.xp > 0 ? colors.primary : colors.textFaint}>
+                    +{w.xp} XP
+                  </AppText>
+                }
+              />
+            ))}
+          </ExerciseList>
         )}
-      </Card>
+      </View>
 
-      <SectionHeader title="Weight" action={<SeeAll href="/profile/weight" label="History" />} />
-      <Pressable accessibilityRole="button" accessibilityLabel="Open weight history" onPress={() => router.push('/profile/weight')}>
-        <Card style={{ gap: space.xs }}>
-          {latestWeight ? (
-            <>
-              <AppText variant="number">{formatWeight(latestWeight.weightKg, m.settings.units)}</AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                Last logged {new Date(`${latestWeight.localDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · Tap to log or view history
-              </AppText>
-            </>
-          ) : (
-            <AppText variant="caption" color={colors.textMuted}>
-              {weight.isPending ? 'Loading…' : 'No weight logged yet. Tap to add one.'}
-            </AppText>
-          )}
-        </Card>
-      </Pressable>
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Weight" action={<SeeAll href="/profile/weight" label="History" />} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Open weight history" onPress={() => router.push('/profile/weight')}>
+          <Card>
+            <Row gap={space.md}>
+              <View style={{ flex: 1, gap: space.xs }}>
+                {latestWeight ? (
+                  <>
+                    <AppText variant="number">{formatWeight(latestWeight.weightKg, m.settings.units)}</AppText>
+                    <AppText variant="caption" color={colors.textMuted}>
+                      Last logged {new Date(`${latestWeight.localDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · Tap to log or view history
+                    </AppText>
+                  </>
+                ) : (
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {weight.isPending ? 'Loading…' : 'No weight logged yet. Tap to add one.'}
+                  </AppText>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </Row>
+          </Card>
+        </Pressable>
+      </View>
 
-      <SectionHeader title="Your plan" />
-      <ProfileSummary me={m} catalog={catalog.data} onEdit={edit} />
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Your plan" />
+        <ProfileSummary me={m} catalog={catalog.data} onEdit={edit} />
+      </View>
 
       <Button label="Settings & privacy" icon="settings-outline" variant="secondary" onPress={() => router.push('/profile/settings')} />
     </Screen>
@@ -196,13 +215,7 @@ function SettingsButton() {
 }
 
 function SeeAll({ href, label = 'See all' }: { href: Href; label?: string }) {
-  return (
-    <Pressable accessibilityRole="link" onPress={() => router.navigate(href)} hitSlop={10}>
-      <AppText variant="label" color={colors.primary}>
-        {label}
-      </AppText>
-    </Pressable>
-  );
+  return <SectionAction label={label} role="link" onPress={() => router.navigate(href)} />;
 }
 
 /** Features whose engines aren't built yet are named quietly in one place — no placeholder content. */

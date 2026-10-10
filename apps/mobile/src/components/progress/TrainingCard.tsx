@@ -39,7 +39,7 @@ export function TrainingCard({ workouts, today }: { workouts: W[]; today: string
           {recent.map((w, i) => (
             <View key={w.id} style={styles.col}>
               <View style={[styles.bar, { height: `${Math.max(6, (w.durationMinutes / max) * 100)}%`, backgroundColor: i === recent.length - 1 ? colors.primary : `${colors.primary}88` }]} />
-              <AppText variant="label" color={colors.textFaint} style={{ fontSize: 11 }}>
+              <AppText variant="label" color={colors.textFaint} style={{ fontSize: 12 }}>
                 {shortDay(w.localDate)}
               </AppText>
             </View>
@@ -52,6 +52,7 @@ export function TrainingCard({ workouts, today }: { workouts: W[]; today: string
       )}
       <WeekDays trained={week.trained} todayIndex={week.todayIndex} />
       <StatStrip
+        variant="flat"
         items={[
           { label: 'This week', value: String(week.trained.filter(Boolean).length), unit: 'days' },
           { label: 'Workouts', value: String(workouts.length) },

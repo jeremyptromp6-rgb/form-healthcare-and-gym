@@ -7,7 +7,7 @@ import { ExerciseThumb } from '@/components/art/ExerciseArt';
 import { setsPerMuscle } from '@/lib/muscles';
 import { RankEmblem as RankBadge } from '@/components/art/RankEmblem';
 import { RingsArt } from '@/components/art/SceneArt';
-import { AppText, Badge, BreathingGlow, Button, Card, Divider, HeroMedia, InlineMessage, MacroTile, ProgressBar, ProgressRing, Row, Screen, StatStrip, SectionHeader, StateView, type IconName } from '@/components/ui';
+import { AppText, Badge, BreathingGlow, Button, Card, Divider, ExerciseList, FuelSummary, HeroMedia, IconBubble, InlineMessage, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
 import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
 import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
@@ -73,13 +73,13 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
                 {`${GREETING[vm.greeting.period]}, ${vm.greeting.name}`}
               </AppText>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Open profile" onPress={() => onNavigate('profile')} style={styles.avatar}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Open profile" onPress={() => onNavigate('profile')} hitSlop={4} style={styles.avatar}>
               <Ionicons name="person" size={20} color={colors.primary} />
             </Pressable>
           </Row>
           {vm.progression ? (
             <Row gap={space.sm} style={{ flexWrap: 'wrap' }}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`${vm.progression.streak.current} day streak. Open progress`} onPress={() => onNavigate('progress')} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`${vm.progression.streak.current} day streak. Open progress`} onPress={() => onNavigate('progress')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
                 <Ionicons name="flame" size={16} color={colors.accent} />
                 <AppText variant="bodyStrong" color={colors.text}>
                   {vm.progression.streak.current}
@@ -88,7 +88,7 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
                   day streak
                 </AppText>
               </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Level ${vm.progression.level}, ${vm.progression.rank}. Open progress`} onPress={() => onNavigate('progress')} style={[styles.chip, { backgroundColor: colors.primarySoft }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Level ${vm.progression.level}, ${vm.progression.rank}. Open progress`} onPress={() => onNavigate('progress')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.primarySoft }]}>
                 <RankBadge rank={vm.progression.rank} size={18} />
                 <AppText variant="bodyStrong" color={colors.text}>
                   Lv {vm.progression.level}
@@ -119,52 +119,54 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
       {vm.today ? <TodayHero today={vm.today} onNavigate={onNavigate} /> : failed('today') ? <SectionError name="today" /> : null}
 
       {/* 4 · Nutrition: calories, macros and water together. */}
-      <SectionHeader title="Today's fuel" action={<Link label="Log food" onPress={() => onNavigate('eat')} />} />
-      {vm.nutrition ? (
-        <Fuel n={vm.nutrition} onNavigate={onNavigate}>
-          {vm.water ? <Water w={vm.water} onAdd={onAddWater} onUndo={onUndoWater} busy={waterBusy} error={waterError} /> : null}
-        </Fuel>
-      ) : (
-        <SectionError name="nutrition" />
-      )}
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Today's fuel" action={<SectionAction label="Log food" onPress={() => onNavigate('eat')} />} />
+        {vm.nutrition ? (
+          <Fuel n={vm.nutrition} onNavigate={onNavigate}>
+            {vm.water ? <Water w={vm.water} onAdd={onAddWater} onUndo={onUndoWater} busy={waterBusy} error={waterError} /> : null}
+          </Fuel>
+        ) : (
+          <SectionError name="nutrition" />
+        )}
+      </View>
       {vm.nutrition && !vm.water ? <SectionError name="water" /> : null}
 
       {/* 5 · The coach's read on the day. */}
       {vm.coach.mode !== 'unavailable' && coach ? (
-        <>
-          <SectionHeader title="Coach" action={onOpenCoach ? <Link label="Ask the coach" onPress={onOpenCoach} /> : undefined} />
+        <View style={{ gap: space.md }}>
+          <SectionHeader title="Coach" action={onOpenCoach ? <SectionAction label="Ask the coach" onPress={onOpenCoach} /> : undefined} />
           {coach.response ? (
             <CoachCard response={coach.response} title="Today's tip" onAction={onOpenRoute} />
           ) : coach.loading ? (
-            <Card>
-              <StateView kind="loading" compact />
-            </Card>
+            <StateView kind="loading" compact />
           ) : coach.failed ? (
-            <Card>
-              <AppText variant="caption" color={colors.textMuted}>
-                The coach couldn&apos;t load right now. Pull down to try again.
-              </AppText>
-            </Card>
+            <InlineMessage tone="info" flat>
+              {"The coach couldn't load right now. Pull down to try again."}
+            </InlineMessage>
           ) : null}
-        </>
+        </View>
       ) : null}
 
       {/* Then the longer view: the last session, goals, level and milestones. */}
       {vm.today?.lastWorkout ? <LastSession last={vm.today.lastWorkout} /> : null}
 
-      <SectionHeader title="Today's goals" />
-      {vm.quests ? <Quests daily={vm.quests.daily} weekly={vm.quests.weekly} /> : <SectionError name="quests" />}
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Today's goals" />
+        {vm.quests ? <Quests daily={vm.quests.daily} weekly={vm.quests.weekly} /> : <SectionError name="quests" />}
+      </View>
 
-      <SectionHeader title="Your level" action={<Link label="View all" onPress={() => onNavigate('progress')} />} />
-      {vm.progression ? <Level p={vm.progression} /> : <SectionError name="progression" />}
+      <View style={{ gap: space.md }}>
+        <SectionHeader title="Your level" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
+        {vm.progression ? <Level p={vm.progression} /> : <SectionError name="progression" />}
+      </View>
 
       {vm.errors.includes('recognition') ? (
         <SectionError name="recognition" />
       ) : vm.bodyQuest.available && vm.achievements.available ? (
-        <>
-          <SectionHeader title="Milestones" action={<Link label="View all" onPress={() => onNavigate('progress')} />} />
+        <View style={{ gap: space.md }}>
+          <SectionHeader title="Milestones" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
           <Milestones vm={vm} onOpen={() => onNavigate('progress')} />
-        </>
+        </View>
       ) : (
         <Card variant="plain" style={{ gap: space.xs }}>
           <AppText variant="bodyStrong">Coming to FORM</AppText>
@@ -183,25 +185,16 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
   );
 }
 
-function Link({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={12} style={{ minHeight: 32, justifyContent: 'center' }}>
-      <AppText variant="label" color={colors.primary}>
-        {label}
-      </AppText>
-    </Pressable>
-  );
-}
-
 /** Body Quest stage, the next achievement within reach, and weeks on plan — all from real activity. */
 function Milestones({ vm, onOpen }: { vm: HomeViewModel; onOpen: () => void }) {
   const bq = vm.bodyQuest;
   const a = vm.achievements;
   if (!bq.available || !a.available) return null;
   return (
-    <View style={{ gap: space.sm }}>
-      <BodyQuestSummaryCard stage={bq.stage} highestStage={bq.highestStage} overall={bq.overall} statsWithData={bq.statsWithData} nextStage={bq.nextStage} onPress={onOpen} />
-      <Card style={{ gap: space.sm }}>
+    <Card style={{ gap: space.md }}>
+      <BodyQuestSummaryCard flat stage={bq.stage} highestStage={bq.highestStage} overall={bq.overall} statsWithData={bq.statsWithData} nextStage={bq.nextStage} onPress={onOpen} />
+      <Divider />
+      <View style={{ gap: space.sm }}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Row gap={space.sm}>
             <Ionicons name="medal" size={18} color={colors.accent} />
@@ -225,17 +218,13 @@ function Milestones({ vm, onOpen }: { vm: HomeViewModel; onOpen: () => void }) {
             Every achievement unlocked. That&apos;s real, earned work.
           </AppText>
         )}
-      </Card>
-    </View>
+      </View>
+    </Card>
   );
 }
 
 function SectionError({ name }: { name: HomeSection }) {
-  return (
-    <Card>
-      <StateView kind="error" compact title={`Couldn't load ${SECTION_LABEL[name]}`} message="The rest of Home is up to date. Pull down to try again." />
-    </Card>
-  );
+  return <StateView kind="error" compact title={`Couldn't load ${SECTION_LABEL[name]}`} message="The rest of Home is up to date. Pull down to try again." />;
 }
 
 function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<HomeViewModel['firstSteps']>; onNavigate: HomeViewProps['onNavigate']; onAddWater: HomeViewProps['onAddWater'] }) {
@@ -247,9 +236,7 @@ function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<Home
   return (
     <Card style={{ gap: space.md }}>
       <Row gap={space.md}>
-        <View style={[styles.stepIcon, { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.accentSoft }]}>
-          <Ionicons name="rocket" size={22} color={colors.accent} />
-        </View>
+        <IconBubble icon="rocket" tint={colors.accent} size={48} />
         <View style={{ flex: 1, gap: 2 }}>
           <AppText variant="heading" header>
             Start here
@@ -260,24 +247,24 @@ function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<Home
         </View>
       </Row>
       <ProgressBar value={steps.filter((x) => x.done).length / steps.length} height={6} color={colors.success} label="First steps done" />
-      {steps.map((s) => (
-        <Pressable
-          key={s.key}
-          accessibilityRole="button"
-          accessibilityLabel={meta[s.key].label}
-          accessibilityState={{ checked: s.done }} aria-checked={s.done}
-          disabled={s.done}
-          onPress={meta[s.key].action}
-          style={({ pressed }) => [styles.step, { backgroundColor: `${meta[s.key].tint}14`, borderColor: `${meta[s.key].tint}30`, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
-          <View style={[styles.stepIcon, { backgroundColor: s.done ? colors.success : meta[s.key].tint }]}>
-            <Ionicons name={s.done ? 'checkmark' : meta[s.key].icon} size={18} color={colors.onPrimary} />
-          </View>
-          <AppText variant="bodyStrong" color={s.done ? colors.textMuted : colors.text} style={{ flex: 1, textDecorationLine: s.done ? 'line-through' : 'none' }}>
-            {meta[s.key].label}
-          </AppText>
-          {s.done ? null : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
-        </Pressable>
-      ))}
+      <ExerciseList>
+        {steps.map((s) => (
+          <Pressable
+            key={s.key}
+            accessibilityRole="button"
+            accessibilityLabel={meta[s.key].label}
+            accessibilityState={{ checked: s.done }} aria-checked={s.done}
+            disabled={s.done}
+            onPress={meta[s.key].action}
+            style={({ pressed }) => [styles.step, { opacity: pressed ? 0.7 : 1 }]}>
+            {s.done ? <IconBubble icon="checkmark" tint={colors.success} size={36} solid /> : <IconBubble icon={meta[s.key].icon} tint={meta[s.key].tint} size={36} />}
+            <AppText variant="bodyStrong" color={s.done ? colors.textMuted : colors.text} style={{ flex: 1, textDecorationLine: s.done ? 'line-through' : 'none' }}>
+              {meta[s.key].label}
+            </AppText>
+            {s.done ? null : <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />}
+          </Pressable>
+        ))}
+      </ExerciseList>
     </Card>
   );
 }
@@ -301,9 +288,7 @@ function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['to
     <Card style={{ gap: space.lg }}>
       <Row style={{ justifyContent: 'space-between' }}>
         <Row gap={space.sm}>
-          <View style={[styles.stepIcon, { width: 32, height: 32, borderRadius: 16, backgroundColor: `${colors.protein}1F` }]}>
-            <Ionicons name="body" size={16} color={colors.protein} />
-          </View>
+          <IconBubble icon="body" tint={colors.protein} size={32} />
           <AppText variant="heading" header>
             Last session
           </AppText>
@@ -314,22 +299,24 @@ function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['to
       </Row>
       {muscles.length ? <BodyMap heat={Object.fromEntries(muscles.map((m) => [m.muscle, m.value / top]))} height={170} style={{ alignSelf: 'center' }} /> : null}
       <StatStrip
+        variant="flat"
         items={[
           { label: 'Time', value: String(last.durationMinutes), unit: 'min' },
           { label: 'Sets', value: String(sets) },
           { label: 'XP', value: `+${last.xp}`, tint: colors.accent },
         ]}
       />
-      <View style={{ gap: space.sm }} accessible accessibilityLabel={`Last session ${shortDate(last.localDate)}`}>
-        {last.exercises.map((e) => (
-          <Row key={e.exerciseId} gap={space.md}>
-            <ExerciseThumb exerciseId={e.exerciseId} size={36} />
-            <AppText variant="caption" color={colors.textMuted} style={{ flex: 1 }}>
-              {e.name}: {e.sets} {e.sets === 1 ? 'set' : 'sets'}, {e.totalReps} reps{e.bestLoadKg > 0 ? ` · top ${e.bestLoadKg} kg` : ''}
-              {e.verifiedReps > 0 ? ` · ${e.verifiedReps} verified` : ''}
-            </AppText>
-          </Row>
-        ))}
+      <View accessible accessibilityLabel={`Last session ${shortDate(last.localDate)}`}>
+        <ExerciseList>
+          {last.exercises.map((e) => (
+            <View key={e.exerciseId} style={styles.sessionRow}>
+              <ExerciseThumb exerciseId={e.exerciseId} size={40} />
+              <AppText variant="caption" color={colors.text} style={{ flex: 1 }}>
+                {`${e.name}: ${e.sets} ${e.sets === 1 ? 'set' : 'sets'}, ${e.totalReps} reps${e.bestLoadKg > 0 ? ` · top ${e.bestLoadKg} kg` : ''}${e.verifiedReps > 0 ? ` · ${e.verifiedReps} verified` : ''}`}
+              </AppText>
+            </View>
+          ))}
+        </ExerciseList>
       </View>
     </Card>
   );
@@ -380,47 +367,33 @@ function Fuel({ n, onNavigate, children }: { n: NonNullable<HomeViewModel['nutri
   const t = n.targets;
   return (
     <Card style={{ gap: space.lg }}>
-      <Row gap={space.lg}>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Row gap={space.xs} style={{ alignItems: 'baseline' }}>
-            <AppText variant="display" style={{ fontVariant: ['tabular-nums'] }}>
-              {n.kcal.toLocaleString()}
-            </AppText>
-            {t ? (
-              <AppText variant="bodyStrong" color={colors.textMuted}>
-                / {t.kcal.toLocaleString()}
-              </AppText>
-            ) : null}
-          </Row>
-          <AppText variant="label" color={colors.textMuted}>
-            Calories eaten · {n.mealsLogged} logged
+      <FuelSummary
+        numeral={n.kcal.toLocaleString()}
+        unitLabel={t ? `/ ${t.kcal.toLocaleString()}` : null}
+        caption={`Calories eaten · ${n.mealsLogged} logged`}
+        ring={{ value: t ? n.kcal / t.kcal : 0, color: colors.accent, label: t ? 'Calories of target' : undefined }}
+        macros={
+          t
+            ? [
+                { label: 'Protein', value: n.proteinG, target: t.proteinG, color: colors.protein },
+                { label: 'Carbs', value: n.carbsG, target: t.carbsG, color: colors.carbs },
+                { label: 'Fat', value: n.fatG, target: t.fatG, color: colors.fat },
+              ]
+            : null
+        }>
+        <View style={{ gap: space.xs }}>
+          <AppText variant="caption" color={colors.textMuted}>
+            {fuelLine(n)}
           </AppText>
+          {n.kcal > 0 ? (
+            <AppText variant="caption" color={n.estimatedKcalShare > 0 ? colors.warning : colors.textFaint}>
+              {accuracyLine(n.measuredKcalShare, n.estimatedKcalShare)}
+            </AppText>
+          ) : null}
         </View>
-        <ProgressRing value={t ? n.kcal / t.kcal : 0} size={84} stroke={8} color={colors.accent} label={t ? 'Calories of target' : undefined}>
-          <Ionicons name="flame" size={24} color={colors.accent} />
-        </ProgressRing>
-      </Row>
-      {t ? (
-        <Row gap={space.sm}>
-          <MacroTile label="Protein" value={n.proteinG} target={t.proteinG} color={colors.protein} />
-          <MacroTile label="Carbs" value={n.carbsG} target={t.carbsG} color={colors.carbs} />
-          <MacroTile label="Fat" value={n.fatG} target={t.fatG} color={colors.fat} />
-        </Row>
-      ) : null}
-      <AppText variant="caption" color={colors.textMuted}>
-        {fuelLine(n)}
-      </AppText>
-      {n.kcal > 0 ? (
-        <AppText variant="caption" color={n.estimatedKcalShare > 0 ? colors.warning : colors.textFaint}>
-          {accuracyLine(n.measuredKcalShare, n.estimatedKcalShare)}
-        </AppText>
-      ) : null}
-      {!t ? (
-        <Pressable accessibilityRole="button" onPress={() => onNavigate('profile')}>
-          <InlineMessage tone="info">Finish your body profile to get calorie and macro targets →</InlineMessage>
-        </Pressable>
-      ) : null}
-      {n.mealsLogged === 0 ? <Button label="Log your first meal today" icon="add" variant="secondary" onPress={() => onNavigate('eat')} /> : null}
+        {!t ? <SectionAction role="button" label="Finish your body profile to get calorie and macro targets →" onPress={() => onNavigate('profile')} /> : null}
+        {n.mealsLogged === 0 ? <Button label="Log your first meal today" icon="add" variant="secondary" onPress={() => onNavigate('eat')} /> : null}
+      </FuelSummary>
       {children ? (
         <>
           <Divider />
@@ -447,19 +420,12 @@ function Water({
   const done = w.totalMl >= w.targetMl;
   return (
     <View style={{ gap: space.sm }}>
-      <View style={styles.waterLine} accessible accessibilityLabel={`Water: ${formatLitres(w.totalMl)} of ${formatLitres(w.targetMl)}`}>
-        <Ionicons name="water" size={18} color={colors.water} />
-        <AppText variant="bodyStrong" style={{ flex: 1 }}>
-          Water
-        </AppText>
-        <AppText variant="bodyStrong" style={{ fontVariant: ['tabular-nums'] }}>
-          {formatLitres(w.totalMl)}
-        </AppText>
-        <AppText variant="label" color={colors.textMuted}>
-          / {formatLitres(w.targetMl)}
-        </AppText>
-      </View>
-      <ProgressBar value={w.totalMl / w.targetMl} height={6} color={colors.water} label="Water of daily guide" />
+      <WaterLine
+        totalText={formatLitres(w.totalMl)}
+        targetText={formatLitres(w.targetMl)}
+        fraction={w.totalMl / w.targetMl}
+        accessibilityLabel={`Water: ${formatLitres(w.totalMl)} of ${formatLitres(w.targetMl)}`}
+      />
       <Row gap={space.sm}>
         <Button label="+250 ml" icon="water-outline" variant="secondary" onPress={() => onAdd(250)} disabled={busy} style={{ flex: 1 }} />
         <Button label="+500 ml" variant="secondary" onPress={() => onAdd(500)} disabled={busy} style={{ flex: 1 }} />
@@ -470,11 +436,7 @@ function Water({
           {w.targetBasis === 'body_weight' ? 'A general guide based on your weight.' : 'A general guide. Add your weight in Profile for a personal one.'} Needs vary with heat and activity.
         </AppText>
         {w.lastEntryId ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Undo last water entry" onPress={() => onUndo(w.lastEntryId!)} disabled={busy} hitSlop={10} style={{ minHeight: 32, justifyContent: 'center' }}>
-            <AppText variant="label" color={colors.textMuted}>
-              Undo last
-            </AppText>
-          </Pressable>
+          <SectionAction label="Undo last" accessibilityLabel="Undo last water entry" tone="muted" onPress={() => onUndo(w.lastEntryId!)} disabled={busy} />
         ) : null}
       </Row>
       {error ? <InlineMessage tone="danger">{error}</InlineMessage> : null}
@@ -558,7 +520,7 @@ function Level({ p }: { p: NonNullable<HomeViewModel['progression']> }) {
         </AppText>
       ) : null}
       {p.totalXp > 0 && p.trainWithinDays !== null && p.trainWithinDays <= 2 ? (
-        <InlineMessage tone="warning" icon="alert-circle-outline">
+        <InlineMessage tone="warning" icon="alert-circle-outline" flat>
           {p.trainWithinDays === 1 ? `Train today to keep Level ${p.level}.` : `Train within 2 days to keep Level ${p.level}.`}
         </InlineMessage>
       ) : null}
@@ -567,20 +529,10 @@ function Level({ p }: { p: NonNullable<HomeViewModel['progression']> }) {
 }
 
 const styles = StyleSheet.create({
-  waterLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   greeting: { paddingTop: space.sm, paddingBottom: space.xs, alignItems: 'flex-end' },
   dot: { width: 28, height: 6, borderRadius: 3, backgroundColor: colors.track },
-  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.card },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, minHeight: 36, borderRadius: radius.pill },
-  stepIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  step: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    minHeight: 56,
-    paddingHorizontal: space.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    backgroundColor: colors.wash,
-  },
+  step: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingVertical: space.sm },
+  sessionRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingVertical: space.sm },
 });

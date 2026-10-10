@@ -147,10 +147,11 @@ export function Stat({
   );
 }
 
-/** One macro: grams so far over target, with its own coloured ring. */
-export function MacroTile({ label, value, target, color }: { label: string; value: number; target: number; color: string }) {
+/** One macro, flat: a coloured dot and name, grams so far over the target, and a thin bar. With no target there is no bar. */
+export function MacroTile({ label, value, target, color }: { label: string; value: number; target: number | null; color: string }) {
+  const grams = Math.round(value);
   return (
-    <View style={styles.macro} accessible accessibilityLabel={`${label}: ${Math.round(value)} of ${target} grams`}>
+    <View style={styles.macro} accessible accessibilityLabel={target === null ? `${label}: ${grams} grams` : `${label}: ${grams} of ${target} grams`}>
       <Row gap={6}>
         <View style={[styles.macroDot, { backgroundColor: color }]} />
         <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
@@ -159,13 +160,13 @@ export function MacroTile({ label, value, target, color }: { label: string; valu
       </Row>
       <Row gap={3} style={{ alignItems: 'baseline' }}>
         <AppText variant="heading" style={{ fontVariant: ['tabular-nums'] }} numberOfLines={1}>
-          {Math.round(value)}
+          {grams}
         </AppText>
         <AppText variant="caption" color={colors.textFaint} numberOfLines={1} style={{ flexShrink: 1 }}>
-          / {target} g
+          {target === null ? 'g' : `/ ${target} g`}
         </AppText>
       </Row>
-      <ProgressBar value={target > 0 ? value / target : 0} color={color} height={5} />
+      {target === null ? null : <ProgressBar value={target > 0 ? value / target : 0} color={color} height={5} />}
     </View>
   );
 }
@@ -240,7 +241,8 @@ export function ErrorState({ error, onRetry, compact }: { error: ApiError; onRet
   return <StateView {...s} compact={compact} actionLabel={error.retryable || error.kind === 'network' ? 'Try again' : undefined} onAction={onRetry} />;
 }
 
-export function InlineMessage({ tone, children, icon }: { tone: 'warning' | 'danger' | 'info' | 'success'; children: ReactNode; icon?: IconName }) {
+/** A short notice with a tinted icon. `flat` drops the tinted panel so it can sit inside a card or on the page. */
+export function InlineMessage({ tone, children, icon, flat }: { tone: 'warning' | 'danger' | 'info' | 'success'; children: ReactNode; icon?: IconName; flat?: boolean }) {
   const palette = {
     warning: [colors.warningSoft, colors.warning, 'warning-outline'],
     danger: [colors.dangerSoft, colors.danger, 'alert-circle-outline'],
@@ -248,20 +250,32 @@ export function InlineMessage({ tone, children, icon }: { tone: 'warning' | 'dan
     success: [colors.primarySoft, colors.primary, 'checkmark-circle-outline'],
   } as const;
   const [bg, fg, defaultIcon] = palette[tone];
+  // Flat messages have no panel to carry the tone, so only the icon does; the text stays readable
+  // (the warning tone is too light for body text on the page). Info stays quiet.
+  const textColor = flat && tone === 'info' ? colors.textMuted : colors.text;
   return (
-    <View style={[styles.inline, { backgroundColor: bg }]} accessibilityRole={tone === 'danger' ? 'alert' : undefined}>
+    <View style={flat ? styles.inlineFlat : [styles.inline, { backgroundColor: bg }]} accessibilityRole={tone === 'danger' ? 'alert' : undefined}>
       <Ionicons name={icon ?? defaultIcon} size={18} color={fg} style={{ marginTop: 1 }} />
-      <View style={{ flex: 1 }}>{typeof children === 'string' ? <AppText variant="caption">{children}</AppText> : children}</View>
+      <View style={{ flex: 1 }}>
+        {typeof children === 'string' ? (
+          <AppText variant="caption" color={textColor}>
+            {children}
+          </AppText>
+        ) : (
+          children
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  macro: { flex: 1, gap: 6, backgroundColor: colors.wash, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.md - 2 },
+  macro: { flex: 1, gap: 6 },
   macroDot: { width: 8, height: 8, borderRadius: 4 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill, alignSelf: 'flex-start' },
   state: { alignItems: 'center', justifyContent: 'center', paddingVertical: space.xxl, gap: space.sm },
   compact: { paddingVertical: space.lg },
   stateIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: space.xs },
   inline: { flexDirection: 'row', gap: space.md, padding: space.md, borderRadius: radius.md },
+  inlineFlat: { flexDirection: 'row', gap: space.sm },
 });

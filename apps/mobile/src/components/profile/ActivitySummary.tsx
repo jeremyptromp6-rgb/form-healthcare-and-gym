@@ -1,5 +1,5 @@
 import { View } from 'react-native';
-import { AppText, Card, Row, Stat } from '@/components/ui';
+import { AppText, Card, Divider, StatStrip } from '@/components/ui';
 import type { ProfileSummaryStats } from '@/lib/types';
 import { colors, space } from '@/theme/tokens';
 
@@ -8,22 +8,26 @@ export function ActivitySummary({ s }: { s: ProfileSummaryStats }) {
   const w = s.workouts;
   const n = s.nutrition;
   return (
-    <View style={{ gap: space.sm }}>
-      <Card style={{ gap: space.sm }}>
+    <Card style={{ gap: space.md }}>
+      <View style={{ gap: space.sm }}>
         <AppText variant="label" color={colors.textMuted}>
           Training · last {w.rangeDays} days
         </AppText>
-        <Row gap={space.sm}>
-          <Stat label="Workouts" value={String(w.workouts)} />
-          <Stat label="Minutes" value={w.minutes.toLocaleString()} />
-          <Stat label="Verified reps" value={w.verifiedReps.toLocaleString()} />
-        </Row>
+        <StatStrip
+          variant="flat"
+          items={[
+            { label: 'Workouts', value: String(w.workouts) },
+            { label: 'Minutes', value: w.minutes.toLocaleString() },
+            { label: 'Verified reps', value: w.verifiedReps.toLocaleString() },
+          ]}
+        />
         <AppText variant="caption" color={colors.textFaint}>
           {w.adherencePercent !== null ? `${w.trainingDays} training days · ${w.adherencePercent}% of your plan` : `${w.trainingDays} training days`}
           {s.recordsBeaten ? ` · ${s.recordsBeaten} ${s.recordsBeaten === 1 ? 'record' : 'records'} beaten all time` : ''}
         </AppText>
-      </Card>
-      <Card style={{ gap: space.sm }}>
+      </View>
+      <Divider />
+      <View style={{ gap: space.sm }}>
         <AppText variant="label" color={colors.textMuted}>
           Food · last {n.rangeDays} days
         </AppText>
@@ -33,11 +37,14 @@ export function ActivitySummary({ s }: { s: ProfileSummaryStats }) {
           </AppText>
         ) : (
           <>
-            <Row gap={space.sm}>
-              <Stat label="Days logged" value={String(n.daysLogged)} />
-              <Stat label="On target" value={n.hasTargets ? String(n.daysOnTarget) : '—'} />
-              <Stat label="Avg kcal" value={n.averageKcal !== null ? n.averageKcal.toLocaleString() : '—'} />
-            </Row>
+            <StatStrip
+              variant="flat"
+              items={[
+                { label: 'Days logged', value: String(n.daysLogged) },
+                { label: 'On target', value: n.hasTargets ? String(n.daysOnTarget) : '—' },
+                { label: 'Avg kcal', value: n.averageKcal !== null ? n.averageKcal.toLocaleString() : '—' },
+              ]}
+            />
             {n.estimatedPercent ? (
               <AppText variant="caption" color={colors.textFaint}>
                 {n.estimatedPercent}% of logged calories are estimates.
@@ -45,7 +52,7 @@ export function ActivitySummary({ s }: { s: ProfileSummaryStats }) {
             ) : null}
           </>
         )}
-      </Card>
-    </View>
+      </View>
+    </Card>
   );
 }

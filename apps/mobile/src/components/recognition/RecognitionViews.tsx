@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { AppText, Badge, Card, Divider, ProgressBar, Row, type IconName } from '@/components/ui';
+import { AppText, Badge, Card, Divider, ExerciseList, IconBubble, ProgressBar, Row, type IconName } from '@/components/ui';
 import { BODY_QUEST_STAGES, BODY_QUEST_STATS, type Achievement, type BodyQuest, type BodyQuestStage, type BodyQuestStat, type BodyQuestStatResult, type PersonalRecord, type Streaks } from '@/lib/types';
 import { colors, radius, space } from '@/theme/tokens';
 
@@ -49,7 +49,7 @@ export function StageTrack({ stage, highestStage }: { stage: BodyQuestStage; hig
             <View style={[styles.trackNode, { borderColor: lit ? info.color : i <= best ? `${info.color}88` : colors.border, backgroundColor: colors.card, borderWidth: i === current ? 2.5 : 1.5 }]}>
               <Ionicons name={info.icon} size={14} color={lit ? info.color : colors.textFaint} />
             </View>
-            <AppText variant="caption" color={i === current ? colors.text : colors.textFaint} style={{ fontSize: 11 }}>
+            <AppText variant="caption" color={i === current ? colors.text : colors.textFaint} style={{ fontSize: 12 }}>
               {info.label}
             </AppText>
           </View>
@@ -59,7 +59,7 @@ export function StageTrack({ stage, highestStage }: { stage: BodyQuestStage; hig
   );
 }
 
-/** Compact Body Quest card for Progress, Home and Profile. */
+/** Compact Body Quest card for Progress, Home and Profile. `flat` drops the card so it can sit on the page or inside another surface. */
 export function BodyQuestSummaryCard({
   stage,
   highestStage,
@@ -67,6 +67,7 @@ export function BodyQuestSummaryCard({
   statsWithData,
   nextStage,
   onPress,
+  flat,
 }: {
   stage: BodyQuestStage;
   highestStage?: BodyQuestStage;
@@ -74,14 +75,13 @@ export function BodyQuestSummaryCard({
   statsWithData: number;
   nextStage: BodyQuestStage | null;
   onPress?: () => void;
+  flat?: boolean;
 }) {
   const info = STAGE_INFO[stage];
-  const body = (
-    <Card style={{ gap: space.md }}>
+  const content = (
+    <>
       <Row gap={space.md}>
-        <View style={[styles.emblem, { borderColor: info.color, backgroundColor: `${info.color}1F` }]}>
-          <Ionicons name={info.icon} size={24} color={info.color} />
-        </View>
+        <IconBubble icon={info.icon} tint={info.color} size={40} />
         <View style={{ flex: 1 }}>
           <AppText variant="overline" color={info.color}>
             Body Quest
@@ -99,8 +99,9 @@ export function BodyQuestSummaryCard({
           Next: {stageLabel(nextStage)}
         </AppText>
       ) : null}
-    </Card>
+    </>
   );
+  const body = flat ? <View style={{ gap: space.md }}>{content}</View> : <Card style={{ gap: space.md }}>{content}</Card>;
   return onPress ? (
     <Pressable accessibilityRole="button" accessibilityLabel={`Body Quest: ${info.label}. Open details`} onPress={onPress}>
       {body}
@@ -217,47 +218,42 @@ const REQUIRES: Record<NonNullable<Achievement['requires']>, string> = {
 
 export function AchievementTile({ a }: { a: Achievement }) {
   const unlocked = a.state === 'unlocked';
+  const locked = a.state === 'locked';
   const icon = ACHIEVEMENT_ICON[a.id] ?? 'star';
   const stateText = unlocked ? `unlocked${a.unlockedAt ? ` on ${new Date(a.unlockedAt).toLocaleDateString()}` : ''}` : a.state === 'in_progress' ? `${a.progress} of ${a.target}` : 'locked';
   return (
-    <Card style={[styles.tile, unlocked && { borderColor: colors.accentSoft, borderWidth: 1 }]}>
-      <View accessible accessibilityLabel={`${a.title}: ${a.description} ${stateText}. ${a.xpReward} XP`} style={{ gap: space.sm }}>
-        <Row gap={space.sm}>
-          <View style={[styles.badge, { backgroundColor: unlocked ? colors.accent : a.state === 'in_progress' ? colors.accentSoft : colors.cardRaised }]}>
-            <Ionicons name={icon} size={22} color={unlocked ? colors.onPrimary : a.state === 'in_progress' ? colors.accent : colors.textFaint} />
-            {a.state === 'locked' ? (
-              <View style={styles.lock}>
-                <Ionicons name="lock-closed" size={10} color={colors.textMuted} />
-              </View>
-            ) : null}
-          </View>
-          <View style={{ flex: 1 }}>
-            <AppText variant="bodyStrong" color={unlocked ? colors.text : colors.textMuted}>
-              {a.title}
-            </AppText>
+    <View accessible accessibilityLabel={`${a.title}: ${a.description} ${stateText}. ${a.xpReward} XP`} style={styles.tile}>
+      <Row gap={space.md}>
+        {unlocked ? <IconBubble icon={icon} tint={colors.accent} solid /> : <IconBubble icon={icon} tint={locked ? colors.textMuted : colors.accent} />}
+        <View style={{ flex: 1 }}>
+          <AppText variant="bodyStrong" color={unlocked ? colors.text : colors.textMuted}>
+            {a.title}
+          </AppText>
+          <Row gap={4}>
+            {locked ? <Ionicons name="lock-closed" size={12} color={colors.textFaint} /> : null}
             <AppText variant="caption" color={colors.textFaint}>
               {unlocked ? (a.unlockedAt ? new Date(a.unlockedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unlocked') : `+${a.xpReward} XP`}
             </AppText>
-          </View>
-        </Row>
-        <AppText variant="caption" color={colors.textMuted}>
-          {a.description}
-        </AppText>
-        {a.state === 'in_progress' ? (
-          <View style={{ gap: 4 }}>
-            <ProgressBar value={a.progress / a.target} height={6} color={colors.accent} />
-            <AppText variant="caption" color={colors.textFaint}>
-              {a.progress} of {a.target}
-            </AppText>
-          </View>
-        ) : null}
-        {a.state === 'locked' && a.requires ? (
+          </Row>
+        </View>
+      </Row>
+      <AppText variant="caption" color={colors.textMuted}>
+        {a.description}
+      </AppText>
+      {a.state === 'in_progress' ? (
+        <View style={{ gap: 4 }}>
+          <ProgressBar value={a.progress / a.target} height={6} color={colors.accent} />
           <AppText variant="caption" color={colors.textFaint}>
-            {REQUIRES[a.requires]}
+            {a.progress} of {a.target}
           </AppText>
-        ) : null}
-      </View>
-    </Card>
+        </View>
+      ) : null}
+      {locked && a.requires ? (
+        <AppText variant="caption" color={colors.textFaint}>
+          {REQUIRES[a.requires]}
+        </AppText>
+      ) : null}
+    </View>
   );
 }
 
@@ -269,11 +265,11 @@ export function sortAchievements(list: Achievement[]): Achievement[] {
 
 export function AchievementList({ achievements }: { achievements: Achievement[] }) {
   return (
-    <View style={{ gap: space.sm }}>
+    <ExerciseList>
       {sortAchievements(achievements).map((a) => (
         <AchievementTile key={a.id} a={a} />
       ))}
-    </View>
+    </ExerciseList>
   );
 }
 
@@ -281,7 +277,7 @@ export function AchievementList({ achievements }: { achievements: Achievement[] 
 
 function StreakTile({ icon, tint, label, value, unit, caption, best }: { icon: IconName; tint: string; label: string; value: string; unit: string; caption: string; best: number | null }) {
   return (
-    <Card style={{ flex: 1, gap: 4, padding: space.md, backgroundColor: `${tint}14`, borderColor: `${tint}30` }}>
+    <View style={styles.streakTile}>
       <View accessible accessibilityLabel={`${label}: ${value} ${unit}. ${caption}${best !== null ? `. Best ${best}` : ''}`} style={{ gap: 4 }}>
         <Row gap={6}>
           <Ionicons name={icon} size={16} color={tint} />
@@ -302,7 +298,7 @@ function StreakTile({ icon, tint, label, value, unit, caption, best }: { icon: I
           {best !== null && best > 0 ? ` · Best ${best}` : ''}
         </AppText>
       </View>
-    </Card>
+    </View>
   );
 }
 
@@ -311,8 +307,8 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** Training, weekly consistency, nutrition and quest streaks — rest is part of every one. */
 export function StreaksGrid({ streaks: s }: { streaks: Streaks }) {
   return (
-    <View style={{ gap: space.sm }}>
-      <Row gap={space.sm} style={{ alignItems: 'stretch' }}>
+    <Card style={{ paddingVertical: space.sm }}>
+      <View style={styles.streakRow}>
         <StreakTile
           icon="flame"
           tint={colors.accent}
@@ -322,6 +318,7 @@ export function StreaksGrid({ streaks: s }: { streaks: Streaks }) {
           caption={`Rest days in your plan keep it going`}
           best={s.workout.longest}
         />
+        <View style={styles.streakSplit} />
         <StreakTile
           icon="calendar"
           tint={colors.primary}
@@ -331,8 +328,9 @@ export function StreaksGrid({ streaks: s }: { streaks: Streaks }) {
           caption={s.weekly.metThisWeek ? 'This week: done' : `${s.weekly.target} days a week`}
           best={s.weekly.longest}
         />
-      </Row>
-      <Row gap={space.sm} style={{ alignItems: 'stretch' }}>
+      </View>
+      <Divider />
+      <View style={styles.streakRow}>
         <StreakTile
           icon="leaf"
           tint={colors.success}
@@ -342,9 +340,10 @@ export function StreaksGrid({ streaks: s }: { streaks: Streaks }) {
           caption={s.nutrition.available ? 'Finished days on target' : 'Set your body profile to track this'}
           best={s.nutrition.available ? s.nutrition.longest : null}
         />
+        <View style={styles.streakSplit} />
         <StreakTile icon="flag" tint={colors.purple} label="Quests" value={String(s.quest.current)} unit={plural(s.quest.current, 'day', 'days')} caption="Days with a daily quest done" best={s.quest.longest} />
-      </Row>
-    </View>
+      </View>
+    </Card>
   );
 }
 
@@ -356,29 +355,26 @@ export function RecordsList({ records, limit }: { records: PersonalRecord[]; lim
   const perExercise = records.filter((r) => r.exerciseId !== null);
   const rows = [...global, ...perExercise].slice(0, limit ?? records.length);
   return (
-    <Card style={{ paddingVertical: space.xs }}>
-      {rows.map((r, i) => (
-        <View key={`${r.exerciseId ?? '*'}:${r.kind}`}>
-          {i > 0 ? <Divider /> : null}
-          <Row style={{ minHeight: 60, paddingVertical: space.sm }} gap={space.md}>
-            <View style={[styles.recordIcon, { backgroundColor: r.recent ? colors.accentSoft : colors.cardRaised }]}>
-              <Ionicons name={r.exerciseId === null ? (r.kind === 'longest_streak' ? 'flame' : 'stats-chart') : 'trophy-outline'} size={18} color={r.recent ? colors.accent : colors.textMuted} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <AppText variant="bodyStrong">{r.exerciseName ?? r.label}</AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                {r.exerciseName ? r.label : 'Across all training'}
-                {r.localDate ? ` · ${new Date(`${r.localDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
-              </AppText>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: 2 }}>
-              <AppText variant="heading">{r.display}</AppText>
-              {r.recent ? <Badge label="New" tone="accent" /> : null}
-            </View>
-          </Row>
-        </View>
+    <ExerciseList>
+      {rows.map((r) => (
+        <Row key={`${r.exerciseId ?? '*'}:${r.kind}`} style={{ minHeight: 60, paddingVertical: space.sm }} gap={space.md}>
+          <IconBubble icon={r.exerciseId === null ? (r.kind === 'longest_streak' ? 'flame' : 'stats-chart') : 'trophy-outline'} tint={r.recent ? colors.accent : colors.textMuted} />
+          <View style={{ flex: 1 }}>
+            <AppText variant="bodyStrong">{r.exerciseName ?? r.label}</AppText>
+            <AppText variant="caption" color={colors.textMuted}>
+              {r.exerciseName ? r.label : 'Across all training'}
+              {r.localDate ? ` · ${new Date(`${r.localDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
+            </AppText>
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 2 }}>
+            <AppText variant="heading" style={{ fontVariant: ['tabular-nums'] }}>
+              {r.display}
+            </AppText>
+            {r.recent ? <Badge label="New" tone="accent" /> : null}
+          </View>
+        </Row>
       ))}
-    </Card>
+    </ExerciseList>
   );
 }
 
@@ -388,12 +384,11 @@ const styles = StyleSheet.create({
   trackStep: { flex: 1, alignItems: 'center', gap: 4 },
   trackLine: { position: 'absolute', top: 14, right: '50%', width: '100%', height: 2 },
   trackNode: { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.card },
-  emblem: { width: 52, height: 52, borderRadius: 26, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  lock: { position: 'absolute', right: -3, bottom: -3, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   history: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 84 },
   historyCol: { flex: 1, justifyContent: 'flex-end' },
   historyBar: { borderRadius: radius.sm },
-  tile: { gap: space.sm },
-  badge: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  recordIcon: { width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  tile: { gap: space.sm, paddingVertical: space.md },
+  streakRow: { flexDirection: 'row', alignItems: 'stretch' },
+  streakTile: { flex: 1, padding: space.md },
+  streakSplit: { width: StyleSheet.hairlineWidth, backgroundColor: colors.hairline },
 });

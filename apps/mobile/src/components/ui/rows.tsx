@@ -6,6 +6,23 @@ import type { IconName } from './controls';
 import { AppText } from './text';
 
 /**
+ * A round icon on a soft tint — the one icon treatment for rows and lists. `tint` is a #RRGGBB
+ * token colour (the default, muted, sits on a neutral fill); `solid` fills with the tint instead.
+ * Decorative: hidden from screen readers.
+ */
+export function IconBubble({ icon, tint = colors.textMuted, size = 40, solid }: { icon: IconName; tint?: string; size?: number; solid?: boolean }) {
+  const backgroundColor = solid ? tint : tint === colors.textMuted ? colors.cardRaised : `${tint}1F`;
+  return (
+    <View
+      style={{ width: size, height: size, borderRadius: size / 2, backgroundColor, alignItems: 'center', justifyContent: 'center' }}
+      importantForAccessibility="no-hide-descendants"
+      accessibilityElementsHidden>
+      <Ionicons name={icon} size={Math.round(size * 0.45)} color={solid ? colors.onPrimary : tint} />
+    </View>
+  );
+}
+
+/**
  * One tappable row: optional icon, a title, a quiet subtitle, something on the right, a chevron.
  * The same row everywhere — settings, exercise library, history, meals.
  */
@@ -34,11 +51,7 @@ export function ListRow({
   const body = (
     <>
       {leading}
-      {!leading && icon ? (
-        <View style={[styles.icon, { backgroundColor: iconTint === colors.textMuted ? colors.cardRaised : `${iconTint}1F` }]}>
-          <Ionicons name={icon} size={18} color={iconTint} />
-        </View>
-      ) : null}
+      {!leading && icon ? <IconBubble icon={icon} tint={iconTint} /> : null}
       <View style={{ flex: 1, gap: 2 }}>
         <AppText variant="body" numberOfLines={2}>
           {title}
@@ -63,5 +76,5 @@ export function ListRow({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: a11y.minTouch + 8, paddingVertical: space.sm },
-  icon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
 });
+

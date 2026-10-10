@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
-import { AppText, Badge, BreathingGlow, Card, Divider, GradientCard, IconButton, InlineMessage, ProgressBar, Row } from '@/components/ui';
+import { AppText, Badge, BreathingGlow, Card, ExerciseList, GradientCard, IconButton, InlineMessage, ProgressBar, Row } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
 import type { Progress, XpLedgerEntry } from '@/lib/types';
 import { RankEmblem, rankColor } from '@/components/art/RankEmblem';
@@ -105,7 +105,7 @@ export function LevelUpBanner({ progress: p, now = new Date(), onDismiss }: { pr
 /** The full rank ladder as a timeline: reached ranks lit, the current one called out, the rest ahead. */
 export function RankLadder({ progress: p }: { progress: Progress }) {
   return (
-    <Card style={{ paddingVertical: space.md }}>
+    <View>
       {p.rankLadder.map((r, i) => {
         const reached = p.level >= r.minLevel;
         const current = p.rank === r.name;
@@ -124,7 +124,7 @@ export function RankLadder({ progress: p }: { progress: Progress }) {
                 <AppText variant="bodyStrong" color={reached ? colors.text : colors.textFaint}>
                   {r.name}
                 </AppText>
-                <AppText variant="caption" color={colors.textFaint}>
+                <AppText variant="caption" color={current ? colors.primary : colors.textFaint}>
                   Level {r.minLevel}
                 </AppText>
               </View>
@@ -133,7 +133,7 @@ export function RankLadder({ progress: p }: { progress: Progress }) {
           </View>
         );
       })}
-    </Card>
+    </View>
   );
 }
 
@@ -159,9 +159,14 @@ export function ConsistencyCard({ progress: p }: { progress: Progress }) {
                 : `Train within ${days} days to keep Level ${p.level}`}
         </AppText>
       </Row>
-      <AppText variant="caption" color={colors.textMuted}>
-        {`Your plan: ${c.trainingDaysPerWeek} ${c.trainingDaysPerWeek === 1 ? 'day' : 'days'} a week. Rest days in your plan never cost anything; a missed training day costs ${c.decayPerMissedDay} XP. After more than ${c.resetAfterDays} days without training, your level starts again from 1 — your workouts, records and history always stay.`}
-      </AppText>
+      <View style={{ gap: space.xs }}>
+        <AppText variant="label" color={colors.text}>
+          {`Your plan: ${c.trainingDaysPerWeek} ${c.trainingDaysPerWeek === 1 ? 'day' : 'days'} a week. Rest days in your plan never cost anything; a missed training day costs ${c.decayPerMissedDay} XP.`}
+        </AppText>
+        <AppText variant="caption" color={colors.textMuted}>
+          {`After more than ${c.resetAfterDays} days without training, your level starts again from 1 — your workouts, records and history always stay.`}
+        </AppText>
+      </View>
       {c.missedThisWeek > 0 ? (
         <AppText variant="caption" color={colors.warning}>
           {c.missedThisWeek} missed {c.missedThisWeek === 1 ? 'day' : 'days'} this week.
@@ -188,36 +193,31 @@ export function ResetNotice({ progress: p, today }: { progress: Progress; today:
 export function XpHistory({ events }: { events: XpLedgerEntry[] }) {
   if (events.length === 0) {
     return (
-      <Card>
-        <AppText variant="caption" color={colors.textMuted}>
-          Your XP history appears here — every workout, quest and nutrition day, and anything that changed it.
-        </AppText>
-      </Card>
+      <AppText variant="caption" color={colors.textMuted}>
+        Your XP history appears here — every workout, quest and nutrition day, and anything that changed it.
+      </AppText>
     );
   }
   return (
-    <Card style={{ paddingVertical: space.xs }}>
-      {events.map((e, i) => {
+    <ExerciseList>
+      {events.map((e) => {
         const positive = e.xp > 0;
         const neutral = e.xp === 0;
         return (
-          <View key={e.id}>
-            {i > 0 ? <Divider /> : null}
-            <View style={[styles.row, { minHeight: 52, paddingVertical: space.sm }]} accessible accessibilityLabel={`${e.label}, ${e.xp >= 0 ? 'plus' : 'minus'} ${Math.abs(e.xp)} XP${e.localDate ? `, ${e.localDate}` : ''}`}>
-              <View style={{ flex: 1 }}>
-                <AppText variant="body">{e.label}</AppText>
-                <AppText variant="caption" color={colors.textFaint}>
-                  {e.localDate ? new Date(`${e.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : new Date(e.at).toLocaleDateString()}
-                </AppText>
-              </View>
-              <AppText variant="bodyStrong" color={neutral ? colors.textFaint : positive ? colors.primary : colors.warning} style={{ fontVariant: ['tabular-nums'] }}>
-                {neutral ? '—' : `${positive ? '+' : '−'}${Math.abs(e.xp)} XP`}
+          <View key={e.id} style={[styles.row, { minHeight: 52, paddingVertical: space.sm }]} accessible accessibilityLabel={`${e.label}, ${e.xp >= 0 ? 'plus' : 'minus'} ${Math.abs(e.xp)} XP${e.localDate ? `, ${e.localDate}` : ''}`}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="body">{e.label}</AppText>
+              <AppText variant="caption" color={colors.textFaint}>
+                {e.localDate ? new Date(`${e.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : new Date(e.at).toLocaleDateString()}
               </AppText>
             </View>
+            <AppText variant="bodyStrong" color={neutral ? colors.textFaint : positive ? colors.primary : colors.warning} style={{ fontVariant: ['tabular-nums'] }}>
+              {neutral ? '—' : `${positive ? '+' : '−'}${Math.abs(e.xp)} XP`}
+            </AppText>
           </View>
         );
       })}
-    </Card>
+    </ExerciseList>
   );
 }
 
@@ -225,11 +225,11 @@ const styles = StyleSheet.create({
   step: { flexDirection: 'row', alignItems: 'stretch', gap: space.md },
   rail: { width: 14, alignItems: 'center' },
   railLine: { flex: 1, width: 2 },
-  node: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: colors.borderStrong, backgroundColor: colors.card },
+  node: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: colors.borderStrong, backgroundColor: colors.bg },
   nodeReached: { borderColor: colors.primary, backgroundColor: colors.primary },
   nodeCurrent: { width: 14, height: 14, borderRadius: 7, borderColor: colors.primary, backgroundColor: colors.bg, borderWidth: 4 },
   stepCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm, paddingHorizontal: space.sm, marginVertical: 3, borderRadius: radius.md },
-  stepCardCurrent: { backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primary },
+  stepCardCurrent: { backgroundColor: colors.primarySoft },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   levelUp: { borderWidth: 1, borderColor: colors.accentSoft, borderRadius: radius.xl },
 });

@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Children, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Animated, Easing, ImageBackground, Platform, RefreshControl, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, Easing, ImageBackground, Platform, Pressable, RefreshControl, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-context';
 import { useReducedMotion } from '@/lib/a11y';
 import { colors, gradients, MAX_CONTENT_WIDTH, radius, scheme, shadow, space } from '@/theme/tokens';
@@ -239,6 +239,42 @@ export function SectionHeader({ title, action }: { title: string; action?: React
   );
 }
 
+/**
+ * A quiet text action that sits in a section header ("See all"). The visible target is compact; the
+ * hit slop lifts the touch target to at least 48 points.
+ */
+export function SectionAction({
+  label,
+  onPress,
+  role = 'button',
+  accessibilityLabel,
+  tone = 'primary',
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  role?: 'button' | 'link';
+  accessibilityLabel?: string;
+  tone?: 'primary' | 'muted';
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole={role}
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled: !!disabled }}
+      aria-disabled={!!disabled}
+      disabled={disabled}
+      onPress={onPress}
+      hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+      style={({ pressed }) => ({ minHeight: 32, justifyContent: 'center', opacity: disabled ? 0.5 : pressed ? 0.7 : 1 })}>
+      <AppText variant="label" color={tone === 'muted' ? colors.textMuted : colors.primary}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
 export function Row({ children, style, gap = space.md }: { children: ReactNode; style?: StyleProp<ViewStyle>; gap?: number }) {
   return <View style={[{ flexDirection: 'row', alignItems: 'center', gap }, style]}>{children}</View>;
 }
@@ -261,5 +297,5 @@ const styles = StyleSheet.create({
   hero: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...shadow.lifted },
   heroBody: { justifyContent: 'flex-end', padding: space.xl, gap: space.md },
   sectionIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.md, marginBottom: -space.xs },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.md },
 });

@@ -21,13 +21,20 @@ export interface StatItem {
   tint?: string;
 }
 
-/** Headline numbers side by side in one bordered strip — Duration | Volume | Sets. */
-export function StatStrip({ items, style }: { items: StatItem[]; style?: StyleProp<ViewStyle> }) {
+/**
+ * Headline numbers side by side — Duration | Volume | Sets. `boxed` (default) is one bordered
+ * strip; `flat` sits straight on the page, cells split by a hairline.
+ */
+export function StatStrip({ items, style, variant = 'boxed' }: { items: StatItem[]; style?: StyleProp<ViewStyle>; variant?: 'boxed' | 'flat' }) {
+  const flat = variant === 'flat';
   return (
-    <View style={[styles.strip, style]}>
+    <View style={[flat ? styles.stripFlat : styles.strip, style]}>
       {items.map((s, i) => (
-        <View key={s.label} style={[styles.stripCell, i > 0 && styles.stripDivider]} accessible accessibilityLabel={`${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ''}`}>
-          <AppText variant="label" color={colors.textMuted} numberOfLines={1} style={{ fontSize: 12 }}>
+        <View
+          key={s.label}
+          style={[styles.stripCell, i > 0 && (flat ? styles.stripDividerFlat : styles.stripDivider), flat && i === 0 && styles.stripFirstFlat]}
+          accessible accessibilityLabel={`${s.label}: ${s.value}${s.unit ? ` ${s.unit}` : ''}`}>
+          <AppText variant="label" color={colors.textMuted} numberOfLines={2} style={{ fontSize: 12 }}>
             {s.label}
           </AppText>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
@@ -143,8 +150,12 @@ export function WeekDays({ trained, todayIndex }: { trained: boolean[]; todayInd
 
 const styles = StyleSheet.create({
   strip: { flexDirection: 'row', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.wash, paddingVertical: space.sm },
-  stripCell: { flex: 1, paddingHorizontal: space.md, gap: 2 },
+  // Cells stretch to the tallest one; space-between keeps the numbers level when a label wraps.
+  stripCell: { flex: 1, paddingHorizontal: space.md, gap: 2, justifyContent: 'space-between' },
   stripDivider: { borderLeftWidth: 1, borderLeftColor: colors.border },
+  stripFlat: { flexDirection: 'row' },
+  stripDividerFlat: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.hairline },
+  stripFirstFlat: { paddingLeft: 0 },
   tabs: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 4 },
   tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: space.sm, borderRadius: radius.md, minHeight: 56, justifyContent: 'center' },
   tabActive: { backgroundColor: colors.primarySoft },
