@@ -80,3 +80,11 @@ export function sessionTotals(s: Pick<WorkoutSession, 'exercises'>) {
     volumeKg: Math.round(sets.reduce((a, x) => a + x.reps * x.loadKg, 0)),
   };
 }
+
+/** Rest as people say it: "45 s", "1 min 30 s", "2 min". */
+export function formatRest(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  const m = Math.floor(seconds / 60);
+  const r = seconds % 60;
+  return r ? `${m} min ${r} s` : `${m} min`;
+}

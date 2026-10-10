@@ -7,6 +7,7 @@ import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-cont
 import { useReducedMotion } from '@/lib/a11y';
 import { colors, gradients, MAX_CONTENT_WIDTH, radius, scheme, shadow, space } from '@/theme/tokens';
 import { SECTION_ICONS } from './sectionIcons';
+import { InTabsContext } from './tabBar';
 import { AppText } from './text';
 
 /** Scroll offsets: where the big title starts to fade and the compact glass bar takes over. */
@@ -36,7 +37,10 @@ export function Screen({
   onRefresh?: () => void;
 }) {
   // Read directly so a screen rendered outside a provider (tests, previews) still works.
-  const topInset = useContext(SafeAreaInsetsContext)?.top ?? 0;
+  const insets = useContext(SafeAreaInsetsContext);
+  const topInset = insets?.top ?? 0;
+  // Inside the tabs the docked tab bar already sits below the screen; elsewhere, clear the system bar.
+  const bottomInset = useContext(InTabsContext) ? 0 : (insets?.bottom ?? 0);
   const [scrollY] = useState(() => new Animated.Value(0));
   const titleFade = scrollY.interpolate({ inputRange: [FADE_START, FADE_END], outputRange: [1, 0], extrapolate: 'clamp' });
   const barIn = scrollY.interpolate({ inputRange: [FADE_START + 20, FADE_END], outputRange: [0, 1], extrapolate: 'clamp' });
@@ -48,7 +52,7 @@ export function Screen({
         <LinearGradient colors={gradients.ambient} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
       </Animated.View>
       <Animated.ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: space.xxl + space.lg + bottomInset }]}
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: Platform.OS !== 'web' })}
@@ -248,13 +252,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   ambient: { position: 'absolute', top: 0, left: 0, right: 0, height: 460 },
   compactBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, alignItems: 'center', justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
-  scroll: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: 140, gap: space.lg, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
+  scroll: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.lg, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'flex-end', paddingTop: space.sm, paddingBottom: space.sm },
-  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: 1, borderColor: colors.border, borderTopColor: colors.edge, ...shadow.card },
+  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...shadow.card },
   raised: { backgroundColor: colors.cardRaised, borderColor: colors.border },
   plain: { backgroundColor: 'transparent', borderWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0 },
   gradientCard: { overflow: 'hidden', borderRadius: radius.xl },
-  hero: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, ...shadow.lifted },
+  hero: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...shadow.lifted },
   heroBody: { justifyContent: 'flex-end', padding: space.xl, gap: space.md },
   sectionIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.md, marginBottom: -space.xs },

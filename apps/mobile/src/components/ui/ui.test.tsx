@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { ApiError } from '@/lib/api';
-import { Button, ErrorState, Segmented, StateView } from './index';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
+import { Button, ErrorState, Screen, Segmented, StateView } from './index';
+import { InTabsContext, TAB_BAR, tabBarBottomPadding } from './tabBar';
 
 // @testing-library/react-native v14: render and events are async.
 describe('design system', () => {
@@ -52,5 +54,50 @@ describe('design system', () => {
     expect(screen.getByRole('radio', { name: 'Maintain' }).props.accessibilityState).toMatchObject({ checked: true });
     await fireEvent.press(screen.getByRole('radio', { name: 'Lose fat' }));
     expect(onChange).toHaveBeenCalledWith('lose');
+  });
+});
+
+describe('screen layout and the tab bar', () => {
+  // A Screen's scroll content: the element carrying the bottom padding.
+  const bottomPadding = () => {
+    const flat = (s: unknown): Record<string, unknown> => (Array.isArray(s) ? Object.assign({}, ...s.map(flat)) : ((s as Record<string, unknown>) ?? {}));
+    type Node = { type: string; props: Record<string, unknown>; children: (Node | string)[] | null };
+    const find = (n: Node | Node[] | string | null): Node | null => {
+      if (!n || typeof n === 'string') return null;
+      if (Array.isArray(n)) return n.map(find).find(Boolean) ?? null;
+      if (n.type === 'RCTScrollView') return { ...n, props: { style: n.props.contentContainerStyle } };
+      return (n.children ?? []).map((c) => find(c)).find(Boolean) ?? null;
+    };
+    return flat(find(screen.toJSON() as Node | Node[])!.props.style).paddingBottom as number;
+  };
+  const insets = { top: 24, bottom: 34, left: 0, right: 0 };
+
+  it('inside the tabs, content ends above the docked tab bar with breathing room (no system inset added twice)', async () => {
+    await render(
+      <SafeAreaInsetsContext.Provider value={insets}>
+        <InTabsContext.Provider value>
+          <Screen title="Eat">
+            <StateView kind="loading" />
+          </Screen>
+        </InTabsContext.Provider>
+      </SafeAreaInsetsContext.Provider>,
+    );
+    expect(bottomPadding()).toBe(48);
+  });
+
+  it('outside the tabs, content also clears the system navigation bar', async () => {
+    await render(
+      <SafeAreaInsetsContext.Provider value={insets}>
+        <Screen title="Settings">
+          <StateView kind="loading" />
+        </Screen>
+      </SafeAreaInsetsContext.Provider>,
+    );
+    expect(bottomPadding()).toBe(48 + 34);
+  });
+
+  it('the docked bar always keeps its labels clear of the system bar', () => {
+    expect(tabBarBottomPadding(0)).toBe(TAB_BAR.minBottomPadding);
+    expect(tabBarBottomPadding(48)).toBe(48);
   });
 });

@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
 import { Animated, Easing, Modal, StyleSheet, View } from 'react-native';
+import { Buddy } from '@/components/art/Buddy';
 import { AppText, Button, type IconName } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
 import { useCelebrations, useMarkCelebrationsSeen } from '@/lib/queries';
@@ -100,6 +101,10 @@ export function CelebrationCard({ celebration, position, onDone }: { celebration
         <View style={[styles.medal, { borderColor: copy.tint, backgroundColor: `${copy.tint}22` }]}>
           <Ionicons name={copy.icon} size={34} color={copy.tint} />
         </View>
+        {/* Pip, proud of you — the same companion that greets you on Home. */}
+        <View style={styles.pip} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+          <Buddy mood="proud" size={54} float={false} />
+        </View>
       </View>
       <View accessible accessibilityLiveRegion="polite" accessibilityLabel={copy.label} style={{ alignItems: 'center', gap: space.xs }}>
         <AppText variant="overline" color={copy.tint}>
@@ -175,4 +180,5 @@ const styles = StyleSheet.create({
   medalWrap: { width: 96, height: 96, alignItems: 'center', justifyContent: 'center' },
   ring: { position: 'absolute', width: 96, height: 96, borderRadius: 48, borderWidth: 2, pointerEvents: 'none' },
   medal: { width: 84, height: 84, borderRadius: 42, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  pip: { position: 'absolute', right: -34, bottom: -10 },
 });

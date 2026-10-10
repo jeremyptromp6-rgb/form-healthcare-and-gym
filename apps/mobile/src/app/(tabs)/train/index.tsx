@@ -2,9 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Buddy } from '@/components/art/Buddy';
 import { ExerciseArt, ExerciseThumb } from '@/components/art/ExerciseArt';
-import { AppText, Badge, BreathingGlow, IconTabs, StatStrip, WeekDays, type IconName, Button, Card, Divider, ErrorState, HeroMedia, InlineMessage, ListRow, Row, Screen, StateView } from '@/components/ui';
+import { AppText, Badge, IconTabs, StatStrip, WeekDays, Button, Card, Divider, ErrorState, HeroMedia, InlineMessage, ListRow, Row, Screen, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
 import { trainingWeek } from '@/lib/week';
 import { ExerciseLibrary } from '@/components/train/ExerciseLibrary';
@@ -12,7 +11,7 @@ import { useFeature } from '@/lib/features';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useExercises, useRefetchOnFocus, useStartSession, useTodayWorkout, useWorkouts } from '@/lib/queries';
 import type { PlannedExercise, Progression } from '@/lib/types';
-import { sessionTotals } from '@/lib/workoutSession';
+import { formatRest, sessionTotals } from '@/lib/workoutSession';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
@@ -100,9 +99,7 @@ export default function Train() {
           <HeroMedia image={imagery.train} minHeight={200}>
             {plan.exercises[0] ? (
               <View style={styles.spotlight} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-                <BreathingGlow size={200} color={colors.primary} style={{ position: 'absolute', bottom: -18 }} />
-                <ExerciseArt exerciseId={plan.exercises[0].exerciseId} decorative style={{ height: 150 }} />
-                <Buddy mood="cheer" size={62} style={{ position: 'absolute', right: -4, bottom: 0 }} />
+                <ExerciseArt exerciseId={plan.exercises[0].exerciseId} decorative style={{ height: 130 }} />
               </View>
             ) : null}
             <AppText variant="overline" color={colors.primary}>
@@ -122,14 +119,29 @@ export default function Train() {
               {plan.generator.id === 'adaptive' ? 'Adapted to your reps, form, range of motion and consistency.' : 'Built from your goal, equipment and recent sessions.'}
             </AppText>
             {plan.generator.id === 'adaptive' ? <Badge label="Adaptive · Pro" tone="primary" icon="trending-up" /> : null}
+            {!openSession && plan.exercises.length > 0 ? (
+              <Button
+                label={today.data?.completedToday ? 'Train again' : 'Start workout'}
+                iconRight={today.data?.completedToday ? undefined : 'arrow-forward'}
+                variant={today.data?.completedToday ? 'secondary' : 'primary'}
+                onPress={begin}
+                loading={start.isPending}
+              />
+            ) : null}
           </HeroMedia>
+          {startError ? <InlineMessage tone="danger">{startError}</InlineMessage> : null}
+          {today.data?.completedToday ? (
+            <InlineMessage tone="success" icon="checkmark-circle">
+              Done for today. Refuel and recover — you can still train again if you planned to.
+            </InlineMessage>
+          ) : null}
           {plan.notes.map((n) => (
             <InlineMessage key={n} tone="warning">
               {n}
             </InlineMessage>
           ))}
           {plan.exercises.length > 0 ? (
-            <Card style={{ paddingVertical: space.xs }}>
+            <Card style={{ paddingVertical: space.xs, paddingHorizontal: space.md }}>
               {plan.exercises.map((e, i) => (
                 <View key={e.exerciseId}>
                   {i > 0 ? <Divider /> : null}
@@ -141,26 +153,11 @@ export default function Train() {
           {plan.exercises.length === 0 ? (
             <InlineMessage tone="info">No exercises match your equipment yet. Update your training setup in Profile.</InlineMessage>
           ) : null}
-          {startError ? <InlineMessage tone="danger">{startError}</InlineMessage> : null}
-          {today.data?.completedToday ? (
-            <InlineMessage tone="success" icon="checkmark-circle">
-              Done for today. Refuel and recover — you can still train again if you planned to.
-            </InlineMessage>
-          ) : null}
-          {!openSession && plan.exercises.length > 0 ? (
-            <Button
-              label={today.data?.completedToday ? 'Train again' : 'Start workout'}
-              iconRight={today.data?.completedToday ? undefined : 'arrow-forward'}
-              variant={today.data?.completedToday ? 'secondary' : 'primary'}
-              onPress={begin}
-              loading={start.isPending}
-            />
-          ) : null}
         </View>
       ) : null}
 
       {tab === 'today' ? (
-      <Card style={{ gap: space.sm, backgroundColor: `${colors.water}12`, borderColor: `${colors.water}30` }}>
+      <Card variant="raised" style={{ gap: space.sm }}>
         <Row gap={space.sm}>
           <View style={[styles.camIcon, { backgroundColor: verifying ? colors.water : colors.track }]}>
             <Ionicons name="videocam" size={16} color={verifying ? colors.onPrimary : colors.textMuted} />
@@ -231,7 +228,7 @@ function PlanRow({ e, n }: { e: PlannedExercise; n: number }) {
       accessibilityRole="button"
       accessibilityLabel={`${e.name}: ${e.sets} sets of ${reps} reps${e.targetLoadKg ? ` at ${e.targetLoadKg} kilograms` : ''}`}
       onPress={() => router.push(`/train/exercise/${e.exerciseId}` as Href)}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, minHeight: 56, borderRadius: radius.sm, opacity: pressed ? 0.7 : 1 })}>
+      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md + 2, minHeight: 64, borderRadius: radius.sm, opacity: pressed ? 0.7 : 1 })}>
       <View>
         <ExerciseThumb exerciseId={e.exerciseId} />
         <View style={styles.stepNo}>
@@ -247,10 +244,16 @@ function PlanRow({ e, n }: { e: PlannedExercise; n: number }) {
         </AppText>
         {badge ? <Badge label={badge.label} tone={badge.tone} /> : null}
       </Row>
-      <Row gap={6} style={{ flexWrap: 'wrap' }}>
-        <InfoChip label={`${e.sets} × ${reps}`} tint={colors.primary} small />
-        {e.targetLoadKg ? <InfoChip label={`${e.targetLoadKg} kg`} tint={colors.accent} small /> : null}
-        <InfoChip icon="time-outline" label={`${e.restSeconds}s rest`} tint={colors.water} small />
+      <Row gap={space.md} style={{ flexWrap: 'wrap' }}>
+        <AppText variant="label" color={colors.text} style={{ fontVariant: ['tabular-nums'] }}>
+          {e.sets} {e.sets === 1 ? 'set' : 'sets'} · {reps} reps{e.targetLoadKg ? ` · ${e.targetLoadKg} kg` : ''}
+        </AppText>
+        <Row gap={4}>
+          <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+          <AppText variant="label" color={colors.textMuted}>
+            {formatRest(e.restSeconds)} rest
+          </AppText>
+        </Row>
       </Row>
       {e.note ? (
         <AppText variant="caption" color={colors.textFaint}>
@@ -287,22 +290,8 @@ function HistorySummary({ workouts }: { workouts: { localDate: string; durationM
   );
 }
 
-/** A small rounded fact: "~29 min", "3 × 10–20". */
-function InfoChip({ label, icon, tint, small }: { label: string; icon?: IconName; tint: string; small?: boolean }) {
-  return (
-    <View style={[styles.chip, small && styles.chipSmall, { backgroundColor: `${tint}1C` }]}>
-      {icon ? <Ionicons name={icon} size={small ? 12 : 14} color={tint} /> : null}
-      <AppText variant="label" color={colors.text} style={small ? { fontSize: 12, lineHeight: 16 } : undefined}>
-        {label}
-      </AppText>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  spotlight: { alignSelf: 'center', alignItems: 'center', justifyContent: 'flex-end', width: 240, height: 160, marginBottom: -space.sm },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: space.md, minHeight: 30, borderRadius: radius.pill },
-  chipSmall: { paddingHorizontal: space.sm, minHeight: 24, gap: 4 },
+  spotlight: { alignSelf: 'center', alignItems: 'center', justifyContent: 'flex-end', width: 220, height: 136, marginBottom: -space.sm },
   stepNo: { position: 'absolute', top: -6, left: -6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.card },
   camIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
 });

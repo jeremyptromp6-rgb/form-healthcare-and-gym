@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { defaultMealType } from '@form/domain';
-import { AppText, Badge, Button, Card, GradientCard, IconButton, InlineMessage, MacroTile, ProgressRing, Row, Stat, StateView, type IconName } from '@/components/ui';
+import { AppText, Badge, Button, Card, Divider, GradientCard, IconButton, InlineMessage, MacroTile, ProgressRing, Row, SectionHeader, Stat, StateView, type IconName } from '@/components/ui';
 import { MealArt } from '@/components/art/MealArt';
 import { dayHeadline, entryBadge, formatLiters, MEAL_LABEL, MEALS, portionLabel, proteinNudge } from '@/lib/eat';
 import type { FoodLog, MealType, NutritionDay } from '@/lib/types';
@@ -113,7 +113,7 @@ export function EatDayView(p: EatDayViewProps) {
           accessibilityLabel={`Protein: ${Math.round(day.totals.proteinG)} grams`}
         />
       )}
-      <Card style={{ gap: space.md, backgroundColor: `${colors.water}12`, borderColor: `${colors.water}30` }}>
+      <Card style={{ gap: space.md }}>
         <Row gap={space.lg}>
           <ProgressRing value={day.water.progress.fraction} size={72} stroke={7} color={colors.water}>
             <Ionicons name="water" size={24} color={colors.water} />
@@ -156,23 +156,12 @@ export function EatDayView(p: EatDayViewProps) {
         </Card>
       ) : null}
 
-      {MEALS.map((meal) => (
-        <MealSection key={meal} meal={meal} day={day} onAdd={() => p.onAdd(meal)} onOpenLog={p.onOpenLog} />
-      ))}
-
-      {p.planning ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.md, paddingVertical: 2 }}>
-          <PlanCard title="Meal plan" body="Meals that fit your targets and diet" meal="dinner" tint={colors.primary} icon="calendar" onPress={p.planning.onOpenPlan} />
-          <PlanCard title="Recipes" body="Simple recipes that suit you" meal="lunch" tint={colors.success} icon="book" onPress={p.planning.onOpenRecipes} />
-          <PlanCard title="Grocery list" body="Everything your plan needs, by aisle" meal="breakfast" tint={colors.accent} icon="cart" onPress={p.planning.onOpenGrocery} />
-        </ScrollView>
-      ) : null}
-
-      <Row gap={space.sm}>
-        <Button label="Weigh a meal" icon="scale-outline" variant="secondary" onPress={p.onWeighMeal} style={{ flex: 1 }} />
-        <Button label="Scan a meal" icon="camera-outline" variant="secondary" onPress={p.onScan} loading={p.scanChecking && !p.scanAvailable} style={{ flex: 1 }} />
+      <SectionHeader title="Log food" />
+      <Row gap={space.sm} style={{ alignItems: 'stretch' }}>
+        <Tool icon="camera-outline" label="Scan a meal" onPress={p.onScan} busy={p.scanChecking && !p.scanAvailable} />
+        {p.onScanBarcode ? <Tool icon="barcode-outline" label="Barcode" accessibilityLabel="Scan a barcode" onPress={p.onScanBarcode} /> : null}
+        <Tool icon="scale-outline" label="Weigh a meal" onPress={p.onWeighMeal} />
       </Row>
-      {p.onScanBarcode ? <Button label="Scan a barcode" icon="barcode-outline" variant="secondary" onPress={p.onScanBarcode} /> : null}
       {p.showScanInfo ? (
         <Card>
           {p.scanAvailable ? (
@@ -184,6 +173,25 @@ export function EatDayView(p: EatDayViewProps) {
           )}
         </Card>
       ) : null}
+
+      <SectionHeader title="Meals" />
+      <Card style={{ paddingVertical: space.xs }}>
+        {MEALS.map((meal, i) => (
+          <View key={meal}>
+            {i > 0 ? <Divider /> : null}
+            <MealSection meal={meal} day={day} onAdd={() => p.onAdd(meal)} onOpenLog={p.onOpenLog} />
+          </View>
+        ))}
+      </Card>
+
+      {p.planning ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.md, paddingVertical: 2 }}>
+          <PlanCard title="Meal plan" body="Meals that fit your targets and diet" meal="dinner" tint={colors.primary} icon="calendar" onPress={p.planning.onOpenPlan} />
+          <PlanCard title="Recipes" body="Simple recipes that suit you" meal="lunch" tint={colors.success} icon="book" onPress={p.planning.onOpenRecipes} />
+          <PlanCard title="Grocery list" body="Everything your plan needs, by aisle" meal="breakfast" tint={colors.accent} icon="cart" onPress={p.planning.onOpenGrocery} />
+        </ScrollView>
+      ) : null}
+
     </View>
   );
 }
@@ -218,9 +226,9 @@ function MealSection({ meal, day, onAdd, onOpenLog }: { meal: MealType; day: Nut
   const totals = day.byMeal[meal];
   const tint = MEAL_TINT[meal];
   return (
-    <Card style={{ gap: space.sm, paddingVertical: space.md, backgroundColor: `${tint}12`, borderColor: `${tint}2E` }}>
+    <View style={{ gap: space.sm, paddingVertical: space.md }}>
       <Row style={{ justifyContent: 'space-between' }} gap={space.md}>
-        <View style={[styles.mealArt, { backgroundColor: colors.card, borderColor: `${tint}40` }]}>
+        <View style={[styles.mealArt, { backgroundColor: `${tint}1A` }]}>
           <MealArt kind={meal} size={36} />
         </View>
         <View style={{ flex: 1 }}>
@@ -271,7 +279,27 @@ function MealSection({ meal, day, onAdd, onOpenLog }: { meal: MealType; day: Nut
           </View>
         );
       })}
-    </Card>
+    </View>
+  );
+}
+
+/** One logging tool: an icon over a short label, equal width with its neighbours. */
+function Tool({ icon, label, onPress, busy, accessibilityLabel }: { icon: IconName; label: string; onPress: () => void; busy?: boolean; accessibilityLabel?: string }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ busy: !!busy }}
+      aria-busy={!!busy}
+      onPress={onPress}
+      style={({ pressed }) => [styles.tool, { opacity: pressed ? 0.75 : busy ? 0.6 : 1 }]}>
+      <View style={styles.toolIcon}>
+        <Ionicons name={icon} size={20} color={colors.primary} />
+      </View>
+      <AppText variant="label" color={colors.text} numberOfLines={1}>
+        {label}
+      </AppText>
+    </Pressable>
   );
 }
 
@@ -280,7 +308,9 @@ const styles = StyleSheet.create({
   planArt: { height: 110, alignItems: 'center', justifyContent: 'center' },
   planIcon: { position: 'absolute', top: 10, left: 10, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   dayPill: { justifyContent: 'space-between', backgroundColor: colors.card, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 4 },
-  mealArt: { width: 58, height: 50, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  mealArt: { width: 52, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  tool: { flex: 1, alignItems: 'center', gap: space.sm, paddingVertical: space.md, paddingHorizontal: space.xs, minHeight: 88, borderRadius: radius.lg, backgroundColor: colors.card },
+  toolIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primarySoft },
   add: {
     width: 44,
     height: 44,

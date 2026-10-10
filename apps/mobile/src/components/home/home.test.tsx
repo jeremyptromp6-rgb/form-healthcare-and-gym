@@ -249,16 +249,27 @@ describe('HomeView', () => {
   });
 });
 
-describe('Home quick actions and header chips', () => {
-  it('routes each quick-action tile and shows the streak and level chips', async () => {
+describe('Home hierarchy and header chips', () => {
+  it('reaches every area from its own section, and the streak and level chips open progress', async () => {
     const { onNavigate } = await renderHome(vm());
-    await fireEvent.press(screen.getByRole('button', { name: 'Go to Eat to log food' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Log food' }));
     expect(onNavigate).toHaveBeenLastCalledWith('eat');
-    await fireEvent.press(screen.getByRole('button', { name: 'Go to Train' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Start workout' }));
     expect(onNavigate).toHaveBeenLastCalledWith('train');
-    await fireEvent.press(screen.getByRole('button', { name: 'Go to Progress' }));
+    await fireEvent.press(screen.getByRole('button', { name: '3 day streak. Open progress' }));
     expect(onNavigate).toHaveBeenLastCalledWith('progress');
-    expect(screen.getByRole('button', { name: '3 day streak. Open progress' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Level 2, Rookie. Open progress' })).toBeTruthy();
+    // No shortcut tiles duplicating the tab bar.
+    expect(screen.queryByRole('button', { name: 'Go to Train' })).toBeNull();
+  });
+
+  it('puts nutrition (with water) before goals, level and milestones', async () => {
+    await renderHome(vm());
+    const headers = screen.getAllByRole('header').map((h) => String(h.props.children));
+    const at = (t: string) => headers.findIndex((h) => h.includes(t));
+    expect(at("Today's fuel")).toBeGreaterThan(-1);
+    expect(at("Today's fuel")).toBeLessThan(at("Today's goals"));
+    expect(at("Today's goals")).toBeLessThan(at('Your level'));
+    expect(screen.getByLabelText(/^Water: /)).toBeTruthy();
   });
 });

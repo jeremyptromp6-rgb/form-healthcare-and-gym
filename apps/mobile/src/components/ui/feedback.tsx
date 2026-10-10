@@ -151,18 +151,21 @@ export function Stat({
 export function MacroTile({ label, value, target, color }: { label: string; value: number; target: number; color: string }) {
   return (
     <View style={styles.macro} accessible accessibilityLabel={`${label}: ${Math.round(value)} of ${target} grams`}>
-      <AppText variant="heading" style={{ fontVariant: ['tabular-nums'] }} numberOfLines={1}>
-        {Math.round(value)}g
-      </AppText>
-      <AppText variant="caption" color={colors.textFaint} numberOfLines={1}>
-        of {target}g
-      </AppText>
-      <Row gap={6} style={{ marginTop: 4 }}>
-        <ProgressRing value={value / target} size={22} stroke={4} color={color} />
+      <Row gap={6}>
+        <View style={[styles.macroDot, { backgroundColor: color }]} />
         <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
           {label}
         </AppText>
       </Row>
+      <Row gap={3} style={{ alignItems: 'baseline' }}>
+        <AppText variant="heading" style={{ fontVariant: ['tabular-nums'] }} numberOfLines={1}>
+          {Math.round(value)}
+        </AppText>
+        <AppText variant="caption" color={colors.textFaint} numberOfLines={1} style={{ flexShrink: 1 }}>
+          / {target} g
+        </AppText>
+      </Row>
+      <ProgressBar value={target > 0 ? value / target : 0} color={color} height={5} />
     </View>
   );
 }
@@ -254,7 +257,8 @@ export function InlineMessage({ tone, children, icon }: { tone: 'warning' | 'dan
 }
 
 const styles = StyleSheet.create({
-  macro: { flex: 1, gap: 4, backgroundColor: colors.card, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: space.md },
+  macro: { flex: 1, gap: 6, backgroundColor: colors.wash, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.md - 2 },
+  macroDot: { width: 8, height: 8, borderRadius: 4 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill, alignSelf: 'flex-start' },
   state: { alignItems: 'center', justifyContent: 'center', paddingVertical: space.xxl, gap: space.sm },
   compact: { paddingVertical: space.lg },

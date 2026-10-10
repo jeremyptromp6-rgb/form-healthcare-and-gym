@@ -1,11 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
-import { BlurView } from 'expo-blur';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CelebrationHost } from '@/components/recognition/Celebrations';
 import type { IconName } from '@/components/ui';
-import { breakpoints, colors, fonts, scheme, shadow } from '@/theme/tokens';
+import { InTabsContext, TAB_BAR, tabBarBottomPadding } from '@/components/ui/tabBar';
+import { breakpoints, colors, fonts } from '@/theme/tokens';
 
 const TABS: { name: string; title: string; icon: IconName; iconActive: IconName }[] = [
   { name: 'index', title: 'Home', icon: 'home-outline', iconActive: 'home' },
@@ -15,13 +15,18 @@ const TABS: { name: string; title: string; icon: IconName; iconActive: IconName 
   { name: 'profile', title: 'Profile', icon: 'person-circle-outline', iconActive: 'person-circle' },
 ];
 
-/** Bottom tabs on phones; a side rail on wide screens (tablets, desktop web). */
+/**
+ * Bottom tabs on phones; a side rail on wide screens (tablets, desktop web). The phone bar is
+ * docked and solid: screens end above it, so it never covers a button or the last list item, and
+ * it sits clear of the system navigation bar (gesture or buttons).
+ */
 export default function TabLayout() {
   const { width } = useWindowDimensions();
   const wide = width >= breakpoints.wide;
   const insets = useSafeAreaInsets();
+  const bottom = tabBarBottomPadding(insets.bottom);
   return (
-    <>
+    <InTabsContext.Provider value>
       <Tabs
         screenOptions={{
           headerShown: false,
@@ -32,35 +37,21 @@ export default function TabLayout() {
           tabBarInactiveTintColor: colors.textFaint,
           tabBarStyle: wide
             ? { backgroundColor: colors.card, borderRightColor: colors.border, borderRightWidth: 1, minWidth: 220, paddingTop: 16 }
-            : // Phones: a floating pill above the bottom edge, clear of the home indicator.
-              {
-                position: 'absolute',
-                left: 16,
-                right: 16,
-                bottom: Math.max(insets.bottom, 12),
-                height: 66,
-                paddingTop: 8,
-                paddingBottom: 8,
+            : {
+                backgroundColor: colors.surface,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: colors.border,
+                height: TAB_BAR.height + bottom,
+                paddingTop: 6,
+                paddingBottom: bottom,
                 paddingHorizontal: 6,
-                borderRadius: 33,
-                backgroundColor: 'transparent',
-                borderTopWidth: 0,
-                borderWidth: 1,
-                borderColor: colors.border,
-                ...shadow.lifted,
+                elevation: 0,
+                shadowOpacity: 0,
               },
-          tabBarItemStyle: wide ? undefined : { borderRadius: 24, marginHorizontal: 1, paddingHorizontal: 0, overflow: 'hidden' },
+          // The active tab: a soft coral pill behind its icon and label.
+          tabBarItemStyle: wide ? undefined : { borderRadius: 18, marginHorizontal: 2, marginBottom: 2, overflow: 'hidden' },
           tabBarActiveBackgroundColor: wide ? undefined : colors.primarySoft,
-          // Frosted glass: the page shows softly through the floating bar.
-          tabBarBackground: wide
-            ? undefined
-            : () => (
-                <>
-                  <BlurView intensity={50} tint={scheme === 'dark' ? 'dark' : 'light'} style={[StyleSheet.absoluteFill, { overflow: 'hidden', borderRadius: 33 }]} />
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.glass, borderRadius: 33 }]} />
-                </>
-              ),
-          tabBarLabelStyle: { fontSize: wide ? 15 : 10.5, fontFamily: fonts.semibold, letterSpacing: -0.1 },
+          tabBarLabelStyle: { fontSize: wide ? 15 : 11, fontFamily: fonts.semibold, letterSpacing: -0.1 },
           sceneStyle: { backgroundColor: colors.bg },
         }}>
         {TABS.map((t) => (
@@ -77,6 +68,6 @@ export default function TabLayout() {
       </Tabs>
       {/* Achievements, streak milestones and Body Quest stages, celebrated once, wherever the user is. */}
       <CelebrationHost />
-    </>
+    </InTabsContext.Provider>
   );
 }
