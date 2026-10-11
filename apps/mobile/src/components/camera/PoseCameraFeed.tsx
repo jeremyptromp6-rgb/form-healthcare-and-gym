@@ -1,18 +1,22 @@
-import { fromMediaPipePose, type PoseDetection } from '@form/domain';
+import { fromMediaPipePose, type LiveFeedback, type PoseDetection } from '@form/domain';
 import { useCameraPermissions } from 'expo-camera';
 import { memo, useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import { useReducedMotion } from '@/lib/a11y';
 import { config } from '@/lib/config';
 import { cameraErrorStatus } from '@/lib/pose/status';
 import { colors } from '@/theme/tokens';
 import type { PoseCameraFeedProps } from './feedTypes';
 import { poseEngineHtml } from './poseEngineHtml';
+import { SkeletonStateTracker, skeletonInjection } from './skeletonState';
 
 const READOUT_INTERVAL_MS = 200;
 const WATCHDOG_MS = 500;
 /** No frame this long while the camera is live and the model is ready → interrupted. */
 const STALL_MS = 2000;
+/** While the engine creates the lite model (no results come; the GPU create alone may take up to its 10 s timeout), the stall limit is this instead. */
+const MODEL_SWITCH_STALL_MS = 11000;
 /** A ready model that never gets a first frame this long after the camera went live → interrupted. */
 const FIRST_FRAME_TIMEOUT_MS = 6000;
 /** Permission granted but the camera never opened this long → "the camera didn't start". */
@@ -22,7 +26,7 @@ export const MODEL_LOAD_TIMEOUT_MS = 60_000;
 
 type EngineMessage =
   | { t: 'camera'; kind: 'requesting' | 'live' | 'ended' | 'error'; name?: string }
-  | { t: 'pose'; kind: 'loading' | 'ready' | 'failed'; backend?: 'GPU' | 'CPU'; offline?: boolean; stage?: 'runtime' | 'model' | 'starting'; pct?: number }
+  | { t: 'pose'; kind: 'loading' | 'ready' | 'failed' | 'model'; backend?: 'GPU' | 'CPU'; offline?: boolean; stage?: 'runtime' | 'model' | 'starting'; pct?: number; variant?: 'full' | 'lite' | 'switching' }
   | { t: 'frame'; ts: number; w: number; h: number; ms: number; b?: number; people: [number, number, number][][] };
 
 /**
@@ -39,9 +43,29 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     callbacks.current = { onCamera, onPose, onReadout };
   });
   const web = useRef<WebView>(null);
-  const live = useRef({ camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, lastReadout: 0, frames: 0, fpsSince: 0, fps: 0, color: '' });
+  const live = useRef({ camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, lastReadout: 0, frames: 0, fpsSince: 0, fps: 0, stallMs: STALL_MS, cue: null as LiveFeedback | null });
 
-  const html = useMemo(() => poseEngineHtml({ modelUrl: config.poseModelUrl, colors: { good: colors.primary, warn: colors.warning, other: colors.danger } }), []);
+  const html = useMemo(
+    () =>
+      poseEngineHtml({
+        modelUrl: config.poseModelUrl,
+        liteModelUrl: config.poseLiteModelUrl,
+        colors: { good: colors.primary, warn: colors.warning, other: colors.danger },
+      }),
+    [],
+  );
+
+  // What the skeleton shows (tone, tracked side, emphasised joints) is judged here, once per camera
+  // session, and handed to the engine page by script: the engine view's props never change.
+  const skel = useMemo(() => new SkeletonStateTracker(session.exerciseId, false), [session]);
+  const pushSkeleton = useCallback(() => {
+    web.current?.injectJavaScript(skeletonInjection(skel.current()));
+  }, [skel]);
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    skel.setReduceMotion(reduceMotion);
+    pushSkeleton();
+  }, [skel, reduceMotion, pushSkeleton]);
 
   // ---- permission (expo-camera owns the OS prompt; the engine's getUserMedia then succeeds) ----
   const known = permission !== null;
@@ -65,7 +89,8 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
   useEffect(() => {
     if (!running) return;
     const s = live.current;
-    Object.assign(s, { camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, color: '' });
+    Object.assign(s, { camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, stallMs: STALL_MS, cue: null });
+    skel.reset();
     session.interrupt();
     const startedAt = Date.now();
     let gaveUp = false;
@@ -86,7 +111,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       }
       if (!s.camera || !s.ready || s.interrupted) return;
       const neverStarted = s.lastFrameAt === 0 && now - s.cameraAt > FIRST_FRAME_TIMEOUT_MS;
-      const stalled = s.lastFrameAt > 0 && now - s.lastFrameAt > STALL_MS;
+      const stalled = s.lastFrameAt > 0 && now - s.lastFrameAt > s.stallMs;
       if (neverStarted || stalled) {
         s.interrupted = true;
         session.interrupt();
@@ -98,7 +123,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       clearInterval(timer);
       callbacks.current.onReadout(null);
     };
-  }, [running, retryToken, session]);
+  }, [running, retryToken, session, skel]);
 
   const onMessage = (event: WebViewMessageEvent) => {
     let m: EngineMessage;
@@ -114,6 +139,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
         s.camera = true;
         s.cameraAt = Date.now();
         cb.onCamera({ kind: 'live' });
+        pushSkeleton();
       } else if (m.kind === 'ended') {
         s.camera = false;
         cb.onReadout(null);
@@ -129,6 +155,12 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       else if (m.kind === 'ready') {
         s.ready = true;
         cb.onPose({ kind: 'ready', backend: m.backend ?? 'CPU' });
+        pushSkeleton();
+      } else if (m.kind === 'model') {
+        // Nothing in the app depends on which model runs. While the lite one is being created the engine
+        // may go quiet for a few seconds, so the stall limit is relaxed until the next frame or model message.
+        s.stallMs = m.variant === 'switching' ? MODEL_SWITCH_STALL_MS : STALL_MS;
+        if (__DEV__) console.log(`[pose] model: ${m.variant ?? 'unknown'}`);
       } else
         cb.onPose(
           m.offline
@@ -140,6 +172,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     // A frame: the same detection shape the web provider produces, into the shared session.
     const now = Date.now();
     s.lastFrameAt = now;
+    s.stallMs = STALL_MS;
     if (s.interrupted) {
       s.interrupted = false;
       cb.onCamera({ kind: 'live' });
@@ -150,12 +183,10 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       people: m.people.map((p) => ({ keypoints: fromMediaPipePose(p.map(([x, y, visibility]) => ({ x, y, visibility }))) })),
     };
     const frame = session.push({ ...detection, brightness: m.b });
-    // Skeleton colour follows tracking quality; the engine draws it at camera frame rate.
-    const color = frame.trackable ? colors.primary : colors.warning;
-    if (color !== s.color) {
-      s.color = color;
-      web.current?.injectJavaScript(`window.__skeletonColor=${JSON.stringify(color)};true;`);
-    }
+    // The skeleton's tone follows the coach's cue and tracking quality; the engine draws it at camera
+    // frame rate and only hears from us when that state actually changes.
+    const next = skel.update(frame, s.cue);
+    if (next) web.current?.injectJavaScript(skeletonInjection(next));
     s.frames++;
     if (now - s.fpsSince >= 1000) {
       s.fps = Math.round((s.frames * 1000) / (now - s.fpsSince));
@@ -164,6 +195,8 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     }
     if (now - s.lastReadout >= READOUT_INTERVAL_MS) {
       s.lastReadout = now;
+      const rep = session.repState();
+      s.cue = rep?.feedback ?? null;
       cb.onReadout({
         framing: frame.framing,
         trackable: frame.trackable,
@@ -171,7 +204,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
         people: frame.people.length,
         fps: s.fps,
         latencyMs: m.ms,
-        rep: session.repState(),
+        rep,
         traceFull: session.traceFull,
       });
     }

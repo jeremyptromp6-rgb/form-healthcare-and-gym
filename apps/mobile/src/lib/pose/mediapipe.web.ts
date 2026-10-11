@@ -1,6 +1,7 @@
 import { fail, fromMediaPipePose, type PoseDetection, type PoseProvider, type ProviderResult, type ProviderStatus } from '@form/domain';
 import type * as Vision from '@mediapipe/tasks-vision';
 import { config } from '@/lib/config';
+import { MODEL_BUDGET_MS, POSE_CONFIDENCE } from './poseModels';
 
 type VisionModule = typeof Vision;
 declare global {
@@ -35,11 +36,22 @@ function loadVision(): Promise<VisionModule> {
 }
 
 /**
- * On-device pose provider for the web build: MediaPipe Pose Landmarker (BlazePose lite) running
- * in WebAssembly + WebGL inside the browser. Frames go from the <video> element straight into the
+ * On-device pose provider for the web build: MediaPipe Pose Landmarker (BlazePose full, with a
+ * silent fall back to lite on a slow device) running in WebAssembly + WebGL inside the browser. Frames go from the <video> element straight into the
  * model; nothing is uploaded or stored. The wasm runtime is served from FORM's own origin
  * (public/mediapipe/wasm); the model file is fetched once from `config.poseModelUrl`.
  */
+
+/** The first this-many real estimates are timed to decide whether the device can afford the full model. */
+const SAMPLE_ESTIMATES = 15;
+/** The first few are skipped: they still pay for shader compilation and cache warm-up. */
+const SAMPLE_SKIP = 4;
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
 
 export type WebPoseProvider = PoseProvider<HTMLVideoElement> & Required<Pick<PoseProvider<HTMLVideoElement>, 'load' | 'close'>> & { readonly backend: 'GPU' | 'CPU' | null };
 
@@ -66,6 +78,10 @@ export function createPoseProvider(): WebPoseProvider {
   let backend: 'GPU' | 'CPU' | null = null;
   let lastTs = -1;
   let closed = false;
+  // Kept after load so a slow device can build the lite model the same way (same delegate).
+  let make: ((url: string) => Promise<Vision.PoseLandmarker>) | null = null;
+  const times: number[] = [];
+  let decided = false;
   let status: ProviderStatus = { state: 'degraded', provider: 'MediaPipe Pose (web)', reason: 'not loaded' };
 
   async function load(): Promise<ProviderResult<void>> {
@@ -74,15 +90,15 @@ export function createPoseProvider(): WebPoseProvider {
     try {
       const vision = await loadVision();
       const fileset = await vision.FilesetResolver.forVisionTasks('/mediapipe/wasm');
-      const create = (delegate: 'GPU' | 'CPU') =>
+      const create = (delegate: 'GPU' | 'CPU', url: string = config.poseModelUrl) =>
         vision.PoseLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: config.poseModelUrl, delegate },
+          baseOptions: { modelAssetPath: url, delegate },
           runningMode: 'VIDEO',
           // Two, so a second person in frame is detected (and blocks tracking) rather than ignored.
           numPoses: 2,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
+          minPoseDetectionConfidence: POSE_CONFIDENCE.detection,
+          minPosePresenceConfidence: POSE_CONFIDENCE.presence,
+          minTrackingConfidence: POSE_CONFIDENCE.tracking,
           outputSegmentationMasks: false,
         });
       let created: Vision.PoseLandmarker;
@@ -116,6 +132,7 @@ export function createPoseProvider(): WebPoseProvider {
       }
       landmarker = created;
       backend = kind;
+      make = (url) => create(kind, url);
       status = { state: 'ready', provider: 'MediaPipe Pose (web)' };
       return { ok: true, value: undefined };
     } catch (e) {
@@ -125,6 +142,57 @@ export function createPoseProvider(): WebPoseProvider {
         ? fail('network', 'Camera coaching needs an internet connection the first time it loads.')
         : fail('unavailable', "Camera coaching couldn't load.");
     }
+  }
+
+  /**
+   * A device that can't run the full model in budget quietly moves to lite. The full landmarker keeps
+   * serving until lite is built and warmed up, then the two swap and the old one is closed. Any failure
+   * leaves the full model in place, with nothing said about it.
+   */
+  async function switchToLite(url: string) {
+    const build = make;
+    if (!build) return;
+    const restoreConsole = muteMediaPipeInitNotice();
+    let lite: Vision.PoseLandmarker | null = null;
+    try {
+      lite = await build(url);
+      try {
+        const warm = document.createElement('canvas');
+        warm.width = 64;
+        warm.height = 64;
+        lite.detectForVideo(warm, ++lastTs); // a timestamp from the shared, strictly increasing sequence
+      } catch {
+        // The first real frame pays for it instead.
+      }
+      if (closed || !landmarker) {
+        lite.close();
+        return;
+      }
+      const old = landmarker;
+      landmarker = lite;
+      lite = null;
+      try {
+        old.close();
+      } catch {
+        // Already gone.
+      }
+    } catch {
+      try {
+        lite?.close();
+      } catch {
+        // Nothing to release.
+      }
+    } finally {
+      restoreConsole();
+    }
+  }
+
+  /** After the first estimates: too slow for the full model → try lite, once. */
+  function considerLite() {
+    if (decided || times.length < SAMPLE_ESTIMATES) return;
+    decided = true;
+    const lite = config.poseLiteModelUrl;
+    if (lite && median(times.slice(SAMPLE_SKIP)) > MODEL_BUDGET_MS) void switchToLite(lite);
   }
 
   return {
@@ -147,7 +215,12 @@ export function createPoseProvider(): WebPoseProvider {
       const ts = timestampMs <= lastTs ? lastTs + 1 : timestampMs;
       lastTs = ts;
       try {
+        const began = performance.now();
         const result = landmarker.detectForVideo(video, ts);
+        if (!decided) {
+          times.push(performance.now() - began);
+          considerLite();
+        }
         return {
           ok: true,
           value: {

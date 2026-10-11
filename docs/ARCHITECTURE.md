@@ -163,13 +163,19 @@ getUserMedia / expo-camera → PoseProvider (on device) → PoseDetection { time
 
 - **Shared rules.** The app imports `@form/domain` directly (Metro `watchFolders` + tsconfig/jest
   path mapping) so framing and analysis on the phone are the exact code the API runs.
-- **Providers.** Web: MediaPipe Pose Landmarker (BlazePose lite, `numPoses: 2`) in WebAssembly +
+- **Providers.** Web: MediaPipe Pose Landmarker (BlazePose, `numPoses: 2`) in WebAssembly +
   WebGL, GPU with CPU fallback. Its runtime is copied from `node_modules` into `public/mediapipe`
   by `scripts/copy-pose-assets.mjs` and loaded as a native ES module only when the camera starts
-  (Metro can't bundle its computed `import()`, and it stays out of the app bundle). The model file
-  (~5.5 MB) comes from `EXPO_PUBLIC_POSE_MODEL_URL` (defaults to Google's hosted file; self-host
-  for production). Native: `expo-camera` preview + permissions, but the provider reports
-  `unconfigured` — real native tracking needs a frame-processor module in a development build.
+  (Metro can't bundle its computed `import()`, and it stays out of the app bundle). The FULL model
+  file (~9 MB, steadier joints) comes from `EXPO_PUBLIC_POSE_MODEL_URL` (defaults to Google's
+  hosted file; self-host for production). If its median inference time is over 32 ms the engine
+  quietly swaps to the lite model (~5.5 MB, `EXPO_PUBLIC_POSE_LITE_MODEL_URL`): the lite file is
+  fetched silently while tracking carries on, then swapped in between frames; if that fails the
+  full model stays, with no message to the user. Confidence: detection 0.5, presence 0.4,
+  tracking 0.4 (`lib/pose/poseModels.ts`). Native: `expo-camera` preview + permissions, but the
+  provider reports `unconfigured` — real native tracking needs a frame-processor module in a
+  development build. The phone engine (`PoseCameraFeed`, a WebView) runs the same model choice in
+  its worker, then the GPU-versus-CPU check again on whichever model is running.
 - **Framing.** `assessFraming` works only from reported landmarks: no person, left frame, multiple
   people (a second person with ≥ 8 visible landmarks), low light (mean frame luminance), too far
   (body extent), too close / partial body (required landmarks predicted outside the frame, with
@@ -179,7 +185,8 @@ getUserMedia / expo-camera → PoseProvider (on device) → PoseDetection { time
 - **Angles** are measured in pixel space (`toPixelSpace`) — normalized coordinates on a 16:9
   frame distort every angle.
 - **Privacy & performance.** Frames are never stored or sent; the only copy is a 32×24 brightness
-  sample. 640×480 ≤ 30 fps capture; inference skips alternate frames when slow; the skeleton is
+  sample. 640×480 ≤ 30 fps capture; inference skips alternate frames when slow, and a model too slow
+  for the device drops from full to lite on its own (never pausing tracking); the skeleton is
   drawn on a canvas outside React; React gets a ~5 Hz readout. The camera stream stops on pause,
   end and unmount; a watchdog on its own timer reports hidden pages, stalled streams and streams
   that never deliver a frame as "interrupted" and resets movement state. The camera opens only

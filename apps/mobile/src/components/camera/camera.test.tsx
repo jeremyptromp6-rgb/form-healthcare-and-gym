@@ -5,7 +5,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { useCameraPermissions } from 'expo-camera';
 import { useState } from 'react';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
+import { config } from '@/lib/config';
 import { createPoseProvider, NATIVE_POSE_UNAVAILABLE } from '@/lib/pose/mediapipe';
 import { cameraErrorStatus, cameraScreenModel, loadingMessage, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
 import { livePoseSupport } from '@/lib/pose/support';
@@ -13,6 +14,9 @@ import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
 import { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
 import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
+import { skeletonPalette } from './skeletonState';
+import { hudToneColor } from './skeletonTone';
+import { colors, palettes } from '@/theme/tokens';
 
 jest.mock('expo-camera', () => {
   const { Text: MockText } = jest.requireActual('react-native');
@@ -431,5 +435,248 @@ describe('native camera feed', () => {
     const pkg = JSON.parse(readFileSync(join(__dirname, '../../../node_modules/@mediapipe/tasks-vision/package.json'), 'utf8')) as { version: string };
     expect(MEDIAPIPE_VERSION).toBe(pkg.version);
     expect(skeletonIndexEdges().every(([a, b]) => a >= 0 && a < 33 && b >= 0 && b < 33)).toBe(true);
+  });
+});
+
+// ---- Round 4: the skeleton state is judged here and injected into the engine page ----
+let mockReduceMotion = true;
+jest.mock('@/lib/a11y', () => ({ useReducedMotion: () => mockReduceMotion }));
+
+describe('skeleton state wiring', () => {
+  const mocked = useCameraPermissions as jest.Mock;
+  type Cue = 'good' | 'fix' | 'warn' | null;
+  /** A session whose frames and coaching cue the test controls (the real one is covered above). */
+  function fakeSession() {
+    const f = { trackable: true, side: 'left' as 'left' | 'right' | null, cue: null as Cue };
+    const session = {
+      exerciseId: 'bodyweight_squat',
+      traceFull: false,
+      interrupt: jest.fn(),
+      push: jest.fn(() => ({ trackable: f.trackable, framing: { side: f.side }, angle: null, people: [{}] })),
+      repState: () => (f.cue ? { feedback: { tone: f.cue, headline: 'CORRECT FORM', message: 'x', atMs: 0 } } : null),
+    } as unknown as LivePoseSession;
+    return { f, session };
+  }
+  const noop = () => ({ onCamera: jest.fn(), onPose: jest.fn(), onReadout: jest.fn() });
+  let clock = 1_000_000;
+  const frameAt = async () => {
+    clock += 250; // each frame is a readout frame, so the coaching cue is refreshed every time
+    await engine({ t: 'frame', ts: clock, w: 640, h: 480, ms: 20, b: 120, people: [standing()] });
+  };
+  const frames = async (n: number) => {
+    for (let i = 0; i < n; i++) await frameAt();
+  };
+  const toneOf = (script: string) => (JSON.parse(script.match(/window\.__formSkeleton=(\{.*?\});window\.formSkeleton/)![1]!) as { tone: string; side: string | null }).tone;
+
+  beforeEach(() => {
+    mockReduceMotion = true;
+    mockWeb.inject.mockClear();
+    jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('tone changes, a side change and a reduce-motion toggle never re-render the engine view', async () => {
+    const { f, session } = fakeSession();
+    function Screen() {
+      const [, setTick] = useState(0);
+      const bump = () => setTick((n) => n + 1);
+      return <PoseCameraFeed active session={session} retryToken={0} onCamera={bump} onPose={bump} onReadout={bump} />;
+    }
+    const { rerender } = await render(<Screen />);
+    mockWeb.renders = 0;
+    const firstSource = mockWeb.props!.source;
+    const firstHtml = firstSource!.html;
+    await engine({ t: 'camera', kind: 'live' });
+    await engine({ t: 'pose', kind: 'ready', backend: 'GPU' });
+    await frames(3);
+    f.cue = 'fix';
+    await frames(3);
+    f.trackable = false;
+    await frames(5);
+    f.trackable = true;
+    f.cue = 'good';
+    await frames(3);
+    f.side = 'right';
+    await frames(6);
+    mockReduceMotion = false;
+    await rerender(<Screen />);
+    await frames(2);
+    mockReduceMotion = true;
+    await rerender(<Screen />);
+    expect(mockWeb.inject.mock.calls.length).toBeGreaterThan(4); // the state really did change and was sent
+    expect(mockWeb.renders).toBe(0);
+    expect(mockWeb.props!.source).toBe(firstSource);
+    expect(mockWeb.props!.source!.html).toBe(firstHtml);
+  });
+
+  it('injects only when the state changes, never on every frame, and always keeps the legacy colour line', async () => {
+    const { f, session } = fakeSession();
+    await render(<PoseCameraFeed active session={session} retryToken={0} {...noop()} />);
+    await engine({ t: 'camera', kind: 'live' });
+    await frames(8); // settles: the side is confirmed after five frames
+    mockWeb.inject.mockClear();
+    await frames(20);
+    expect(mockWeb.inject).not.toHaveBeenCalled();
+    f.cue = 'fix';
+    await frames(3);
+    expect(mockWeb.inject).toHaveBeenCalledTimes(1);
+    expect(toneOf(mockWeb.inject.mock.calls[0]![0] as string)).toBe('fix');
+    f.trackable = false;
+    await frames(10);
+    expect(mockWeb.inject).toHaveBeenCalledTimes(2);
+    expect(toneOf(mockWeb.inject.mock.calls[1]![0] as string)).toBe('untrackable');
+    for (const [script] of mockWeb.inject.mock.calls as [string][]) {
+      expect(script).toContain('window.__skeletonColor=');
+      expect(script).toContain('window.formSkeleton&&window.formSkeleton(window.__formSkeleton)');
+    }
+  });
+
+  it('pushes the current state when the camera goes live and when the pose model is ready', async () => {
+    const { session } = fakeSession();
+    await render(<PoseCameraFeed active session={session} retryToken={0} {...noop()} />);
+    mockWeb.inject.mockClear();
+    await engine({ t: 'camera', kind: 'live' });
+    expect(mockWeb.inject).toHaveBeenCalledTimes(1);
+    expect(toneOf(mockWeb.inject.mock.calls[0]![0] as string)).toBe('good');
+    await engine({ t: 'pose', kind: 'ready', backend: 'GPU' });
+    expect(mockWeb.inject).toHaveBeenCalledTimes(2);
+    expect(mockWeb.inject.mock.calls[1]![0]).toContain('window.__skeletonColor=');
+  });
+
+  it('a camera restart resets the tracker (nothing stale carries into the new session)', async () => {
+    const { f, session } = fakeSession();
+    const h = noop();
+    const { rerender } = await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+    await engine({ t: 'camera', kind: 'live' });
+    await frames(6); // the left side is confirmed
+    f.trackable = false;
+    await frames(6);
+    expect(toneOf(mockWeb.inject.mock.calls.at(-1)![0] as string)).toBe('untrackable');
+    await rerender(<PoseCameraFeed active session={session} retryToken={1} {...h} />);
+    mockWeb.inject.mockClear();
+    await engine({ t: 'camera', kind: 'live' });
+    const pushed = mockWeb.inject.mock.calls.at(-1)![0] as string;
+    expect(toneOf(pushed)).toBe('good');
+    expect(pushed).toContain('"side":null');
+  });
+
+  it('the engine page gets the lite model URL, and its model message is ignored quietly', async () => {
+    const { session } = fakeSession();
+    const h = noop();
+    await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+    expect(config.poseLiteModelUrl).toBeTruthy();
+    expect(mockWeb.props!.source!.html).toContain(`"liteUrl":${JSON.stringify(config.poseLiteModelUrl)}`);
+    const html = poseEngineHtml({ modelUrl: 'https://example.test/full.task', liteModelUrl: 'https://example.test/lite.task', colors: { good: '#0f0', warn: '#ff0', other: '#f00' } });
+    expect(html).toContain('"liteUrl":"https://example.test/lite.task"');
+    mockWeb.inject.mockClear();
+    await engine({ t: 'pose', kind: 'model', variant: 'lite' });
+    expect(h.onPose).not.toHaveBeenCalled();
+    expect(h.onCamera).not.toHaveBeenCalled();
+    expect(mockWeb.inject).not.toHaveBeenCalled();
+  });
+
+  it('D1: the feedback strip and the skeleton use the same colour for the same tone', async () => {
+    const strip = async (tone: 'ready' | 'adjust' | 'info') => {
+      const base = cameraScreenModel(LIVE, READY, readout(null, 92), false);
+      await render(<LiveCameraView {...props({ model: { ...base, feedback: { tone, headline: 'CORRECT FORM', message: 'x' } } })} />);
+      const color = StyleSheet.flatten(screen.getByText('Correct form').props.style).color;
+      await screen.unmount();
+      return color;
+    };
+    // The same mapping, drawn from the same palette, whichever way it is read.
+    const skeleton = skeletonPalette();
+    expect(skeleton.good).toBe(hudToneColor(palettes.dark, 'ready'));
+    expect(skeleton.fix).toBe(hudToneColor(palettes.dark, 'adjust'));
+    expect(skeleton.warn).toBe(hudToneColor(palettes.dark, 'adjust'));
+    expect(skeleton.untrackable).toBe(hudToneColor(palettes.dark, 'info'));
+    // The strip draws that mapping in the app's own mood (the skeleton always uses Evening, over video).
+    const strips = { ready: await strip('ready'), adjust: await strip('adjust'), info: await strip('info') };
+    expect(strips).toEqual({ ready: hudToneColor(colors, 'ready'), adjust: hudToneColor(colors, 'adjust'), info: hudToneColor(colors, 'info') });
+    if (colors === palettes.dark) expect([strips.ready, strips.adjust, strips.info]).toEqual([skeleton.good, skeleton.fix, skeleton.untrackable]);
+  });
+
+  it('the HUD keeps its content, names and live region', async () => {
+    const r = readout(null, 172, repState([88]));
+    await render(<LiveCameraView {...props({ readout: r, model: cameraScreenModel(LIVE, READY, r, false) })} />);
+    expect(screen.getByText('Private · not recorded')).toBeTruthy();
+    expect(screen.getByText('Full body detected')).toBeTruthy();
+    expect(screen.getByLabelText('1 verified rep')).toBeTruthy();
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+});
+
+describe('stall watchdog and the model swap', () => {
+  const mocked = useCameraPermissions as jest.Mock;
+  const handlers = () => ({ onCamera: jest.fn(), onPose: jest.fn(), onReadout: jest.fn() });
+  const INTERRUPTED = { kind: 'interrupted' };
+  // A live camera with the model ready and one frame delivered, under fake timers.
+  async function live() {
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+    const h = handlers();
+    await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+    await engine({ t: 'camera', kind: 'live' });
+    await engine({ t: 'pose', kind: 'ready', backend: 'GPU' });
+    await engine({ t: 'frame', ts: 1000, w: 640, h: 480, ms: 20, b: 120, people: [standing()] });
+    return h;
+  }
+  const silence = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
+
+  it('3 s without a frame is a stall', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await live();
+      await silence(3000);
+      expect(h.onCamera).toHaveBeenCalledWith(INTERRUPTED);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a "switching" notice gives the model swap room: 3 s of silence after it is not a stall', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await live();
+      await engine({ t: 'pose', kind: 'model', variant: 'switching' });
+      await silence(3000);
+      expect(h.onCamera).not.toHaveBeenCalledWith(INTERRUPTED);
+      // It covers the 10 s GPU create timeout of the lite model ...
+      await silence(7000);
+      expect(h.onCamera).not.toHaveBeenCalledWith(INTERRUPTED);
+      // ... but is for a few seconds only, not for ever.
+      await silence(2000);
+      expect(h.onCamera).toHaveBeenCalledWith(INTERRUPTED);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('the next frame ends the grace: normal stall timing resumes', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await live();
+      await engine({ t: 'pose', kind: 'model', variant: 'switching' });
+      await silence(3000);
+      await engine({ t: 'pose', kind: 'model', variant: 'lite' });
+      await engine({ t: 'frame', ts: 4000, w: 640, h: 480, ms: 20, b: 120, people: [standing()] });
+      expect(h.onCamera).not.toHaveBeenCalledWith(INTERRUPTED);
+      await silence(3000);
+      expect(h.onCamera).toHaveBeenCalledWith(INTERRUPTED);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('the lite model message alone also ends the grace', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await live();
+      await engine({ t: 'pose', kind: 'model', variant: 'switching' });
+      await engine({ t: 'pose', kind: 'model', variant: 'lite' });
+      await silence(3000);
+      expect(h.onCamera).toHaveBeenCalledWith(INTERRUPTED);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

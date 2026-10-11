@@ -5,7 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button, IconButton, InlineMessage, ProgressBar, Row, StateView } from '@/components/ui';
 import type { CameraAction, CameraScreenModel, LiveReadout } from '@/lib/pose/status';
 import { formWord } from '@/lib/workoutSession';
-import { colors, MAX_CONTENT_WIDTH, radius, space } from '@/theme/tokens';
+import { colors, MAX_CONTENT_WIDTH, palettes, radius, space } from '@/theme/tokens';
+import { hudToneColor, type HudTone } from './skeletonTone';
 
 export interface LiveCameraViewProps {
   exerciseName: string;
@@ -32,11 +33,12 @@ export interface LiveCameraViewProps {
   onEnd: () => void;
 }
 
-const TONE = {
-  ready: { color: colors.primary, icon: 'checkmark-circle' },
-  adjust: { color: colors.warning, icon: 'alert-circle' },
-  info: { color: colors.textMuted, icon: 'information-circle' },
-} as const;
+/** The strip's icon per tone; its colour comes from skeletonTone, the same place the skeleton's does. */
+const TONE_ICON = { ready: 'checkmark-circle', adjust: 'alert-circle', info: 'information-circle' } as const satisfies Record<HudTone, string>;
+const toneOf = (t: HudTone) => ({ color: hudToneColor(colors, t), icon: TONE_ICON[t] });
+
+/** Chips and the rep counter sit on the live video, so they use the Evening palette whatever the app's mood. */
+const hud = palettes.dark;
 
 /**
  * Training with the camera should feel like training with a coach who can see you: the exercise,
@@ -47,7 +49,7 @@ const TONE = {
 export function LiveCameraView(p: LiveCameraViewProps) {
   const { model, readout } = p;
   const rep = !p.paused ? (readout?.rep ?? null) : null;
-  const tone = model.feedback ? TONE[model.feedback.tone] : null;
+  const tone = model.feedback ? toneOf(model.feedback.tone) : null;
   const tracking = !p.paused && !!readout?.trackable;
   const verified = rep?.verifiedReps ?? 0;
   const rom = rep ? (rep.liveRomPercent ?? rep.lastRep?.romPercent ?? null) : null;
@@ -76,24 +78,29 @@ export function LiveCameraView(p: LiveCameraViewProps) {
             <>
               <View style={styles.chips}>
                 <View style={styles.chip}>
-                  <Ionicons name="lock-closed" size={12} color={colors.text} />
-                  <AppText variant="label">Private · not recorded</AppText>
+                  <Ionicons name="lock-closed" size={12} color={hud.textMuted} />
+                  <AppText variant="label" color={hud.text}>
+                    Private · not recorded
+                  </AppText>
                 </View>
               </View>
               {rep ? (
                 <View style={styles.counter} accessible accessibilityLabel={`${verified} verified ${verified === 1 ? 'rep' : 'reps'}`}>
-                  <AppText variant="display" style={{ fontSize: 34, lineHeight: 38, fontVariant: ['tabular-nums'] }}>
+                  <AppText variant="valueLg" color={hud.text}>
                     {verified}
                   </AppText>
-                  <AppText variant="label" color={colors.textMuted}>
+                  <AppText variant="label" color={hud.textMuted}>
                     {verified === 1 ? 'rep' : 'reps'}
                   </AppText>
                 </View>
               ) : null}
               {tracking ? (
                 <View style={styles.detected}>
-                  <Ionicons name="body-outline" size={14} color={colors.primary} />
-                  <AppText variant="label">Full body detected</AppText>
+                  <View style={styles.detectedDot} />
+                  <Ionicons name="body-outline" size={14} color={hud.text} />
+                  <AppText variant="label" color={hud.text}>
+                    Full body detected
+                  </AppText>
                 </View>
               ) : null}
             </>
@@ -121,7 +128,8 @@ export function LiveCameraView(p: LiveCameraViewProps) {
         </View>
 
         {model.feedback && tone ? (
-          <View style={styles.feedback} accessible accessibilityLiveRegion="polite" accessibilityRole="alert">
+          <View style={[styles.feedback, { borderColor: `${tone.color}33` }]} accessible accessibilityLiveRegion="polite" accessibilityRole="alert">
+            <View style={[styles.accent, { backgroundColor: tone.color }]} />
             <Ionicons name={tone.icon} size={22} color={tone.color} />
             <View style={{ flex: 1 }}>
               {model.feedback.headline ? (
@@ -204,11 +212,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   column: { flex: 1, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center', padding: space.lg, gap: space.lg },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  feed: { flex: 1, minHeight: 260, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: '#000' },
+  feed: { flex: 1, minHeight: 260, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: hud.bg },
   chips: { pointerEvents: 'none', position: 'absolute', top: space.md, left: space.md, flexDirection: 'row' },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: 'rgba(0,0,0,0.55)' },
-  counter: { pointerEvents: 'none', position: 'absolute', top: space.md, right: space.md, minWidth: 72, alignItems: 'center', paddingVertical: space.sm, paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: 'rgba(0,0,0,0.6)' },
-  detected: { pointerEvents: 'none', position: 'absolute', bottom: space.md, left: space.md, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(0,0,0,0.6)' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: hud.hairline, backgroundColor: `${hud.bg}CC` },
+  counter: { pointerEvents: 'none', position: 'absolute', top: space.md, right: space.md, minWidth: 76, alignItems: 'center', paddingTop: space.xs, paddingBottom: space.sm, paddingHorizontal: space.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: hud.hairline, backgroundColor: `${hud.bg}D9` },
+  detected: { pointerEvents: 'none', position: 'absolute', bottom: space.md, left: space.md, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: hud.hairline, backgroundColor: `${hud.bg}CC` },
+  detectedDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: hudToneColor(hud, 'ready') },
   overlay: { ...StyleSheet.absoluteFill, backgroundColor: colors.surface, justifyContent: 'center', gap: space.sm },
-  feedback: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.lg, minHeight: 60, backgroundColor: colors.card },
+  feedback: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.md, paddingRight: space.md, paddingLeft: space.sm, borderRadius: radius.lg, borderWidth: 1, minHeight: 60, overflow: 'hidden', backgroundColor: colors.card },
+  accent: { width: 4, alignSelf: 'stretch', borderRadius: radius.pill },
 });

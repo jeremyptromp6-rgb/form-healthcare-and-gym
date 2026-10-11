@@ -1,10 +1,13 @@
-import { FRAMING_THRESHOLDS, SKELETON_EDGES, type LiveFrame } from '@form/domain';
-import { useEffect, useRef } from 'react';
+import type { LiveFeedback } from '@form/domain';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useReducedMotion } from '@/lib/a11y';
 import { createPoseProvider, type WebPoseProvider } from '@/lib/pose/mediapipe';
 import { cameraErrorStatus } from '@/lib/pose/status';
-import { colors } from '@/theme/tokens';
 import type { PoseCameraFeedProps } from './feedTypes';
+import { createSkeletonPage, landmarksFromPeople } from './skeletonPage';
+import { SkeletonStateTracker } from './skeletonState';
+import type { SkeletonEnv, SkeletonPage } from './skeletonTypes';
 
 const READOUT_INTERVAL_MS = 200;
 const BRIGHTNESS_INTERVAL_MS = 500;
@@ -16,9 +19,11 @@ const WATCHDOG_MS = 500;
 
 /**
  * Web camera + on-device pose. getUserMedia → <video> → MediaPipe (in-browser) → LivePoseSession
- * → skeleton drawn on a <canvas> over the video. Frames are never copied anywhere except a 32×24
- * brightness sample; nothing is recorded. The stream stops whenever `active` goes false
- * (pause, end, unmount); processing stops while the page is hidden and is reported as interrupted.
+ * → skeleton drawn on a <canvas> over the video by the same skeleton page the phone uses. The page
+ * runs its own animation-frame loop, decoupled from inference, so the skeleton moves smoothly
+ * between results. Frames are never copied anywhere except a 32×24 brightness sample; nothing is
+ * recorded. The stream stops whenever `active` goes false (pause, end, unmount); processing stops
+ * while the page is hidden and is reported as interrupted.
  */
 export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, onReadout }: PoseCameraFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -29,6 +34,16 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
   useEffect(() => {
     callbacks.current = { onCamera, onPose, onReadout };
   });
+
+  // What the skeleton shows (tone, tracked side, emphasised joints) is judged here, as on the phone;
+  // the page only draws. On the web the tracker drives the page directly, with no injection.
+  const skel = useMemo(() => new SkeletonStateTracker(session.exerciseId, false), [session]);
+  const pageRef = useRef<SkeletonPage | null>(null);
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    skel.setReduceMotion(reduceMotion);
+    pageRef.current?.setState(skel.current());
+  }, [skel, reduceMotion]);
 
   // The model lives as long as the screen (reloading it on every pause would waste seconds).
   useEffect(
@@ -49,14 +64,47 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     let stream: MediaStream | null = null;
     let raf = 0;
 
+    // ---- skeleton drawing: its own animation-frame loop, independent of inference ----------------
+    // Built defensively: if the page can't be created (say, a policy that forbids new Function) no
+    // skeleton is drawn, but tracking, rep counting and feedback carry on.
+    skel.reset();
+    let page: SkeletonPage | null = null;
+    try {
+      page = createSkeletonPage(skeletonEnv(canvas, video));
+      page.setState(skel.current());
+    } catch {
+      page = null;
+    }
+    pageRef.current = page;
+    // A failing call turns the skeleton off; it never breaks the camera loop.
+    const withPage = (fn: (p: SkeletonPage) => void) => {
+      if (!page) return;
+      try {
+        fn(page);
+      } catch {
+        page = null;
+        pageRef.current = null;
+      }
+    };
+    const showSkeleton = () =>
+      withPage((p) => {
+        p.setState(skel.current());
+        p.start();
+      });
+    const hideSkeleton = () => withPage((p) => p.stop());
+
     const provider = (providerRef.current ??= createPoseProvider());
-    if (provider.backend) cb.onPose({ kind: 'ready', backend: provider.backend });
-    else {
+    if (provider.backend) {
+      withPage((p) => p.setBackend(provider.backend ?? 'CPU'));
+      cb.onPose({ kind: 'ready', backend: provider.backend });
+    } else {
       cb.onPose({ kind: 'loading' });
       provider.load().then((r) => {
         if (cancelled) return;
-        if (r.ok) callbacks.current.onPose({ kind: 'ready', backend: provider.backend ?? 'CPU' });
-        else if (r.code === 'unconfigured') callbacks.current.onPose({ kind: 'unsupported', message: r.message });
+        if (r.ok) {
+          withPage((p) => p.setBackend(provider.backend ?? 'CPU'));
+          callbacks.current.onPose({ kind: 'ready', backend: provider.backend ?? 'CPU' });
+        } else if (r.code === 'unconfigured') callbacks.current.onPose({ kind: 'unsupported', message: r.message });
         else callbacks.current.onPose({ kind: 'failed', message: r.message, retryable: r.retryable });
       });
     }
@@ -78,15 +126,20 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
     let interrupted = false;
     let startedAt = Infinity;
     let ended = false;
+    // The coach's current cue, refreshed at the readout rate; the skeleton's tone follows it.
+    let cue: LiveFeedback | null = null;
 
     const setInterrupted = (value: boolean) => {
       if (interrupted === value) return;
       interrupted = value;
       if (value) {
-        clearCanvas(canvas);
+        hideSkeleton();
         callbacks.current.onReadout(null);
         callbacks.current.onCamera({ kind: 'interrupted' });
-      } else callbacks.current.onCamera({ kind: 'live' });
+      } else {
+        showSkeleton();
+        callbacks.current.onCamera({ kind: 'live' });
+      }
     };
 
     const tick = async () => {
@@ -108,7 +161,11 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
             const took = performance.now() - started;
             latency = latency === 0 ? took : latency * 0.8 + took * 0.2;
             const frame = session.push({ ...r.value, brightness });
-            drawSkeleton(canvas, r.value.frame, frame);
+            // The raw people went to the session unchanged; the page gets its own 33-landmark copy,
+            // stamped with when the camera frame was taken (this tick) and when its result arrived.
+            withPage((p) => p.push(landmarksFromPeople(r.value.people), now, performance.now(), r.value.frame.width, r.value.frame.height));
+            const next = skel.update(frame, cue);
+            if (next) withPage((p) => p.setState(next));
             setInterrupted(false);
             frames++;
             if (now - fpsSince >= 1000) {
@@ -118,6 +175,8 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
             }
             if (now - lastReadout >= READOUT_INTERVAL_MS) {
               lastReadout = now;
+              const rep = session.repState();
+              cue = rep?.feedback ?? null;
               callbacks.current.onReadout({
                 framing: frame.framing,
                 trackable: frame.trackable,
@@ -125,12 +184,12 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
                 people: frame.people.length,
                 fps,
                 latencyMs: Math.round(latency),
-                rep: session.repState(),
+                rep,
                 traceFull: session.traceFull,
               });
             }
           } else if (r.code !== 'invalid_input') {
-            clearCanvas(canvas);
+            hideSkeleton();
             callbacks.current.onPose({ kind: 'failed', message: r.message, retryable: r.retryable });
             return; // stop the loop; Retry restarts everything
           }
@@ -176,7 +235,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
         if (cancelled) return;
         ended = true;
         cancelAnimationFrame(raf);
-        clearCanvas(canvas);
+        hideSkeleton();
         callbacks.current.onReadout(null);
         callbacks.current.onCamera({ kind: 'unavailable', reason: 'ended' });
       });
@@ -188,6 +247,7 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       startedAt = performance.now();
       session.interrupt();
       callbacks.current.onCamera({ kind: 'live' });
+      showSkeleton();
       raf = requestAnimationFrame(tick);
     };
     start();
@@ -198,21 +258,22 @@ export function PoseCameraFeed({ active, session, retryToken, onCamera, onPose, 
       clearInterval(watchdog);
       stream?.getTracks().forEach((t) => t.stop());
       video.srcObject = null;
-      clearCanvas(canvas);
+      hideSkeleton();
+      if (pageRef.current === page) pageRef.current = null;
       callbacks.current.onReadout(null);
     };
-  }, [active, retryToken, session]);
+  }, [active, retryToken, session, skel]);
 
   return (
     <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
-      {/* Mirrored like a mirror; the canvas gets the same transform so the skeleton lines up. */}
-      <video ref={videoRef} muted playsInline autoPlay aria-label="Live camera preview" style={MEDIA_STYLE} />
-      <canvas ref={canvasRef} aria-hidden style={MEDIA_STYLE} />
+      {/* Only the video is mirrored (like a mirror); the skeleton page maps and mirrors the points itself. */}
+      <video ref={videoRef} muted playsInline autoPlay aria-label="Live camera preview" style={VIDEO_STYLE} />
+      <canvas ref={canvasRef} aria-hidden style={CANVAS_STYLE} />
     </View>
   );
 }
 
-const MEDIA_STYLE = {
+const VIDEO_STYLE = {
   position: 'absolute',
   inset: 0,
   width: '100%',
@@ -221,47 +282,32 @@ const MEDIA_STYLE = {
   transform: 'scaleX(-1)',
 } as const;
 
+// No transform and no object-fit: the page sizes the backing store to the view and does the cover
+// crop and the mirror itself.
+const CANVAS_STYLE = { position: 'absolute', inset: 0, width: '100%', height: '100%' } as const;
+
+/** The skeleton page's view of the DOM: view size, video size, the clock and a spare canvas. */
+function skeletonEnv(canvas: HTMLCanvasElement, video: HTMLVideoElement): SkeletonEnv {
+  return {
+    canvas,
+    size: () => ({ cw: canvas.clientWidth, ch: canvas.clientHeight, dpr: window.devicePixelRatio || 1 }),
+    video: () => ({ w: video.videoWidth, h: video.videoHeight }),
+    raf: (cb) => {
+      requestAnimationFrame(cb);
+    },
+    now: () => performance.now(),
+    createCanvas: (w, h) => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      return c;
+    },
+    mirror: true,
+  };
+}
+
 function meanLuma(rgba: Uint8ClampedArray): number {
   let sum = 0;
   for (let i = 0; i < rgba.length; i += 4) sum += 0.2126 * rgba[i]! + 0.7152 * rgba[i + 1]! + 0.0722 * rgba[i + 2]!;
   return sum / (rgba.length / 4);
-}
-
-function clearCanvas(canvas: HTMLCanvasElement) {
-  canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-/** Draws only what the model reported as visible — never interpolated or guessed joints. */
-function drawSkeleton(canvas: HTMLCanvasElement, frame: { width: number; height: number }, live: LiveFrame) {
-  if (canvas.width !== frame.width) canvas.width = frame.width;
-  if (canvas.height !== frame.height) canvas.height = frame.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // Subtle and functional: thin, slightly translucent lines — a coach's sketch, not a scanner.
-  const line = Math.max(2, frame.width / 240);
-  ctx.globalAlpha = 0.8;
-  live.people.forEach((person, i) => {
-    const color = i > 0 ? colors.danger : live.trackable ? colors.primary : colors.warning;
-    const pts = new Map(person.keypoints.filter((k) => k.confidence >= FRAMING_THRESHOLDS.visibleConfidence).map((k) => [k.name, k]));
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = line;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (const [a, b] of SKELETON_EDGES) {
-      const pa = pts.get(a);
-      const pb = pts.get(b);
-      if (!pa || !pb) continue;
-      ctx.moveTo(pa.x * frame.width, pa.y * frame.height);
-      ctx.lineTo(pb.x * frame.width, pb.y * frame.height);
-    }
-    ctx.stroke();
-    for (const k of pts.values()) {
-      ctx.beginPath();
-      ctx.arc(k.x * frame.width, k.y * frame.height, line * 1.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  });
-  ctx.globalAlpha = 1;
 }

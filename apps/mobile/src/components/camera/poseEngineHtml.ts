@@ -1,4 +1,8 @@
 import { FRAMING_THRESHOLDS, MEDIAPIPE_POSE_INDEX, SKELETON_EDGES } from '@form/domain';
+import { MODEL_BUDGET_MS, MODEL_BYTES, POSE_CONFIDENCE } from '../../lib/pose/poseModels';
+import { SKELETON_BUNDLE, skeletonConfig } from './skeletonPage';
+import { skeletonPalette } from './skeletonState';
+import type { SkeletonState } from './skeletonTypes';
 
 /** The MediaPipe build the phone engine loads — the same version the web app bundles. */
 export const MEDIAPIPE_VERSION = '1.0.1';
@@ -23,22 +27,32 @@ export function skeletonIndexEdges(): [number, number][] {
  * WebView — in a Web Worker normally, or in the page itself as a fallback — and the app's own
  * JavaScript engine (Hermes) can't turn a compiled function back into source.
  *
- * Built to start reliably on phones: MediaPipe's runtime (~12 MB) and the pose model (~6 MB) are
- * downloaded ONCE, with progress reported, and handed to MediaPipe from memory. Only one pose
- * model runs at a time (each instance is a full copy of the runtime — several at once is what
- * made phones stall). It starts on the GPU, giving up on it after GPU_START_TIMEOUT_MS; if the GPU
- * turns out slow on real frames, the CPU is tried alongside and the faster one kept. Tracking is
- * for one person (MediaPipe skips its costly person detector only when it tracks as many people
- * as asked for).
+ * Built to start reliably on phones: MediaPipe's runtime (~12 MB) and the pose model (the FULL
+ * model, ~9 MB) are downloaded ONCE, with progress reported, and handed to MediaPipe from memory.
+ * Only one pose model runs at a time (each instance is a full copy of the runtime — several at once
+ * is what made phones stall). It starts on the GPU, giving up on it after GPU_START_TIMEOUT_MS.
+ * If the full model's median inference is over the budget and a lite model is configured, the lite
+ * one is fetched quietly (no progress, never an error) and swapped in between frames, so tracking
+ * never pauses; if that fails, the full model carries on. Then, if the GPU turns out slow on real
+ * frames, the CPU is tried alongside and the faster one kept. Tracking is for one person (MediaPipe
+ * skips its costly person detector only when it tracks as many people as asked for).
  * Uses only its arguments and the global `Vision` from MediaPipe's script build.
- *   engineCore(send, { cdn, modelUrl, gpuTimeoutMs, slowFrameMs }) → handle({ type: 'init' } | { type: 'frame', bitmap, ts })
+ *   engineCore(send, { cdn, modelUrl, gpuTimeoutMs, slowFrameMs, liteUrl?, modelBytes?, liteBytes?, modelBudgetMs?,
+ *     confDetection?, confPresence?, confTracking? }) → handle({ type: 'init' } | { type: 'frame', bitmap, ts })
  *   send({ type: 'progress', stage: 'runtime' | 'model' | 'starting', pct } | { type: 'ready', backend }
+ *     | { type: 'model', variant: 'full' | 'lite' | 'switching' } (only when liteUrl is set; 'switching' = creating the lite model)
  *     | { type: 'backend', backend, ms } | { type: 'error', message } | { type: 'result', ts, people, ms } | { type: 'frameError', message })
  */
 export const ENGINE_CORE = `function engineCore(send, CFG) {
   var V = self.Vision;
   var track = null, trackDelegate = null, lastTs = 0;
-  var files = null, modelBuf = null;
+  var files = null, modelBuf = null, variant = 'full';
+  // Optional settings; without them the engine behaves as it always did (no lite fallback).
+  var LITE = CFG.liteUrl || null;
+  var MODEL_BYTES = CFG.modelBytes || 6e6, LITE_BYTES = CFG.liteBytes || 5.5e6, BUDGET = CFG.modelBudgetMs || 32;
+  var CONF_DETECT = CFG.confDetection == null ? 0.5 : CFG.confDetection;
+  var CONF_PRESENT = CFG.confPresence == null ? 0.4 : CFG.confPresence;
+  var CONF_TRACK = CFG.confTracking == null ? 0.4 : CFG.confTracking;
   function r4(n) { return Math.round(n * 10000) / 10000; }
   function pack(l) { return l.map(function (p) { return [r4(p.x), r4(p.y), r4(p.visibility == null ? 0 : p.visibility)]; }); }
   function median(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s.length ? s[s.length >> 1] : Infinity; }
@@ -49,23 +63,28 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
     });
   }
   // Downloads a file once, reporting progress; total is shared across the files so the bar moves smoothly.
+  // Quiet downloads (the lite fallback, fetched while tracking) report nothing at all.
   var progress = { done: 0, total: 0 };
-  async function download(url, expected, stage) {
-    var res = await fetch(url);
+  async function download(url, expected, stage, quiet) {
+    var res = await fetch(url, { cache: 'force-cache' });
     if (!res.ok) throw new Error(stage + ' ' + res.status);
     var size = Number(res.headers.get('content-length')) || expected;
-    progress.total += size - expected;
+    if (!quiet) progress.total += size - expected;
     if (!res.body || !res.body.getReader) {
       var whole = new Uint8Array(await res.arrayBuffer());
-      progress.done += whole.length;
-      send({ type: 'progress', stage: stage, pct: Math.min(99, Math.round((progress.done / progress.total) * 100)) });
+      if (!quiet) {
+        progress.done += whole.length;
+        send({ type: 'progress', stage: stage, pct: Math.min(99, Math.round((progress.done / progress.total) * 100)) });
+      }
       return whole;
     }
     var reader = res.body.getReader(), chunks = [], got = 0, lastPct = -1;
     for (;;) {
       var r = await reader.read();
       if (r.done) break;
-      chunks.push(r.value); got += r.value.length; progress.done += r.value.length;
+      chunks.push(r.value); got += r.value.length;
+      if (quiet) continue;
+      progress.done += r.value.length;
       var pct = Math.min(99, Math.round((progress.done / progress.total) * 100));
       if (pct !== lastPct) { lastPct = pct; send({ type: 'progress', stage: stage, pct: pct }); }
     }
@@ -73,44 +92,78 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
     chunks.forEach(function (c) { out.set(c, o); o += c.length; });
     return out;
   }
-  function make(delegate) {
+  function make(delegate, buf) {
     return V.PoseLandmarker.createFromOptions(files, {
-      baseOptions: { modelAssetBuffer: modelBuf.slice(), delegate: delegate },
+      baseOptions: { modelAssetBuffer: buf.slice(), delegate: delegate },
       runningMode: 'VIDEO', numPoses: 1,
-      minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+      minPoseDetectionConfidence: CONF_DETECT, minPosePresenceConfidence: CONF_PRESENT, minTrackingConfidence: CONF_TRACK,
       outputSegmentationMasks: false
     });
   }
   async function init() {
     send({ type: 'progress', stage: 'runtime', pct: 0 });
     files = await V.FilesetResolver.forVisionTasks(CFG.cdn + '/wasm');
-    // Rough sizes until the server says (runtime ~12 MB, model ~6 MB).
-    progress.total = 12e6 + 6e6;
+    // Rough sizes until the server says (runtime ~12 MB, then the model).
+    progress.total = 12e6 + MODEL_BYTES;
     var wasm = await download(files.wasmBinaryPath, 12e6, 'runtime');
     files.wasmBinaryPath = URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' }));
-    modelBuf = await download(CFG.modelUrl, 6e6, 'model');
+    modelBuf = await download(CFG.modelUrl, MODEL_BYTES, 'model');
     send({ type: 'progress', stage: 'starting', pct: 100 });
     try {
-      track = await withTimeout(make('GPU'), CFG.gpuTimeoutMs);
+      track = await withTimeout(make('GPU', modelBuf), CFG.gpuTimeoutMs);
       trackDelegate = 'GPU';
     } catch (e) {
-      track = await make('CPU');
+      track = await make('CPU', modelBuf);
       trackDelegate = 'CPU';
     }
     send({ type: 'ready', backend: trackDelegate });
+    if (LITE) send({ type: 'model', variant: variant });
   }
   // If the GPU is slow on real frames, start the CPU alongside (tracking carries on meanwhile),
   // time it on real frames too, keep the faster and close the other.
-  var times = [], trial = null, trialTimes = [], decided = false;
+  var times = [], trial = null, trialTimes = [], decided = false, liteTried = false;
+  // The full model is too slow here: fetch the lite one quietly and swap it in between frames (the
+  // full model keeps tracking meanwhile). Any failure leaves the full model running, silently.
+  async function switchToLite() {
+    var buf = null, lm = null, pending = null;
+    try {
+      buf = await download(LITE, LITE_BYTES, 'model', true);
+      // Creating the model can hold the engine up for a few seconds: tell the app, so a pause in the results isn't taken for a stall.
+      send({ type: 'model', variant: 'switching' });
+      pending = make(trackDelegate, buf);
+      try {
+        lm = await withTimeout(pending, CFG.gpuTimeoutMs);
+      } catch (e) {
+        // A create that hangs may still finish later: close it then, so it never leaks.
+        pending.then(function (late) { try { late.close(); } catch (ce) {} }, function () {});
+        throw e;
+      }
+    } catch (e) {
+      // Stay on the full model; the backend choice carries on as if nothing happened.
+      decided = false;
+      return;
+    }
+    var old = track;
+    track = lm; modelBuf = buf; variant = 'lite';
+    try { old.close(); } catch (ce) {}
+    // The lite model is timed afresh, so the GPU/CPU verdict runs again on it.
+    times = []; trialTimes = []; trial = null; decided = false;
+    send({ type: 'model', variant: variant });
+  }
   function consider(ms) {
     if (decided) return;
     if (!trial) {
       times.push(ms);
       if (times.length < 15) return;
       var gpu = median(times.slice(4));
+      if (variant === 'full' && LITE && !liteTried && gpu > BUDGET) {
+        liteTried = true; decided = true;
+        switchToLite();
+        return;
+      }
       if (trackDelegate !== 'GPU' || gpu <= CFG.slowFrameMs) { decided = true; send({ type: 'backend', backend: trackDelegate, ms: Math.round(gpu) }); return; }
       trial = 'starting';
-      make('CPU').then(function (lm) { trial = lm; }, function () { decided = true; trial = null; });
+      make('CPU', modelBuf).then(function (lm) { trial = lm; }, function () { decided = true; trial = null; });
       return;
     }
   }
@@ -163,26 +216,60 @@ export const ENGINE_CORE = `function engineCore(send, CFG) {
  * The on-device pose engine for phones: a tiny page run inside a WebView. It opens the front
  * camera with getUserMedia and hands the newest frame to the pose model in a Web Worker (one
  * frame in flight, never a backlog), so the page's own thread only shows the video and draws.
- * The skeleton is smoothed (One Euro filter) and redrawn at the screen's refresh rate, gliding
- * between model results. Each result's raw landmarks go to the app, where FORM's shared
- * LivePoseSession counts reps and judges form exactly as on the web. Frames never leave the
- * phone; only joint coordinates cross into the app. Messages:
+ * The skeleton is drawn by the shared skeleton page (skeletonPage.ts, embedded as text): it
+ * smooths and predicts the joints, holds and fades them when tracking blips, and redraws at the
+ * screen's refresh rate on a canvas that covers the view (the video is mirrored, the skeleton is
+ * mapped mirrored, so the two line up). Each result's raw landmarks also go to the app, where
+ * FORM's shared LivePoseSession counts reps and judges form exactly as on the web. Frames never
+ * leave the phone; only joint coordinates cross into the app. Messages:
  *   { t: 'camera', kind: 'requesting' | 'live' | 'ended' | 'error', name? }
  *   { t: 'pose', kind: 'loading', stage?: 'runtime' | 'model' | 'starting', pct? } | { t: 'pose', kind: 'ready' | 'failed', backend?, offline? }
+ *   { t: 'pose', kind: 'model', variant: 'full' | 'lite' | 'switching' }
  *   { t: 'frame', ts, w, h, ms, b, people: [[x, y, visibility] × 33][] }
- * The app sets `window.__skeletonColor` (tracking quality) and calls `window.formStop()`.
+ * The app sets the skeleton's look by calling `window.formSkeleton(state)` (a state it also leaves
+ * in `window.__formSkeleton`, applied at start; `window.__skeletonColor` is the older one-colour
+ * form, kept for compatibility) and calls `window.formStop()`.
  */
-export function poseEngineHtml({ modelUrl, version = MEDIAPIPE_VERSION, colors }: { modelUrl: string; version?: string; colors: { good: string; warn: string; other: string } }): string {
+export function poseEngineHtml({ modelUrl, version = MEDIAPIPE_VERSION, colors, liteModelUrl = null }: { modelUrl: string; version?: string; colors: { good: string; warn: string; other: string }; liteModelUrl?: string | null }): string {
   const cdn = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${version}`;
-  const cfg = JSON.stringify({ cdn, modelUrl, engine: { gpuTimeoutMs: GPU_START_TIMEOUT_MS, slowFrameMs: SLOW_FRAME_MS }, edges: skeletonIndexEdges(), visible: FRAMING_THRESHOLDS.visibleConfidence, colors });
+  const engine = {
+    gpuTimeoutMs: GPU_START_TIMEOUT_MS,
+    slowFrameMs: SLOW_FRAME_MS,
+    modelBytes: MODEL_BYTES.full,
+    liteBytes: MODEL_BYTES.lite,
+    modelBudgetMs: MODEL_BUDGET_MS,
+    confDetection: POSE_CONFIDENCE.detection,
+    confPresence: POSE_CONFIDENCE.presence,
+    confTracking: POSE_CONFIDENCE.tracking,
+  };
+  // Until the app sends its own state, the skeleton starts from the colours it was given.
+  const defaultState: SkeletonState = {
+    v: 1,
+    tone: 'good',
+    side: null,
+    chain: [],
+    palette: { ...skeletonPalette(), good: colors.good, fix: colors.warn, warn: colors.warn, other: colors.other },
+    reduceMotion: false,
+  };
+  const cfg = JSON.stringify({ cdn, modelUrl, liteUrl: liteModelUrl, engine, edges: skeletonIndexEdges(), visible: FRAMING_THRESHOLDS.visibleConfidence, colors, skeleton: skeletonConfig(), skeletonState: defaultState });
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}</style>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}video,canvas{position:absolute;inset:0;width:100%;height:100%}video{object-fit:cover;transform:scaleX(-1)}</style>
 </head><body><video id="v" muted playsinline autoplay></video><canvas id="c"></canvas>
 <script>
-const CFG = ${cfg};
+${pageScript(cfg)}</script></body></html>`;
+}
+
+/**
+ * The page's own script, as source text with the settings JSON (one line) in front. Everything
+ * the page needs is here or in the two texts it embeds: the engine core (the model) and the
+ * skeleton bundle (the drawing).
+ */
+export function pageScript(cfgJson: string): string {
+  return `const CFG = ${cfgJson};
 const ENGINE_SRC = ${JSON.stringify(ENGINE_CORE)};
 const engineCore = (0, eval)("(" + ENGINE_SRC + ")");
+const SKELETON_SRC = ${JSON.stringify(SKELETON_BUNDLE)};
 const post = (m) => { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} };
 const v = document.getElementById('v');
 const c = document.getElementById('c');
@@ -193,12 +280,46 @@ window.__skeletonColor = CFG.colors.warn;
 let engine = null, mode = 'worker', ready = false, busy = false, busySince = 0, stream = null, stopped = false;
 let latency = 0, lastLumaAt = -1e9, luma = undefined, frameErrors = [];
 const START_TIMEOUT_MS = 25000;
-const ENGINE_CFG = { cdn: CFG.cdn, modelUrl: CFG.modelUrl, gpuTimeoutMs: CFG.engine.gpuTimeoutMs, slowFrameMs: CFG.engine.slowFrameMs };
+const ENGINE_CFG = Object.assign({ cdn: CFG.cdn, modelUrl: CFG.modelUrl, liteUrl: CFG.liteUrl }, CFG.engine);
+
+// ---- the skeleton: the canvas covers the view; the mapper (mirrored) lines it up with the video ----
+let viewW = 0, viewH = 0, watching = false;
+const readView = () => { viewW = c.clientWidth; viewH = c.clientHeight; };
+readView();
+if (typeof ResizeObserver !== 'undefined') {
+  try { new ResizeObserver(readView).observe(c); watching = true; } catch (e) {}
+}
+// The drawing is optional: if it fails to load, to start or later, the camera and the rep counting go on
+// without a skeleton. Every call goes through a wrapper that swallows errors; a skeleton that could not
+// be built is replaced by one that does nothing.
+const SK_METHODS = ['push', 'setState', 'setBackend', 'setInline', 'start', 'stop', 'frame', 'stats'];
+let skRaw = null;
+try {
+  skRaw = (0, eval)(SKELETON_SRC)({
+    canvas: c,
+    mirror: true,
+    size: () => { if (!watching) readView(); return { cw: viewW, ch: viewH, dpr: window.devicePixelRatio || 1 }; },
+    video: () => ({ w: v.videoWidth, h: v.videoHeight }),
+    raf: (cb) => requestAnimationFrame(cb),
+    now: () => performance.now(),
+    createCanvas: (w, h) => { const k = document.createElement('canvas'); k.width = w; k.height = h; return k; }
+  }, CFG.skeleton);
+} catch (e) { skRaw = null; }
+const sk = {};
+SK_METHODS.forEach((name) => {
+  sk[name] = (a, b, d, e, f) => { try { return skRaw ? skRaw[name](a, b, d, e, f) : undefined; } catch (err) { return undefined; } };
+});
+const reduceQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+sk.setState(Object.assign({}, CFG.skeletonState, { reduceMotion: !!(reduceQuery && reduceQuery.matches) }));
+// A state the app injected before this script ran (it leaves its latest in __formSkeleton).
+if (window.__formSkeleton) sk.setState(window.__formSkeleton);
+window.formSkeleton = (s) => { sk.setState(s); };
 
 window.formStop = () => {
   stopped = true;
   if (stream) stream.getTracks().forEach((t) => t.stop());
   if (engine && engine.terminate) engine.terminate();
+  sk.stop();
   ctx.clearRect(0, 0, c.width, c.height);
 };
 
@@ -216,6 +337,7 @@ function startWorker() {
 function startInline() {
   if (mode === 'inline' || stopped) return;
   mode = 'inline';
+  sk.setInline();
   if (engine && engine.terminate) engine.terminate();
   const s = document.createElement('script');
   s.src = CFG.cdn + '/vision_bundle.js'; s.crossOrigin = 'anonymous';
@@ -229,8 +351,9 @@ function startInline() {
 }
 function onEngine(m) {
   if (stopped) return;
-  if (m.type === 'ready') { ready = true; post({ t: 'pose', kind: 'ready', backend: m.backend }); pump(); return; }
-  if (m.type === 'backend') { post({ t: 'pose', kind: 'ready', backend: m.backend }); return; }
+  if (m.type === 'ready') { ready = true; sk.setBackend(m.backend); post({ t: 'pose', kind: 'ready', backend: m.backend }); pump(); return; }
+  if (m.type === 'backend') { sk.setBackend(m.backend); post({ t: 'pose', kind: 'ready', backend: m.backend }); return; }
+  if (m.type === 'model') { post({ t: 'pose', kind: 'model', variant: m.variant }); return; }
   if (m.type === 'progress') {
     post({ t: 'pose', kind: 'loading', stage: m.stage, pct: m.pct });
     // Downloaded but not started a while later: this phone's worker is stuck — run in the page instead.
@@ -254,7 +377,9 @@ function onEngine(m) {
   if (m.type === 'result') {
     busy = false;
     latency = latency === 0 ? m.ms : latency * 0.8 + m.ms * 0.2;
-    smoothInto(m.people, m.ts);
+    // The skeleton gets the people first, so a problem there can never hold back the rep counting.
+    sk.push(m.people, capOf(m.ts), performance.now(), v.videoWidth, v.videoHeight);
+    sk.start();
     post({ t: 'frame', ts: m.ts, w: v.videoWidth, h: v.videoHeight, ms: Math.round(latency), b: luma, people: m.people });
     pump();
   }
@@ -274,11 +399,26 @@ async function startCamera() {
   v.srcObject = stream;
   v.play().catch(() => {});
   post({ t: 'camera', kind: 'live' });
+  sk.start();
   onVideoFrame();
 }
 let lastVideoTime = -1;
-function onVideoFrame() {
+// When the camera frame on screen was captured, from requestVideoFrameCallback's metadata: captureTime
+// (the camera's own stamp), else expectedDisplayTime or presentationTime. All three are in the same
+// clock as performance.now() (DOMHighResTimeStamps on the page's time origin), so they can be mixed
+// with it freely. Without metadata (the setTimeout fallback) it is null, and pump uses performance.now().
+let frameCap = null;
+const capFrom = (meta) => {
+  if (!meta) return null;
+  const t = [meta.captureTime, meta.expectedDisplayTime, meta.presentationTime].find((x) => typeof x === 'number' && x > 0);
+  return t === undefined ? null : t;
+};
+// The capture time of the frame in flight, by the ts it was sent with, for when its result comes back.
+let inflight = null;
+const capOf = (ts) => (inflight && Math.abs(inflight.ts - ts) < 2 ? inflight.cap : ts);
+function onVideoFrame(now, meta) {
   if (stopped) return;
+  frameCap = capFrom(meta);
   if (v.currentTime !== lastVideoTime) { lastVideoTime = v.currentTime; pump(); }
   if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(onVideoFrame);
   else setTimeout(onVideoFrame, 15);
@@ -294,69 +434,19 @@ function pump() {
     luma = s / (d.length / 4); lastLumaAt = now;
   }
   busy = true; busySince = now;
+  const seen = frameCap; // the frame on screen now is the one the bitmap is taken from
   createImageBitmap(v).then((bitmap) => {
     if (stopped) { bitmap.close(); return; }
-    engine.send({ type: 'frame', bitmap, ts: performance.now() }, [bitmap]);
+    // A capture time can't be later than now (an expected display time is); ts is unchanged: the engine timeline relies on it.
+    const ts = performance.now();
+    const cap = seen === null ? ts : Math.min(seen, ts);
+    inflight = { ts, cap };
+    engine.send({ type: 'frame', bitmap, ts, cap }, [bitmap]);
   }).catch(() => { busy = false; });
-}
-
-// ---- smooth skeleton: One Euro filter on each result, then glide to it every display frame ----
-const MIN_CUTOFF = 1.5, BETA = 10, D_CUTOFF = 1;
-const alpha = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
-let filters = [], shown = [], targets = [], lastResultTs = 0;
-function smoothInto(people, ts) {
-  const dt = lastResultTs ? Math.max(0.001, (ts - lastResultTs) / 1000) : 1 / 30;
-  lastResultTs = ts;
-  targets = people.map((p, pi) => {
-    const f = filters[pi] || (filters[pi] = []);
-    return p.map((k, ki) => {
-      const s = f[ki];
-      if (!s) { f[ki] = { x: k[0], y: k[1], dx: 0, dy: 0 }; return [k[0], k[1], k[2]]; }
-      const dx = (k[0] - s.x) / dt, dy = (k[1] - s.y) / dt;
-      const ad = alpha(D_CUTOFF, dt);
-      s.dx = s.dx + ad * (dx - s.dx); s.dy = s.dy + ad * (dy - s.dy);
-      const ax = alpha(MIN_CUTOFF + BETA * Math.abs(s.dx), dt), ay = alpha(MIN_CUTOFF + BETA * Math.abs(s.dy), dt);
-      s.x = s.x + ax * (k[0] - s.x); s.y = s.y + ay * (k[1] - s.y);
-      return [s.x, s.y, k[2]];
-    });
-  });
-  filters.length = people.length;
-}
-let lastDraw = 0;
-function draw(now) {
-  if (stopped) return;
-  const dt = lastDraw ? Math.min(100, now - lastDraw) : 16;
-  lastDraw = now;
-  const w = v.videoWidth || 640, h = v.videoHeight || 480;
-  if (c.width !== w) c.width = w;
-  if (c.height !== h) c.height = h;
-  const k = 1 - Math.exp(-dt / 30);
-  shown = targets.map((p, pi) => p.map((t, ki) => {
-    const s = shown[pi] && shown[pi][ki];
-    return s ? [s[0] + (t[0] - s[0]) * k, s[1] + (t[1] - s[1]) * k, t[2]] : t;
-  }));
-  ctx.clearRect(0, 0, w, h);
-  const line = Math.max(2, w / 240);
-  ctx.globalAlpha = 0.85; ctx.lineCap = 'round'; ctx.lineWidth = line;
-  shown.forEach((p, i) => {
-    const color = i > 0 ? CFG.colors.other : window.__skeletonColor;
-    ctx.strokeStyle = color; ctx.fillStyle = color;
-    ctx.beginPath();
-    for (const [a, b] of CFG.edges) {
-      const pa = p[a], pb = p[b];
-      if (!pa || !pb || pa[2] < CFG.visible || pb[2] < CFG.visible) continue;
-      ctx.moveTo(pa[0] * w, pa[1] * h); ctx.lineTo(pb[0] * w, pb[1] * h);
-    }
-    ctx.stroke();
-    for (const q of p) { if (q[2] < CFG.visible) continue; ctx.beginPath(); ctx.arc(q[0] * w, q[1] * h, line * 1.1, 0, Math.PI * 2); ctx.fill(); }
-  });
-  ctx.globalAlpha = 1;
-  requestAnimationFrame(draw);
 }
 
 post({ t: 'pose', kind: 'loading' });
 try { if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') throw 0; startWorker(); } catch (e) { startInline(); }
 startCamera();
-requestAnimationFrame(draw);
-</script></body></html>`;
+`;
 }

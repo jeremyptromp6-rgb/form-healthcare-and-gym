@@ -27,9 +27,14 @@ uses an ephemeral dev secret (sessions reset on restart). In production it refus
 
 Live camera tracking runs on the device. On web it uses MediaPipe, whose runtime is copied into
 `apps/mobile/public/mediapipe` on install (`scripts/copy-pose-assets.mjs`); the model file is fetched
-from `EXPO_PUBLIC_POSE_MODEL_URL` (defaults to Google's hosted lite model — self-host it in
-production). Browsers only open the camera on `localhost` or HTTPS. Native iOS/Android show the
-camera preview, but pose tracking needs a development build with a native pose module.
+from `EXPO_PUBLIC_POSE_MODEL_URL` (defaults to Google's hosted full model, ~9 MB — self-host it in
+production). Devices too slow for the full model quietly switch to the lite one
+(`EXPO_PUBLIC_POSE_LITE_MODEL_URL`, defaults to Google's hosted lite model; pointing the main URL
+at your own file turns the fallback off unless you also set the lite URL). Model downloads are
+force-cached by the device, so self-hosted model URLs must use versioned filenames (for example
+`pose_landmarker_full_v2.task`); a changed file under the same name would not be picked up. Browsers
+only open the camera on `localhost` or HTTPS. Native iOS/Android show the camera preview, but pose
+tracking needs a development build with a native pose module.
 
 Food scanning needs a recognition provider. Set `FOOD_RECOGNITION_PROVIDER=anthropic` and
 `ANTHROPIC_API_KEY` to use Claude vision (photos are sent to Anthropic; FORM strips EXIF and never
