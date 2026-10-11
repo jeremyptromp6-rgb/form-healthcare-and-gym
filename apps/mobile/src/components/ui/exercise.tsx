@@ -55,7 +55,7 @@ export function ExerciseRow({
         <ExerciseThumb exerciseId={exerciseId} size={thumbSize} />
         {index !== undefined ? (
           <View style={styles.index}>
-            <AppText variant="label" color={colors.onPrimary} style={{ fontSize: 11, lineHeight: 14 }}>
+            <AppText variant="label" color={colors.onPrimary} style={{ fontSize: 12, lineHeight: 16 }}>
               {String(index)}
             </AppText>
           </View>
@@ -238,7 +238,7 @@ export function TrendChart({ title, unit, points, height = 96 }: { title: string
   const summary = `${title}: ${points.length} ${points.length === 1 ? 'session' : 'sessions'}, latest ${roundValue(latest.value)} ${unit}, best ${roundValue(max)} ${unit}`;
   // Each column stacks [value label][bar][x label]; the bar gets whatever height is left.
   const valueRoom = 16;
-  const xRoom = 14;
+  const xRoom = 16;
   const barRoom = Math.max(8, height - valueRoom - xRoom);
   return (
     <View accessible accessibilityRole="image" accessibilityLabel={summary} style={{ gap: space.sm }}>
@@ -264,7 +264,7 @@ export function TrendChart({ title, unit, points, height = 96 }: { title: string
                 ) : null}
               </View>
               <View testID="trend-bar" style={{ width: '70%', maxWidth: 28, height: h, borderRadius: 6, backgroundColor: isLatest ? colors.primary : colors.primarySoft }} />
-              <AppText variant="label" color={colors.textFaint} numberOfLines={1} style={{ fontSize: 11, lineHeight: xRoom }}>
+              <AppText variant="label" color={colors.textFaint} numberOfLines={1} style={{ fontSize: 12, lineHeight: xRoom }}>
                 {p.label}
               </AppText>
             </View>

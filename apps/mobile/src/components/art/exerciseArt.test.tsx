@@ -1,6 +1,8 @@
 import { act, render, screen } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
-import { ExerciseArt, EXERCISE_ART_COLORS, ILLUSTRATED_EXERCISES, lerpPose, poseAt, type Pose } from './ExerciseArt';
+import { countSvg } from '@/test-utils/svgNodes';
+import type { ArtTone } from '@/theme/artPalette';
+import { ExerciseArt, EXERCISE_ART_COLORS, ExerciseThumb, ILLUSTRATED_EXERCISES, lerpPose, poseAt, type Pose } from './ExerciseArt';
 
 // test/setup.ts mocks reduced motion on; this flag lets the animation tests turn it off.
 let mockReduce = true;
@@ -171,5 +173,110 @@ describe('ExerciseArt rendering', () => {
     mockReduce = false;
     await render(<ExerciseArt exerciseId="bicep_curl" name="Curl" animated />);
     expect(screen.getByLabelText('Curl illustration')).toBeTruthy();
+  });
+});
+
+describe('ExerciseArt as illustrated people', () => {
+  const TONES: ArtTone[] = ['light', 'dark'];
+  beforeEach(() => {
+    mockReduce = true;
+  });
+
+  describe.each(TONES)('in the %s tone', (tone) => {
+    it.each(ILLUSTRATED_EXERCISES)('%s stays within 50 elements as a card and 25 as a thumb, with no filters, masks or clips', async (id) => {
+      const { unmount } = await render(<ExerciseArt exerciseId={id} name={id} tone={tone} />);
+      const full = countSvg();
+      expect(full.total).toBeGreaterThan(0);
+      expect(full.total).toBeLessThanOrEqual(50);
+      expect(full.forbidden).toEqual([]);
+      await unmount();
+      await render(<ExerciseArt exerciseId={id} name={id} size="thumb" decorative tone={tone} />);
+      const thumb = countSvg();
+      expect(thumb.total).toBeLessThanOrEqual(25);
+      expect(thumb.forbidden).toEqual([]);
+    });
+
+    it.each(ILLUSTRATED_EXERCISES)('%s stays within budget at the start of its animation', async (id) => {
+      mockReduce = false;
+      jest.useFakeTimers();
+      try {
+        await render(<ExerciseArt exerciseId={id} name={id} tone={tone} animated />);
+        const found = countSvg();
+        expect(found.total).toBeLessThanOrEqual(50);
+        expect(found.forbidden).toEqual([]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
+  it('draws with no tone, in the launch scheme', async () => {
+    await render(<ExerciseArt exerciseId="squat" name="Squat" />);
+    expect(countSvg().total).toBeLessThanOrEqual(50);
+  });
+
+  it('draws a different picture in each tone', async () => {
+    const { unmount } = await render(<ExerciseArt exerciseId="lunge" tone="light" />);
+    const light = snapshot();
+    await unmount();
+    await render(<ExerciseArt exerciseId="lunge" tone="dark" />);
+    expect(snapshot()).not.toBe(light);
+  });
+
+  it('gives the thumbnail the figure without the ghost and its gradients', async () => {
+    const { unmount } = await render(<ExerciseArt exerciseId="lunge" />);
+    const card = countSvg();
+    await unmount();
+    await render(<ExerciseThumb exerciseId="lunge" size={40} />);
+    const thumb = countSvg();
+    expect(thumb.total).toBeLessThan(card.total);
+    expect(thumb.byType.RNSVGLinearGradient ?? 0).toBe(0);
+  });
+
+  describe('an exercise with no drawing yet', () => {
+    it('renders a placeholder labelled "illustration coming soon", not the squat', async () => {
+      const { unmount } = await render(<ExerciseArt exerciseId="unknown" name="Mystery" />);
+      expect(screen.getByLabelText('Mystery illustration coming soon')).toBeTruthy();
+      const placeholder = countSvg();
+      const shape = snapshot();
+      await unmount();
+      await render(<ExerciseArt exerciseId="squat" name="Squat" />);
+      expect(shape).not.toBe(snapshot());
+      expect(placeholder.total).toBeLessThan(countSvg().total);
+      expect(placeholder.forbidden).toEqual([]);
+    });
+
+    it('is labelled with a generic name when none is given, and can be decorative', async () => {
+      const { unmount } = await render(<ExerciseArt exerciseId="unknown" />);
+      expect(screen.getByLabelText('Exercise illustration coming soon')).toBeTruthy();
+      await unmount();
+      await render(<ExerciseArt exerciseId="unknown" decorative />);
+      const root = screen.toJSON() as { props: Record<string, unknown> };
+      expect(root.props.accessible).toBe(false);
+      expect(root.props['aria-hidden']).toBe(true);
+    });
+
+    it.each(TONES)('keeps the placeholder thumb within 12 elements in the %s tone', async (tone) => {
+      await render(<ExerciseThumb exerciseId="unknown" tone={tone} />);
+      const found = countSvg();
+      expect(found.total).toBeGreaterThan(0);
+      expect(found.total).toBeLessThanOrEqual(12);
+      expect(found.forbidden).toEqual([]);
+    });
+
+    it('never starts the frame loop, even when asked to animate', async () => {
+      mockReduce = false;
+      jest.useFakeTimers();
+      setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
+      await render(<ExerciseArt exerciseId="unknown" animated />);
+      expect(frameLoops().started).toBe(0);
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    });
+
+    it('has no pose', () => {
+      expect(poseAt('unknown', 0)).toBeNull();
+      expect(poseAt('unknown', 1)).toBeNull();
+    });
   });
 });

@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
 import { View } from 'react-native';
 import { colors, space } from '@/theme/tokens';
-import { MacroTile, ProgressBar, ProgressRing } from './feedback';
+import { CountUp, MacroTile, ProgressBar, ProgressRing } from './feedback';
 import { Row } from './layout';
 import { AppText } from './text';
 
@@ -22,6 +22,8 @@ export interface FuelMacro {
 export function FuelSummary({
   title,
   numeral,
+  numeralValue,
+  formatNumeral,
   unitLabel,
   caption,
   captionTone = 'muted',
@@ -32,6 +34,10 @@ export function FuelSummary({
   /** Heading above the numbers (announced as a header). */
   title?: string;
   numeral: string;
+  /** The same figure as a number. When given, the big numeral counts up to it once (CountUp) instead of showing `numeral` at once; screen readers still get the final text. */
+  numeralValue?: number;
+  /** Formats `numeralValue` the way `numeral` is written (default: rounded, as the browser's locale groups it). */
+  formatNumeral?: (n: number) => string;
   /** Sits beside the numeral, e.g. "/ 2,200 kcal". */
   unitLabel?: string | null;
   caption?: string | null;
@@ -51,9 +57,13 @@ export function FuelSummary({
       <Row gap={space.lg}>
         <View style={{ flex: 1, gap: 2 }}>
           <Row gap={space.xs} style={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
-            <AppText variant="display" style={{ fontVariant: ['tabular-nums'] }}>
-              {numeral}
-            </AppText>
+            {numeralValue !== undefined ? (
+              <CountUp value={numeralValue} format={formatNumeral ?? ((n) => Math.round(n).toLocaleString())} variant="display" style={{ fontVariant: ['tabular-nums'] }} />
+            ) : (
+              <AppText variant="display" style={{ fontVariant: ['tabular-nums'] }}>
+                {numeral}
+              </AppText>
+            )}
             {unitLabel ? (
               <AppText variant="bodyStrong" color={colors.textMuted}>
                 {unitLabel}

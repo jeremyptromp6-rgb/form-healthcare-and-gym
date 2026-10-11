@@ -7,7 +7,8 @@ import { ExerciseThumb } from '@/components/art/ExerciseArt';
 import { setsPerMuscle } from '@/lib/muscles';
 import { RankEmblem as RankBadge } from '@/components/art/RankEmblem';
 import { RingsArt } from '@/components/art/SceneArt';
-import { AppText, Badge, BreathingGlow, Button, Card, Divider, ExerciseList, FuelSummary, HeroMedia, IconBubble, InlineMessage, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
+import { AppText, Badge, BreathingGlow, Button, Card, Divider, ExerciseList, FuelSummary, HeroMedia, ICON_BUBBLE, IconBubble, InlineMessage, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
+import { useStaticArt } from '@/components/ui/staticArt';
 import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
 import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
@@ -236,7 +237,7 @@ function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<Home
   return (
     <Card style={{ gap: space.md }}>
       <Row gap={space.md}>
-        <IconBubble icon="rocket" tint={colors.accent} size={48} />
+        <IconBubble icon="rocket" tint={colors.accent} size={ICON_BUBBLE.lg} />
         <View style={{ flex: 1, gap: 2 }}>
           <AppText variant="heading" header>
             Start here
@@ -257,7 +258,7 @@ function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<Home
             disabled={s.done}
             onPress={meta[s.key].action}
             style={({ pressed }) => [styles.step, { opacity: pressed ? 0.7 : 1 }]}>
-            {s.done ? <IconBubble icon="checkmark" tint={colors.success} size={36} solid /> : <IconBubble icon={meta[s.key].icon} tint={meta[s.key].tint} size={36} />}
+            {s.done ? <IconBubble icon="checkmark" tint={colors.success} size={ICON_BUBBLE.md} solid /> : <IconBubble icon={meta[s.key].icon} tint={meta[s.key].tint} size={ICON_BUBBLE.md} />}
             <AppText variant="bodyStrong" color={s.done ? colors.textMuted : colors.text} style={{ flex: 1, textDecorationLine: s.done ? 'line-through' : 'none' }}>
               {meta[s.key].label}
             </AppText>
@@ -288,7 +289,7 @@ function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['to
     <Card style={{ gap: space.lg }}>
       <Row style={{ justifyContent: 'space-between' }}>
         <Row gap={space.sm}>
-          <IconBubble icon="body" tint={colors.protein} size={32} />
+          <IconBubble icon="body" tint={colors.protein} size={ICON_BUBBLE.sm} />
           <AppText variant="heading" header>
             Last session
           </AppText>
@@ -325,6 +326,7 @@ function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['to
 function TodayHero({ today, onNavigate }: { today: NonNullable<HomeViewModel['today']>; onNavigate: HomeViewProps['onNavigate'] }) {
   const s = today.suggestion;
   const train = s.kind === 'train';
+  const staticArt = useStaticArt(); // Pip stands still inside a Welcome phone preview
   return (
     <HeroMedia image={imagery.home} minHeight={train ? 300 : 240} art={<RingsArt style={{ flex: 1 }} />}>
       <Row gap={space.sm} style={{ alignItems: 'flex-end' }}>
@@ -338,7 +340,7 @@ function TodayHero({ today, onNavigate }: { today: NonNullable<HomeViewModel['to
         </View>
         <View style={{ alignItems: 'center', justifyContent: 'center' }}>
           <BreathingGlow size={150} color={colors.accent} style={{ position: 'absolute' }} />
-          <Buddy mood={MOOD[s.kind]} size={92} />
+          <Buddy mood={MOOD[s.kind]} size={92} float={!staticArt} />
         </View>
       </Row>
       <AppText variant="body" color={colors.textMuted}>
@@ -363,12 +365,16 @@ function WeekDots({ done, planned }: { done: number; planned: number }) {
   );
 }
 
+const formatKcal = (v: number) => Math.round(v).toLocaleString();
+
 function Fuel({ n, onNavigate, children }: { n: NonNullable<HomeViewModel['nutrition']>; onNavigate: HomeViewProps['onNavigate']; children?: ReactNode }) {
   const t = n.targets;
   return (
     <Card style={{ gap: space.lg }}>
       <FuelSummary
         numeral={n.kcal.toLocaleString()}
+        numeralValue={n.kcal}
+        formatNumeral={formatKcal}
         unitLabel={t ? `/ ${t.kcal.toLocaleString()}` : null}
         caption={`Calories eaten · ${n.mealsLogged} logged`}
         ring={{ value: t ? n.kcal / t.kcal : 0, color: colors.accent, label: t ? 'Calories of target' : undefined }}

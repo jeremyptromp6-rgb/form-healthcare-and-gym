@@ -5,8 +5,10 @@ import { Children, useContext, useEffect, useState, type ReactNode } from 'react
 import { Animated, Easing, ImageBackground, Platform, Pressable, RefreshControl, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-context';
 import { useReducedMotion } from '@/lib/a11y';
-import { colors, gradients, MAX_CONTENT_WIDTH, radius, scheme, shadow, space } from '@/theme/tokens';
+import { useActiveLoop } from '@/lib/useActiveLoop';
+import { colors, edgeLight, elevation, gradients, MAX_CONTENT_WIDTH, radius, scheme, space } from '@/theme/tokens';
 import { SECTION_ICONS } from './sectionIcons';
+import { useStaticArt } from './staticArt';
 import { InTabsContext } from './tabBar';
 import { AppText } from './text';
 
@@ -65,7 +67,7 @@ export function Screen({
                   {subtitle}
                 </AppText>
               ) : null}
-              <AppText variant="title" header style={{ fontSize: 34, lineHeight: 40 }}>
+              <AppText variant="screenTitle" header>
                 {title}
               </AppText>
             </View>
@@ -109,12 +111,23 @@ export function Appear({ index = 0, children }: { index?: number; children: Reac
   );
 }
 
-/** A soft light that slowly breathes behind a hero subject (Pip, a rank shield, today's exercise). Still with reduced motion. */
+/** The three layers of the glow: width as a fraction of `size`, and how opaque each is at its brightest. */
+const GLOW_LAYERS = [
+  { k: 1, o: 0.08 },
+  { k: 0.7, o: 0.14 },
+  { k: 0.42, o: 0.22 },
+] as const;
+
+/**
+ * A soft light that slowly breathes behind a hero subject (Pip, a rank shield, today's exercise).
+ * Three faint layers make the falloff; one native value drives them. Still (at its resting glow)
+ * with reduced motion or while the app is in the background.
+ */
 export function BreathingGlow({ size, color = colors.accent, style }: { size: number; color?: string; style?: StyleProp<ViewStyle> }) {
-  const reduce = useReducedMotion();
-  const [v] = useState(() => new Animated.Value(0));
+  const run = useActiveLoop(!useStaticArt());
+  const [v] = useState(() => new Animated.Value(0.5));
   useEffect(() => {
-    if (reduce) return;
+    if (!run) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(v, { toValue: 1, duration: 2600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
@@ -123,25 +136,24 @@ export function BreathingGlow({ size, color = colors.accent, style }: { size: nu
     );
     loop.start();
     return () => loop.stop();
-  }, [v, reduce]);
-  const ring = (k: number, o: number) => (
-    <Animated.View
-      key={k}
-      style={{
-        position: 'absolute',
-        width: size * k,
-        height: size * k,
-        borderRadius: (size * k) / 2,
-        backgroundColor: color,
-        opacity: v.interpolate({ inputRange: [0, 1], outputRange: [o * 0.7, o] }),
-        transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] }) }],
-      }}
-    />
-  );
+  }, [v, run]);
+  const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] });
   return (
     <View pointerEvents="none" style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-      {/* Many faint layers make a soft falloff instead of visible rings. */}
-      {[1, 0.88, 0.76, 0.64, 0.52, 0.4].map((k, i) => ring(k, 0.045 + i * 0.012))}
+      {GLOW_LAYERS.map(({ k, o }) => (
+        <Animated.View
+          key={k}
+          style={{
+            position: 'absolute',
+            width: size * k,
+            height: size * k,
+            borderRadius: (size * k) / 2,
+            backgroundColor: color,
+            opacity: v.interpolate({ inputRange: [0, 1], outputRange: [o * 0.7, o] }),
+            transform: [{ scale }],
+          }}
+        />
+      ))}
     </View>
   );
 }
@@ -230,7 +242,7 @@ export function SectionHeader({ title, action }: { title: string; action?: React
             <Ionicons name={mark.icon} size={15} color={mark.tint} />
           </View>
         ) : null}
-        <AppText variant="heading" header style={{ fontSize: 20, lineHeight: 26, letterSpacing: -0.2 }}>
+        <AppText variant="sectionTitle" header>
           {title}
         </AppText>
       </View>
@@ -290,11 +302,13 @@ const styles = StyleSheet.create({
   compactBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, alignItems: 'center', justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
   scroll: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.lg, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'flex-end', paddingTop: space.sm, paddingBottom: space.sm },
-  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...shadow.card },
-  raised: { backgroundColor: colors.cardRaised, borderColor: colors.border },
-  plain: { backgroundColor: 'transparent', borderWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0 },
-  gradientCard: { overflow: 'hidden', borderRadius: radius.xl },
-  hero: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...shadow.lifted },
+  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...elevation.card, ...edgeLight },
+  raised: { backgroundColor: colors.cardRaised, borderColor: colors.border, ...elevation.raised },
+  // A side-specific border width beats `borderWidth`, so the dark-mode top edge has to be zeroed too.
+  plain: { backgroundColor: 'transparent', borderWidth: 0, borderTopWidth: 0, padding: 0, shadowOpacity: 0, elevation: 0 },
+  // A lit top edge in both moods: the highlight a feature surface catches from above.
+  gradientCard: { overflow: 'hidden', borderRadius: radius.xl, borderTopWidth: 1, borderTopColor: colors.edge },
+  hero: { borderRadius: radius.xl, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...elevation.raised, ...edgeLight },
   heroBody: { justifyContent: 'flex-end', padding: space.xl, gap: space.md },
   sectionIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.md },

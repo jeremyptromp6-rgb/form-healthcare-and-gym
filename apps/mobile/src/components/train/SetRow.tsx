@@ -53,7 +53,7 @@ export function SetTableHeader({ loadable }: { loadable: boolean }) {
 function Caption({ children, width, center }: { children: string; width?: number; center?: boolean }) {
   return (
     <View style={width ? { width } : undefined}>
-      <AppText variant="overline" color={colors.textFaint} numberOfLines={1} style={{ fontSize: 11, lineHeight: 14, letterSpacing: 0.8, textAlign: center ? 'center' : 'left' }}>
+      <AppText variant="overline" color={colors.textFaint} numberOfLines={1} style={{ fontSize: 12, lineHeight: 16, letterSpacing: 0.6, textAlign: center ? 'center' : 'left' }}>
         {children}
       </AppText>
     </View>

@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { View } from 'react-native';
 import { AppText, Card, Row, SectionHeader } from '@/components/ui';
 import type { BodyQuest } from '@/lib/types';
-import { colors, space } from '@/theme/tokens';
+import { colors, glow, space } from '@/theme/tokens';
 import { BodyQuestHistory, NextStageCard, STAGE_INFO, StageTrack, StatList } from './RecognitionViews';
 
 /** Body Quest in full: where you are, what each stat measures, what's next, and how it has changed. */
@@ -12,14 +12,17 @@ export function BodyQuestView({ bodyQuest: bq }: { bodyQuest: BodyQuest }) {
     <View style={{ gap: space.lg }}>
       <Card style={{ gap: space.lg, paddingVertical: space.xl }}>
         <Row gap={space.lg}>
-          <View style={{ width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: info.color, backgroundColor: `${info.color}1F`, alignItems: 'center', justifyContent: 'center' }}>
-            <Ionicons name={info.icon} size={32} color={info.color} />
+          {/* A solid disc under the tint, so the dark-mode glow has an edge to follow. */}
+          <View style={[{ width: 72, height: 72, borderRadius: 36, backgroundColor: colors.card }, glow(info.color)]}>
+            <View style={{ flex: 1, borderRadius: 36, borderWidth: 2, borderColor: info.color, backgroundColor: `${info.color}1F`, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name={info.icon} size={32} color={info.color} />
+            </View>
           </View>
           <View style={{ flex: 1, gap: 2 }}>
             <AppText variant="overline" color={info.color}>
               Stage {['starter', 'foundation', 'builder', 'athlete', 'elite'].indexOf(bq.stage) + 1} of 5
             </AppText>
-            <AppText variant="display" header style={{ fontSize: 34, lineHeight: 40 }}>
+            <AppText variant="screenTitle" header>
               {info.label}
             </AppText>
             <AppText variant="caption" color={colors.textMuted}>

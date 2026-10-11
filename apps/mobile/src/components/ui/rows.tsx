@@ -1,23 +1,37 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { a11y, colors, space } from '@/theme/tokens';
-import type { IconName } from './controls';
+import { a11y, colors, radius, space } from '@/theme/tokens';
+import { ICON_BUBBLE, stateIcon, type IconName } from './controls';
 import { AppText } from './text';
 
 /**
  * A round icon on a soft tint — the one icon treatment for rows and lists. `tint` is a #RRGGBB
  * token colour (the default, muted, sits on a neutral fill); `solid` fills with the tint instead.
- * Decorative: hidden from screen readers.
+ * Sizes come from `ICON_BUBBLE` (32, 40, 48). The icon follows the icon rule: outline at rest,
+ * filled when `solid` (earned, done) or when `filled` says so. Decorative: hidden from screen readers.
  */
-export function IconBubble({ icon, tint = colors.textMuted, size = 40, solid }: { icon: IconName; tint?: string; size?: number; solid?: boolean }) {
+export function IconBubble({
+  icon,
+  tint = colors.textMuted,
+  size = ICON_BUBBLE.md,
+  solid,
+  filled,
+}: {
+  icon: IconName;
+  tint?: string;
+  size?: number;
+  solid?: boolean;
+  /** Overrides the icon rule (default: filled exactly when `solid`). */
+  filled?: boolean;
+}) {
   const backgroundColor = solid ? tint : tint === colors.textMuted ? colors.cardRaised : `${tint}1F`;
   return (
     <View
       style={{ width: size, height: size, borderRadius: size / 2, backgroundColor, alignItems: 'center', justifyContent: 'center' }}
       importantForAccessibility="no-hide-descendants"
       accessibilityElementsHidden>
-      <Ionicons name={icon} size={Math.round(size * 0.45)} color={solid ? colors.onPrimary : tint} />
+      <Ionicons name={stateIcon(icon, filled ?? !!solid)} size={Math.round(size * 0.5)} color={solid ? colors.onPrimary : tint} />
     </View>
   );
 }
@@ -63,12 +77,16 @@ export function ListRow({
         ) : null}
       </View>
       {right}
-      {onPress && chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textFaint} /> : null}
+      {onPress && chevron ? (
+        <View style={styles.chevron}>
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        </View>
+      ) : null}
     </>
   );
   if (!onPress) return <View style={styles.row}>{body}</View>;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} style={({ pressed }) => [styles.row, styles.rowPressable, pressed && { backgroundColor: colors.primarySoft }]}>
       {body}
     </Pressable>
   );
@@ -76,5 +94,8 @@ export function ListRow({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: a11y.minTouch + 8, paddingVertical: space.sm },
+  // The pressed wash is a rounded fill of the row itself: only its colour changes, so nothing moves and no margin goes negative.
+  rowPressable: { borderRadius: radius.sm },
+  chevron: { width: 20, alignItems: 'center', justifyContent: 'center' },
 });
 

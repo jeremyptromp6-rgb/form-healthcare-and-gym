@@ -1,17 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { AppText, Badge, Card, Divider, ExerciseList, IconBubble, ProgressBar, Row, type IconName } from '@/components/ui';
+import { AppText, Badge, Card, Divider, ExerciseList, ICON_BUBBLE, IconBubble, ProgressBar, Row, type IconName } from '@/components/ui';
 import { BODY_QUEST_STAGES, BODY_QUEST_STATS, type Achievement, type BodyQuest, type BodyQuestStage, type BodyQuestStat, type BodyQuestStatResult, type PersonalRecord, type Streaks } from '@/lib/types';
-import { colors, radius, space } from '@/theme/tokens';
+import { colors, glow, radius, space } from '@/theme/tokens';
 
 // ---- Body Quest ---------------------------------------------------------------------------------
 
 export const STAGE_INFO: Record<BodyQuestStage, { label: string; icon: IconName; color: string; blurb: string }> = {
-  starter: { label: 'Starter', icon: 'footsteps', color: '#9C8370', blurb: 'Every quest starts here. Train, verify, repeat.' },
-  foundation: { label: 'Foundation', icon: 'cube', color: '#C24E2A', blurb: 'The basics are in place — a real routine is forming.' },
-  builder: { label: 'Builder', icon: 'hammer', color: '#4E8A5C', blurb: 'Steady training is building real capacity.' },
-  athlete: { label: 'Athlete', icon: 'flash', color: '#3E86B0', blurb: 'Strong, consistent and moving well.' },
-  elite: { label: 'Elite', icon: 'diamond', color: '#C9741A', blurb: 'Months of consistent, high-quality training.' },
+  starter: { label: 'Starter', icon: 'footsteps', color: colors.textMuted, blurb: 'Every quest starts here. Train, verify, repeat.' },
+  foundation: { label: 'Foundation', icon: 'cube', color: colors.primary, blurb: 'The basics are in place — a real routine is forming.' },
+  builder: { label: 'Builder', icon: 'hammer', color: colors.success, blurb: 'Steady training is building real capacity.' },
+  athlete: { label: 'Athlete', icon: 'flash', color: colors.water, blurb: 'Strong, consistent and moving well.' },
+  elite: { label: 'Elite', icon: 'diamond', color: colors.accent, blurb: 'Months of consistent, high-quality training.' },
 };
 
 export const STAT_INFO: Record<BodyQuestStat, { label: string; icon: IconName; how: string }> = {
@@ -46,7 +46,7 @@ export function StageTrack({ stage, highestStage }: { stage: BodyQuestStage; hig
         return (
           <View key={s} style={styles.trackStep}>
             {i > 0 ? <View style={[styles.trackLine, { backgroundColor: i <= current ? info.color : colors.border }]} /> : null}
-            <View style={[styles.trackNode, { borderColor: lit ? info.color : i <= best ? `${info.color}88` : colors.border, backgroundColor: colors.card, borderWidth: i === current ? 2.5 : 1.5 }]}>
+            <View style={[styles.trackNode, { borderColor: lit ? info.color : i <= best ? `${info.color}88` : colors.border, backgroundColor: colors.card, borderWidth: i === current ? 2.5 : 1.5 }, i === current && glow(info.color)]}>
               <Ionicons name={info.icon} size={14} color={lit ? info.color : colors.textFaint} />
             </View>
             <AppText variant="caption" color={i === current ? colors.text : colors.textFaint} style={{ fontSize: 12 }}>
@@ -81,7 +81,7 @@ export function BodyQuestSummaryCard({
   const content = (
     <>
       <Row gap={space.md}>
-        <IconBubble icon={info.icon} tint={info.color} size={40} />
+        <IconBubble icon={info.icon} tint={info.color} size={ICON_BUBBLE.md} />
         <View style={{ flex: 1 }}>
           <AppText variant="overline" color={info.color}>
             Body Quest

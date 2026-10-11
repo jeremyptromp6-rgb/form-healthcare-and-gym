@@ -1,19 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
-import { StyleSheet, useWindowDimensions } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CelebrationHost } from '@/components/recognition/Celebrations';
-import type { IconName } from '@/components/ui';
+import { stateIcon, type IconName } from '@/components/ui';
 import { InTabsContext, TAB_BAR, tabBarBottomPadding } from '@/components/ui/tabBar';
-import { breakpoints, colors, fonts } from '@/theme/tokens';
+import { breakpoints, colors, edgeLight, elevation, fonts, scheme } from '@/theme/tokens';
 
-const TABS: { name: string; title: string; icon: IconName; iconActive: IconName }[] = [
-  { name: 'index', title: 'Home', icon: 'home-outline', iconActive: 'home' },
-  { name: 'train', title: 'Train', icon: 'barbell-outline', iconActive: 'barbell' },
-  { name: 'eat', title: 'Eat', icon: 'restaurant-outline', iconActive: 'restaurant' },
-  { name: 'progress', title: 'Progress', icon: 'stats-chart-outline', iconActive: 'stats-chart' },
-  { name: 'profile', title: 'Profile', icon: 'person-circle-outline', iconActive: 'person-circle' },
+// One name per tab: the icon rule (outline at rest, filled when active) comes from `stateIcon`.
+const TABS: { name: string; title: string; icon: IconName }[] = [
+  { name: 'index', title: 'Home', icon: 'home' },
+  { name: 'train', title: 'Train', icon: 'barbell' },
+  { name: 'eat', title: 'Eat', icon: 'restaurant' },
+  { name: 'progress', title: 'Progress', icon: 'stats-chart' },
+  { name: 'profile', title: 'Profile', icon: 'person-circle' },
 ];
+
+// The active colour has to read at 12px: in light mode the coral is 4.1:1 on the bar, its deep shade 5.3:1.
+const ACTIVE = scheme === 'dark' ? colors.primary : colors.primaryDeep;
 
 /**
  * Bottom tabs on phones; a side rail on wide screens (tablets, desktop web). The phone bar is
@@ -33,25 +37,26 @@ export default function TabLayout() {
           tabBarPosition: wide ? 'left' : 'bottom',
           tabBarVariant: wide ? 'material' : 'uikit',
           tabBarLabelPosition: wide ? 'beside-icon' : 'below-icon',
-          tabBarActiveTintColor: colors.primary,
+          tabBarActiveTintColor: ACTIVE,
           tabBarInactiveTintColor: colors.textFaint,
           tabBarStyle: wide
             ? { backgroundColor: colors.card, borderRightColor: colors.border, borderRightWidth: 1, minWidth: 220, paddingTop: 16 }
             : {
                 backgroundColor: colors.surface,
+                // A hairline in light mode; in dark mode the lit top edge instead (light falls from above).
                 borderTopWidth: StyleSheet.hairlineWidth,
                 borderTopColor: colors.border,
+                ...edgeLight,
                 height: TAB_BAR.height + bottom,
                 paddingTop: 6,
                 paddingBottom: bottom,
                 paddingHorizontal: 6,
-                elevation: 0,
-                shadowOpacity: 0,
+                // Rests on the page: the card shadow thrown upward.
+                ...elevation.card,
+                shadowOffset: { width: 0, height: -3 },
               },
-          // The active tab: a soft coral pill behind its icon and label.
-          tabBarItemStyle: wide ? undefined : { borderRadius: 18, marginHorizontal: 2, marginBottom: 2, overflow: 'hidden' },
-          tabBarActiveBackgroundColor: wide ? undefined : colors.primarySoft,
-          tabBarLabelStyle: { fontSize: wide ? 15 : 11, fontFamily: fonts.semibold, letterSpacing: -0.1 },
+          tabBarItemStyle: wide ? undefined : { marginHorizontal: 2 },
+          tabBarLabelStyle: { fontSize: wide ? 15 : 12, lineHeight: wide ? 20 : 16, fontFamily: fonts.semibold, letterSpacing: wide ? -0.1 : -0.15 },
           sceneStyle: { backgroundColor: colors.bg },
         }}>
         {TABS.map((t) => (
@@ -61,7 +66,15 @@ export default function TabLayout() {
             options={{
               title: t.title,
               tabBarAccessibilityLabel: t.title,
-              tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? t.iconActive : t.icon} size={size} color={color} />,
+              tabBarIcon: ({ color, size, focused }) =>
+                wide ? (
+                  <Ionicons name={stateIcon(t.icon, focused)} size={size} color={color} />
+                ) : (
+                  // The active tab: a soft coral pill behind a filled icon.
+                  <View style={[styles.pill, focused && styles.pillActive]}>
+                    <Ionicons name={stateIcon(t.icon, focused)} size={Math.min(size, 24)} color={color} />
+                  </View>
+                ),
             }}
           />
         ))}
@@ -71,3 +84,8 @@ export default function TabLayout() {
     </InTabsContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  pill: { width: 56, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  pillActive: { backgroundColor: colors.primarySoft, borderColor: `${colors.primary}33` },
+});

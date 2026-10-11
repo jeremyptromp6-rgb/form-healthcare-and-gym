@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { MUSCLE_LABEL, MuscleThumb, type Muscle } from '@/components/art/BodyMap';
-import { colors, radius, space, type } from '@/theme/tokens';
+import { colors, edgeLight, radius, space, type } from '@/theme/tokens';
 import { ProgressBar } from './feedback';
 import { AppText } from './text';
 
@@ -38,7 +38,7 @@ export function StatStrip({ items, style, variant = 'boxed' }: { items: StatItem
             {s.label}
           </AppText>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-            <AppText variant="heading" color={s.tint ?? colors.text} numberOfLines={1} style={{ fontSize: 20, lineHeight: 26, fontVariant: ['tabular-nums'] }}>
+            <AppText variant="sectionTitle" color={s.tint ?? colors.text} numberOfLines={1} style={{ fontVariant: ['tabular-nums'] }}>
               {s.value}
             </AppText>
             {s.unit ? (
@@ -119,7 +119,7 @@ export function MuscleBars({ rows }: { rows: { muscle: Muscle; value: number; ca
                 {r.caption}
               </AppText>
             </View>
-            <ProgressBar value={r.value / max} height={6} color="#E0553E" />
+            <ProgressBar value={r.value / max} height={6} color={colors.primary} />
           </View>
         </View>
       ))}
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   stripFlat: { flexDirection: 'row' },
   stripDividerFlat: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.hairline },
   stripFirstFlat: { paddingLeft: 0 },
-  tabs: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 4 },
+  tabs: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 4, ...edgeLight },
   tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: space.sm, borderRadius: radius.md, minHeight: 56, justifyContent: 'center' },
   tabActive: { backgroundColor: colors.primarySoft },
   tabMark: { position: 'absolute', bottom: 4, width: 18, height: 3, borderRadius: 2, backgroundColor: colors.primary },

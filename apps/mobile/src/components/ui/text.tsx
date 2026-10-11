@@ -4,7 +4,7 @@ import { a11y, colors, type } from '@/theme/tokens';
 
 export type TextVariant = keyof typeof type;
 
-const NUMERIC: TextVariant[] = ['display', 'number'];
+const NUMERIC: TextVariant[] = ['display', 'number', 'stat', 'valueLg'];
 
 export function AppText({
   variant = 'body',

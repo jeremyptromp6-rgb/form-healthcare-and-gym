@@ -1,16 +1,21 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/ui';
-import { colors, radius, shadow, space } from '@/theme/tokens';
+import { StaticArtContext } from '@/components/ui/staticArt';
+import { colors, edgeLight, palettes, radius, shadow, space } from '@/theme/tokens';
 
 /** The size the real screen is laid out at before it's shrunk into the frame. */
 const SCREEN_W = 390;
 const SCREEN_H = 820;
 
+/** The bezel is a physical object: the same near-black in both moods (the dark mood's deepest surface). */
+const BEZEL = palettes.dark.surface;
+
 /**
  * A phone with one of FORM's real screens inside, scaled down — so the welcome page shows the app
  * as it actually is, never a mock-up that drifts out of date. Purely a picture: not interactive,
- * hidden from screen readers (the caption says what it shows).
+ * hidden from screen readers (the caption says what it shows). Its art stands still (StaticArtContext),
+ * so the page's motion budget is spent on the hero alone.
  */
 export function PhonePreview({ width = 220, caption, children }: { width?: number; caption: string; children: ReactNode }) {
   const scale = (width - 16) / SCREEN_W;
@@ -30,7 +35,7 @@ export function PhonePreview({ width = 220, caption, children }: { width?: numbe
               transform: [{ scale }],
               backgroundColor: colors.bg,
             }}>
-            {children}
+            <StaticArtContext.Provider value>{children}</StaticArtContext.Provider>
           </View>
         </View>
         <View style={styles.notch} />
@@ -43,7 +48,7 @@ export function PhonePreview({ width = 220, caption, children }: { width?: numbe
 }
 
 const styles = StyleSheet.create({
-  frame: { padding: 8, borderRadius: 36, backgroundColor: '#2A1E17', borderWidth: 1.5, borderColor: colors.borderStrong, ...shadow.lifted },
+  frame: { padding: 8, borderRadius: 36, backgroundColor: BEZEL, borderWidth: 1.5, borderColor: colors.borderStrong, ...shadow.lifted, ...edgeLight },
   screen: { borderRadius: 28, overflow: 'hidden', backgroundColor: colors.bg },
-  notch: { position: 'absolute', top: 14, alignSelf: 'center', left: '50%', marginLeft: -34, width: 68, height: 18, borderRadius: radius.pill, backgroundColor: '#2A1E17' },
+  notch: { position: 'absolute', top: 14, alignSelf: 'center', left: '50%', marginLeft: -34, width: 68, height: 18, borderRadius: radius.pill, backgroundColor: BEZEL },
 });

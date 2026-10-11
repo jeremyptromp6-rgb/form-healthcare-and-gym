@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
 import { Animated, Easing, Modal, StyleSheet, View } from 'react-native';
 import { Buddy } from '@/components/art/Buddy';
+import { TrophyArt } from '@/components/art/SceneArt';
 import { AppText, Button, type IconName } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
 import { useCelebrations, useMarkCelebrationsSeen } from '@/lib/queries';
@@ -67,7 +68,68 @@ export function celebrationCopy(c: Celebration): CelebrationCopy {
   }
 }
 
-/** One celebration: a medallion with a soft ring that blooms out (still, with reduced motion). */
+/** The burst: 12 pieces thrown up and out from the medallion, in the palette. Each has its angle, reach, size and spin. */
+const CONFETTI = [
+  { angle: -90, reach: 96, w: 8, h: 12, spin: 2.2, color: colors.primary },
+  { angle: -60, reach: 118, w: 7, h: 7, spin: -1.6, color: colors.accent, round: true },
+  { angle: -120, reach: 118, w: 8, h: 11, spin: 1.8, color: colors.success },
+  { angle: -35, reach: 132, w: 9, h: 13, spin: -2.4, color: colors.water },
+  { angle: -145, reach: 132, w: 7, h: 11, spin: 2.6, color: colors.primary },
+  { angle: -75, reach: 140, w: 6, h: 6, spin: 1.4, color: colors.water, round: true },
+  { angle: -105, reach: 138, w: 8, h: 12, spin: -1.9, color: colors.accent },
+  { angle: -15, reach: 112, w: 8, h: 11, spin: 2.0, color: colors.success },
+  { angle: -165, reach: 112, w: 7, h: 7, spin: -2.1, color: colors.accent, round: true },
+  { angle: 10, reach: 92, w: 9, h: 12, spin: -1.5, color: colors.primary },
+  { angle: 170, reach: 92, w: 8, h: 11, spin: 1.7, color: colors.water },
+  { angle: -48, reach: 86, w: 6, h: 6, spin: 1.2, color: colors.success, round: true },
+] as const;
+
+/**
+ * A one-shot burst of confetti behind the medallion: native-driven translate, rotate and fade,
+ * about 1.5 s, then gone. Not rendered at all with reduced motion.
+ */
+function ConfettiBurst({ playKey }: { playKey: number }) {
+  const [t] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    t.setValue(0);
+    const run = Animated.timing(t, { toValue: 1, duration: 1500, delay: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    run.start();
+    return () => run.stop();
+  }, [playKey, t]);
+  return (
+    <View style={styles.confetti} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+      {CONFETTI.map((c, i) => {
+        const rad = (c.angle * Math.PI) / 180;
+        const x = Math.cos(rad) * c.reach;
+        const y = Math.sin(rad) * c.reach;
+        return (
+          <Animated.View
+            key={i}
+            testID="confetti-piece"
+            style={{
+              position: 'absolute',
+              left: 48 - c.w / 2,
+              top: 48 - c.h / 2,
+              width: c.w,
+              height: c.h,
+              borderRadius: 'round' in c ? c.w / 2 : 2,
+              backgroundColor: c.color,
+              opacity: t.interpolate({ inputRange: [0, 0.08, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+              transform: [
+                { translateX: t.interpolate({ inputRange: [0, 1], outputRange: [0, x] }) },
+                // Thrown out, then gravity pulls it down past where it started.
+                { translateY: t.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0, y, y + 56] }) },
+                { rotate: t.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${Math.round(c.spin * 180)}deg`] }) },
+              ],
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+/** One celebration: a medallion with a soft ring that blooms out and a burst of confetti (all still, with reduced motion). */
 export function CelebrationCard({ celebration, position, onDone }: { celebration: Celebration; position?: { index: number; total: number }; onDone: () => void }) {
   const copy = celebrationCopy(celebration);
   const reduce = useReducedMotion();
@@ -90,6 +152,7 @@ export function CelebrationCard({ celebration, position, onDone }: { celebration
   return (
     <Animated.View style={[styles.card, { opacity: enter, transform: [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }] }]}>
       <View style={styles.medalWrap}>
+        {!reduce ? <ConfettiBurst playKey={celebration.id} /> : null}
         {!reduce ? (
           <Animated.View
             style={[
@@ -98,12 +161,13 @@ export function CelebrationCard({ celebration, position, onDone }: { celebration
             ]}
           />
         ) : null}
+        {/* Records and achievements are won, so they get the trophy; streaks and stages keep their own icon. */}
         <View style={[styles.medal, { borderColor: copy.tint, backgroundColor: `${copy.tint}22` }]}>
-          <Ionicons name={copy.icon} size={34} color={copy.tint} />
+          {celebration.kind === 'personal_record' || celebration.kind === 'achievement' ? <TrophyArt size={68} /> : <Ionicons name={copy.icon} size={38} color={copy.tint} />}
         </View>
-        {/* Pip, proud of you — the same companion that greets you on Home. */}
+        {/* Pip, cheering you on — the same companion that greets you on Home. */}
         <View style={styles.pip} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-          <Buddy mood="proud" size={54} float={false} />
+          <Buddy mood="celebrate" size={60} float={false} />
         </View>
       </View>
       <View accessible accessibilityLiveRegion="polite" accessibilityLabel={copy.label} style={{ alignItems: 'center', gap: space.xs }}>
@@ -167,7 +231,7 @@ export function CelebrationHost({ exclude }: { exclude?: (c: Celebration) => boo
   };
   return (
     <Modal transparent animationType="fade" visible onRequestClose={done}>
-      <View style={styles.scrim}>
+      <View style={styles.scrim} testID="celebration-scrim">
         <CelebrationCard celebration={current} position={{ index: shownInRun, total: shownInRun + pending.length }} onDone={done} />
       </View>
     </Modal>
@@ -175,10 +239,11 @@ export function CelebrationHost({ exclude }: { exclude?: (c: Celebration) => boo
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: 'rgba(58,42,31,0.42)', alignItems: 'center', justifyContent: 'center', padding: space.lg },
+  scrim: { flex: 1, backgroundColor: colors.scrim, alignItems: 'center', justifyContent: 'center', padding: space.lg },
   card: { width: '100%', maxWidth: 380, backgroundColor: colors.card, borderRadius: radius.xl, padding: space.xl, gap: space.lg, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   medalWrap: { width: 96, height: 96, alignItems: 'center', justifyContent: 'center' },
+  confetti: { position: 'absolute', top: 0, left: 0, width: 96, height: 96 },
   ring: { position: 'absolute', width: 96, height: 96, borderRadius: 48, borderWidth: 2, pointerEvents: 'none' },
   medal: { width: 84, height: 84, borderRadius: 42, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  pip: { position: 'absolute', right: -34, bottom: -10 },
+  pip: { position: 'absolute', right: -40, bottom: -12 },
 });

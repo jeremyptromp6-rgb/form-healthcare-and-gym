@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { defaultMealType } from '@form/domain';
 import { AppText, Badge, Button, Card, Divider, FuelSummary, IconBubble, IconButton, InlineMessage, ListRow, Row, SectionHeader, StateView, WaterLine, type FuelMacro, type IconName } from '@/components/ui';
+import { Buddy } from '@/components/art/Buddy';
 import { MealArt } from '@/components/art/MealArt';
 import { dayHeadline, entryBadge, formatLiters, MEAL_LABEL, MEALS, portionLabel, proteinNudge } from '@/lib/eat';
 import type { FoodLog, MealType, NutritionDay } from '@/lib/types';
@@ -61,8 +62,16 @@ export function EatDayView(p: EatDayViewProps) {
       </Row>
 
       <Card style={{ gap: space.lg }}>
+        {/* The headline and Pip share a row, so no text size can slide the headline under him: it wraps in the space he leaves. */}
+        <Row gap={space.md}>
+          <AppText variant="heading" header style={{ flex: 1 }}>
+            {dayHeadline(day)}
+          </AppText>
+          <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+            <Buddy mood="happy" size={SUMMARY_PIP} float={false} />
+          </View>
+        </Row>
         <FuelSummary
-          title={dayHeadline(day)}
           numeral={fmt(day.totals.kcal)}
           unitLabel={kcal ? `/ ${fmt(kcal.target)} kcal` : 'kcal'}
           caption={kcal ? (kcal.over > 0 ? `${fmt(kcal.over)} over` : `${fmt(kcal.remaining)} left`) : null}
@@ -257,6 +266,8 @@ function Tool({ icon, label, onPress, busy, accessibilityLabel, divided }: { ico
     </Pressable>
   );
 }
+
+const SUMMARY_PIP = 48;
 
 const styles = StyleSheet.create({
   dayPill: { justifyContent: 'space-between', paddingHorizontal: 4 },

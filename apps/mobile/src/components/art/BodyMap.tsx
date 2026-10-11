@@ -1,12 +1,14 @@
-import { useId } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
-import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
-import { colors, fonts, scheme } from '@/theme/tokens';
+import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
+import { ACCENTS, artPalettes, LIGHT_DIR, STROKE, useArtId, type ArtTone } from '@/theme/artPalette';
+import { fonts, palettes, scheme } from '@/theme/tokens';
 
 /**
- * An anatomical muscle map, front and back: a shaded figure whose worked muscles light up — the
- * main movers bright, the helpers softer, or a heat scale (e.g. sets per muscle). Matches the
- * catalogue's muscle groups exactly. `MuscleThumb` zooms in on one group, for filters and lists.
+ * An anatomical muscle map, front and back: a friendly stylised figure (neck, hands and feet, a
+ * warm outline like the exercise figures) whose worked muscles light up: the main movers bright, the
+ * helpers softer, or a heat scale (e.g. sets per muscle) from amber through coral to deep red. Matches the
+ * catalogue's muscle groups exactly. `MuscleThumb` shows one group on a body-part silhouette, for filters and
+ * lists. Style rules: docs/art-style.md. Budget: 200 SVG elements for the map, 40 for a thumb.
  */
 
 export type Muscle = 'quads' | 'hamstrings' | 'glutes' | 'calves' | 'chest' | 'back' | 'lats' | 'shoulders' | 'biceps' | 'triceps' | 'core';
@@ -25,126 +27,317 @@ export const MUSCLE_LABEL: Record<Muscle, string> = {
   calves: 'Calves',
 };
 
-const dark = scheme === 'dark';
-const SKIN_TOP = dark ? '#5A483D' : '#F3E6D6';
-const SKIN_BOTTOM = dark ? '#3E3129' : '#E3D1BC';
-const MUSCLE_TOP = dark ? '#6B574A' : '#E9D7C2';
-const MUSCLE_BOTTOM = dark ? '#4E3F35' : '#D7C1A8';
-const OUTLINE = dark ? 'rgba(0,0,0,0.35)' : 'rgba(90,62,43,0.22)';
-const ACTIVE_TOP = '#FF8C6B';
-const ACTIVE_BOTTOM = '#CF3F2A';
-
 type View2 = 'front' | 'back';
+type V = readonly [number, number];
 
-/** Left-half muscle paths for a figure centred on x=0 (mirrored for the right). */
+/* ------------------------------------------------------------ geometry */
+
+const f1 = (n: number) => Math.round(n * 10) / 10;
+const fp = (x: number, y: number) => `${f1(x)} ${f1(y)}`;
+const unit = (x: number, y: number): V => {
+  const l = Math.hypot(x, y) || 1;
+  return [x / l, y / l];
+};
+
+/** Smooth curve through the points (Catmull-Rom as cubic Beziers). */
+function curve(pts: readonly V[]): string {
+  let s = '';
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]!;
+    s += `C${fp(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)} ${fp(p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)} ${fp(p2[0], p2[1])}`;
+  }
+  return s;
+}
+
+/** A soft tapered limb along the points, with a half-width at each, as one closed shape. */
+function tube(pts: readonly V[], hw: readonly number[]): string {
+  const n = pts.length;
+  const nor: V[] = pts.map((_, i) => {
+    const a = pts[Math.max(0, i - 1)]!;
+    const b = pts[Math.min(n - 1, i + 1)]!;
+    const [tx, ty] = unit(b[0] - a[0], b[1] - a[1]);
+    return [-ty, tx];
+  });
+  const left = pts.map((p, i): V => [p[0] + nor[i]![0] * hw[i]!, p[1] + nor[i]![1] * hw[i]!]);
+  const right = pts.map((p, i): V => [p[0] - nor[i]![0] * hw[i]!, p[1] - nor[i]![1] * hw[i]!]).reverse();
+  const l0 = left[0]!;
+  const r0 = right[0]!;
+  return `M${fp(l0[0], l0[1])}${curve(left)}A${f1(hw[n - 1]!)} ${f1(hw[n - 1]!)} 0 0 0 ${fp(r0[0], r0[1])}${curve(right)}A${f1(hw[0]!)} ${f1(hw[0]!)} 0 0 0 ${fp(l0[0], l0[1])}Z`;
+}
+
+/** An ellipse as four cubic curves (so it can be mirrored like any other shape). */
+function ell(cx: number, cy: number, rx: number, ry: number): string {
+  const k = 0.5523;
+  return `M${fp(cx - rx, cy)} C${fp(cx - rx, cy - ry * k)} ${fp(cx - rx * k, cy - ry)} ${fp(cx, cy - ry)} C${fp(cx + rx * k, cy - ry)} ${fp(cx + rx, cy - ry * k)} ${fp(cx + rx, cy)} C${fp(cx + rx, cy + ry * k)} ${fp(cx + rx * k, cy + ry)} ${fp(cx, cy + ry)} C${fp(cx - rx * k, cy + ry)} ${fp(cx - rx, cy + ry * k)} ${fp(cx - rx, cy)} Z`;
+}
+
+/** A rounded rectangle from absolute "x y" pairs (mirrorable). */
+const rr = (x: number, y: number, w: number, h: number, r: number) =>
+  `M${x + r} ${y} L${x + w - r} ${y} Q${x + w} ${y} ${x + w} ${y + r} L${x + w} ${y + h - r} Q${x + w} ${y + h} ${x + w - r} ${y + h} L${x + r} ${y + h} Q${x} ${y + h} ${x} ${y + h - r} L${x} ${y + r} Q${x} ${y} ${x + r} ${y} Z`;
+
+const PAIR = /(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g;
+/** A left-half shape (x <= 0) placed on the figure at `cx`, on its own side (s = 1) or mirrored to the other (s = -1). */
+const place = (d: string, cx: number, s: number) => d.replace(PAIR, (_, x: string, y: string) => `${f1(cx + s * +x)} ${y}`);
+/** The shape on both sides of the figure. */
+const both = (d: string, cx: number) => `${place(d, cx, 1)} ${place(d, cx, -1)}`;
+/** A limb on both sides. */
+const bothTubes = (pts: readonly V[], hw: readonly number[], cx: number) => `${tube(pts.map(([x, y]): V => [cx + x, y]), hw)} ${tube(pts.map(([x, y]): V => [cx - x, y]), hw)}`;
+
+type Seg = readonly ['L', number, number] | readonly ['C', number, number, number, number, number, number];
+
+/** A symmetric outline from its left half: down the left side from the top centre, then back up the right. */
+function symmetric(cx: number, start: V, segs: readonly Seg[]): string {
+  const at = (x: number, y: number, s: number) => fp(cx + s * x, y);
+  const ends: V[] = [start];
+  let d = `M${at(start[0], start[1], 1)}`;
+  for (const g of segs) {
+    if (g[0] === 'L') {
+      d += `L${at(g[1], g[2], 1)}`;
+      ends.push([g[1], g[2]]);
+    } else {
+      d += `C${at(g[1], g[2], 1)} ${at(g[3], g[4], 1)} ${at(g[5], g[6], 1)}`;
+      ends.push([g[5], g[6]]);
+    }
+  }
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const g = segs[i]!;
+    const from = ends[i]!;
+    d += g[0] === 'L' ? `L${at(from[0], from[1], -1)}` : `C${at(g[3], g[4], -1)} ${at(g[1], g[2], -1)} ${at(from[0], from[1], -1)}`;
+  }
+  return `${d}Z`;
+}
+
+/* ------------------------------------------------------------- anatomy */
+
+/** The torso, shoulders to hips, left half (the figure is mirrored). */
+const TRUNK: readonly Seg[] = [
+  ['L', -5.5, 33],
+  ['C', -12, 34, -18, 37, -23, 41],
+  ['C', -26, 43, -26, 48, -24.5, 53],
+  ['C', -22, 64, -19, 72, -17.5, 80],
+  ['C', -16.5, 90, -19, 98, -20, 108],
+  ['L', -17, 119],
+  ['L', 0, 120],
+];
+const ARM: { pts: readonly V[]; hw: readonly number[] } = {
+  pts: [[-26, 45], [-30.5, 64], [-33.5, 84], [-35.3, 100], [-36.8, 116]],
+  hw: [7.5, 6.8, 5.6, 5, 3.9],
+};
+const LEG: { pts: readonly V[]; hw: readonly number[] } = {
+  pts: [[-11, 112], [-12.2, 132], [-11.5, 150], [-12.8, 161], [-11.8, 175]],
+  hw: [11, 10, 7.3, 7, 4.2],
+};
+
+type Part = 'legs' | 'feet' | 'arms' | 'hands' | 'trunk' | 'neck' | 'head';
+const PART_ORDER: Part[] = ['legs', 'feet', 'arms', 'hands', 'trunk', 'neck', 'head'];
+
+function partPath(part: Part, cx: number): string {
+  switch (part) {
+    case 'legs':
+      return bothTubes(LEG.pts, LEG.hw, cx);
+    case 'feet':
+      return both(ell(-13.3, 180.4, 6.2, 3.7), cx);
+    case 'arms':
+      return bothTubes(ARM.pts, ARM.hw, cx);
+    case 'hands':
+      return both(ell(-37.4, 123.5, 3.9, 5.4), cx);
+    case 'trunk':
+      return symmetric(cx, [0, 32], TRUNK);
+    case 'neck':
+      return tube([[cx, 22], [cx, 35]], [4.8, 6.3]);
+    case 'head':
+      return ell(cx, 14, 9.5, 11.5);
+  }
+}
+
+/** Where each muscle lies on the left half (absolute "x y" pairs, mirrored to the right). */
 const SHAPES: Record<View2, Partial<Record<Muscle, string[]>>> = {
   front: {
-    shoulders: ['M-23 39 Q-35 41 -34 56 Q-27 53 -21 46 Z'],
-    chest: ['M-1 42 Q-12 39 -22 45 Q-24 56 -15 60 Q-6 62 -1 58 Z'],
-    biceps: ['M-33 59 Q-36 69 -32 79 Q-27 75 -26 61 Z'],
-    core: ['M-8 64 h6.5 v8.5 h-6.5 Z', 'M-8 74.5 h6.5 v8.5 h-6.5 Z', 'M-8 85 h6.5 v9.5 h-6.5 Z', 'M-16 62 Q-20 77 -16 93 L-10 95 L-10 63 Z'],
-    quads: ['M-17 117 Q-21 133 -16 151 Q-10 155 -5 151 Q-3 133 -4 119 Z'],
-    calves: ['M-15 158 Q-17 167 -13 177 Q-10 173 -9 160 Z'],
+    shoulders: ['M-20 40 C-25 39 -31 42 -33 48 C-34.5 53 -34 58 -32 62 C-28.5 60 -25 56 -23.5 51 C-22 47 -21 43 -20 40 Z'],
+    chest: ['M-0.8 42 C-6 40.5 -13 40.5 -19 44 C-22.5 51 -21.5 58 -17 62 C-11 65 -4 63.5 -0.8 60 Z'],
+    biceps: ['M-30 56 C-34.5 62 -35 72 -33 81 C-30 82 -27.5 80 -26.5 76 C-25.5 69 -26 61 -27.5 56 Z'],
+    core: [rr(-8.5, 66, 7.3, 8, 2.6), rr(-8.5, 76, 7.3, 8, 2.6), rr(-8.5, 86, 7.3, 8, 2.6), 'M-14.5 66 C-18.5 76 -18.5 88 -16 98 L-10.8 99 L-10.4 67 Z'],
+    quads: ['M-18.5 120 C-20 131 -20 143 -17 153 C-14 155 -10 154.5 -8 152 C-6 142 -5.5 130 -6 121 C-9.5 119 -14 119 -18.5 120 Z'],
+    calves: ['M-17 157 C-18.5 164 -17 171 -14.5 175 C-12 172 -10.5 164 -10.5 157 Z'],
   },
   back: {
-    back: ['M0 28 Q-10 32 -22 40 Q-12 47 0 63 Z', 'M-6 79 h5 v19 h-5 Z'],
-    shoulders: ['M-23 39 Q-35 41 -34 56 Q-27 53 -21 46 Z'],
-    lats: ['M-21 49 Q-25 63 -17 82 L-3 90 L-3 67 Z'],
-    triceps: ['M-33 59 Q-37 70 -32 80 Q-27 73 -27 61 Z'],
-    glutes: ['M-1 101 Q-16 99 -18 111 Q-14 123 -1 119 Z'],
-    hamstrings: ['M-17 123 Q-20 137 -15 151 Q-10 154 -6 151 Q-4 137 -4 123 Z'],
-    calves: ['M-15 155 Q-19 165 -14 177 Q-9 175 -8 157 Z'],
+    back: ['M-0.8 33.5 L-5.5 34 C-11 35.5 -17 38.5 -21 42 C-17 49 -9 56 -0.8 66 Z', rr(-8.5, 76, 7.7, 25, 3)],
+    shoulders: ['M-20 40 C-25 39 -31 42 -33 48 C-34.5 53 -34 58 -32 62 C-28.5 60 -25 56 -23.5 51 C-22 47 -21 43 -20 40 Z'],
+    lats: ['M-21.5 50 C-24 62 -20.5 76 -15.5 88 L-9 94 C-9.5 82 -10 70 -11 60 C-14.5 57.5 -18.5 54 -21.5 50 Z'],
+    triceps: ['M-30.5 56 C-35.5 62 -36 72 -33.5 82 C-30.5 83 -27.5 80.5 -26.5 75 C-25.5 68 -26 61 -27 56 Z'],
+    glutes: ['M-0.8 103 C-8 100.5 -17.5 102 -20.5 110 C-21.5 118 -16 124 -8 123.5 C-4 123 -1.5 120 -0.8 117 Z'],
+    hamstrings: ['M-18.5 126 C-20.5 137 -20 147 -16.5 154 C-13 155.5 -9.5 155 -7.5 152.5 C-5.5 143 -5 134 -5.5 126 C-9.5 124.5 -14 124.5 -18.5 126 Z'],
+    calves: ['M-18 157 C-20.5 164 -18.5 172 -14.5 176 C-10.5 172 -9.5 164 -9.5 157 C-12 155.5 -15.5 155.5 -18 157 Z'],
   },
 };
 
-/** The figure outline, left half (x ≤ 0), drawn once per side. */
-const BODY_PARTS = [
-  'M-6 26 Q-14 34 -24 38 L0 38 Z', // trapezius slope
-  'M-24 38 Q-29 52 -24 68 Q-20 88 -17 102 L0 102 L0 38 Z', // torso
-  'M-24 39 Q-36 43 -35 59 L-32 81 Q-27 83 -25 80 L-22 56 Z', // upper arm
-  'M-34 80 Q-38 93 -37 105 L-33 107 Q-29 95 -27 82 Z', // forearm
-  'M-17 100 Q-21 109 -18 117 L0 117 L0 100 Z', // hips
-  'M-18 113 Q-23 133 -16 153 L-5 153 Q-2 133 -2 115 Z', // thigh
-  'M-16 152 Q-18 169 -13 185 L-6 185 Q-5 168 -6 152 Z', // shin
-];
+/** Fine lines that give the figure shape: collarbones and breastbone in front, spine and blades behind. */
+const LINES: Record<View2, { side: string; centre: string }> = {
+  front: { side: 'M-5 35.5 Q-13 37 -20 40.5', centre: 'M0 42 L0 100' },
+  back: { side: 'M-12 52 Q-16 60 -13 68', centre: 'M0 34 L0 104' },
+};
 
-function Figure({ cx, view, heat, ids }: { cx: number; view: View2; heat: Map<string, number>; ids: { skin: string; muscle: string; active: string } }) {
-  const half = (d: string, fill: string, k: string, extra?: { opacity?: number; stroke?: string }) => (
-    <G key={k}>
-      <Path d={d} fill={fill} opacity={extra?.opacity} stroke={extra?.stroke ?? OUTLINE} strokeWidth={0.6} transform={`translate(${cx} 0)`} />
-      <Path d={d} fill={fill} opacity={extra?.opacity} stroke={extra?.stroke ?? OUTLINE} strokeWidth={0.6} transform={`translate(${cx} 0) scale(-1 1)`} />
-    </G>
-  );
-  return (
-    <G>
-      <Ellipse cx={cx} cy={192} rx={26} ry={3.5} fill="#000000" opacity={dark ? 0.35 : 0.08} />
-      {BODY_PARTS.map((d, i) => half(d, `url(#${ids.skin})`, `b${i}`))}
-      <Ellipse cx={cx} cy={16} rx={10.5} ry={12.5} fill={`url(#${ids.skin})`} stroke={OUTLINE} strokeWidth={0.6} />
-      <Ellipse cx={cx - 36} cy={109} rx={3.6} ry={4.6} fill={`url(#${ids.skin})`} />
-      <Ellipse cx={cx + 36} cy={109} rx={3.6} ry={4.6} fill={`url(#${ids.skin})`} />
-      <Ellipse cx={cx - 10} cy={187} rx={6} ry={3} fill={`url(#${ids.skin})`} />
-      <Ellipse cx={cx + 10} cy={187} rx={6} ry={3} fill={`url(#${ids.skin})`} />
-      {(Object.keys(SHAPES[view]) as Muscle[]).map((m) => {
-        const h = heat.get(m) ?? 0;
-        return SHAPES[view][m]!.map((d, i) => (
-          <G key={`${m}${i}`}>
-            {half(d, `url(#${ids.muscle})`, `${m}${i}base`)}
-            {h > 0 ? half(d, `url(#${ids.active})`, `${m}${i}on`, { opacity: 0.35 + 0.65 * h, stroke: 'rgba(120,20,10,0.35)' }) : null}
-          </G>
-        ));
-      })}
-      {/* A soft highlight down the figure's lit side. */}
-      <Path d={`M${cx - 20} 44 Q${cx - 24} 60 ${cx - 19} 80`} stroke="#FFFFFF" strokeOpacity={dark ? 0.08 : 0.4} strokeWidth={2} fill="none" strokeLinecap="round" />
-    </G>
-  );
+/** Creases and joints (knees, elbows, hips, forearms) that give the figure its anatomy, left half. */
+const JOINTS: Record<View2, string> = {
+  front: 'M-14 101 Q-9 106.5 -1.5 109 M-34.6 83 Q-31 86.5 -27.6 84 M-35.2 91 Q-35.8 101 -36 110 M-16.5 150 Q-11.5 154.5 -6.6 150.5 M-16.4 160 Q-12 162.5 -8.8 160',
+  back: 'M-34.6 83 Q-31 86.5 -27.6 84 M-35.2 91 Q-35.8 101 -36 110 M-17 151.5 Q-12 149 -7 151.5 M-16 124 Q-11 127 -3 125',
+};
+
+/** A soft band of shade down the edge away from the light: the torso flank, the arm and the leg. */
+const SHADE = 'M-22.5 55 Q-20 68 -15.5 80 Q-16 94 -18 108 M-31.3 52 Q-35.1 66 -36.9 84 Q-38.1 100 -38.5 114 M-20 122 Q-21 138 -17.5 152 Q-16 164 -14 173';
+
+/** Which body parts a thumb draws, and where it looks: the centre of a square window and its side. */
+const THUMB: Record<Muscle, { view: View2; parts: Part[]; at: V; span: number }> = {
+  chest: { view: 'front', parts: ['trunk', 'neck', 'arms'], at: [0, 52], span: 60 },
+  shoulders: { view: 'front', parts: ['trunk', 'neck', 'arms'], at: [-19, 50], span: 60 },
+  biceps: { view: 'front', parts: ['trunk', 'arms'], at: [-28, 68], span: 58 },
+  core: { view: 'front', parts: ['trunk', 'arms'], at: [0, 82], span: 58 },
+  quads: { view: 'front', parts: ['trunk', 'legs'], at: [-2, 134], span: 60 },
+  back: { view: 'back', parts: ['trunk', 'neck', 'arms'], at: [0, 56], span: 62 },
+  lats: { view: 'back', parts: ['trunk', 'arms'], at: [-8, 70], span: 60 },
+  triceps: { view: 'back', parts: ['trunk', 'arms'], at: [-28, 68], span: 58 },
+  glutes: { view: 'back', parts: ['trunk', 'legs'], at: [0, 112], span: 58 },
+  hamstrings: { view: 'back', parts: ['trunk', 'legs'], at: [0, 138], span: 62 },
+  calves: { view: 'back', parts: ['legs', 'feet'], at: [0, 164], span: 56 },
+};
+
+/* ---------------------------------------------------------------- heat */
+
+/** Three steps of heat: amber, coral, deep red. They read on skin and on espresso alike. */
+function heatStops(tone: ArtTone, step: 0 | 1 | 2): [string, string] {
+  const x = ACCENTS[tone];
+  if (step === 0) return [x.sparkleHoney, x.sparkleCoral];
+  if (step === 1) return [x.bodyActiveTop, x.bodyActiveBottom];
+  return [x.bodyActiveBottom, artPalettes[tone].figure.workDeep];
+}
+const stepOf = (level: number): 0 | 1 | 2 => (level >= 0.67 ? 2 : level >= 0.34 ? 1 : 0);
+
+/* --------------------------------------------------------------- pieces */
+
+/** The soft grey-brown lines and shadows need the tone's own palette. */
+function useLook(tone?: ArtTone): { t: ArtTone; base: string } {
+  const base = useArtId('bm');
+  return { t: tone ?? scheme, base };
 }
 
-function Gradients({ ids }: { ids: { skin: string; muscle: string; active: string } }) {
+function Gradients({ t, base, levels, figures }: { t: ArtTone; base: string; levels: Map<string, number>; figures: { cx: number; id: string }[] }) {
+  const x = ACCENTS[t];
+  const used = new Set([...levels.values()].map(stepOf));
   return (
     <Defs>
-      <LinearGradient id={ids.skin} x1="0" y1="0" x2="0" y2="1">
-        <Stop offset="0" stopColor={SKIN_TOP} />
-        <Stop offset="1" stopColor={SKIN_BOTTOM} />
+      {figures.map((f) => (
+        <LinearGradient key={f.id} id={f.id} gradientUnits="userSpaceOnUse" x1={f.cx - 30} y1={0} x2={f.cx + 36} y2={190}>
+          <Stop offset="0" stopColor={x.bodySkinTop} />
+          <Stop offset="1" stopColor={x.bodySkinBottom} />
+        </LinearGradient>
+      ))}
+      <LinearGradient id={`${base}m`} {...LIGHT_DIR}>
+        <Stop offset="0" stopColor={x.bodyMuscleTop} />
+        <Stop offset="1" stopColor={x.bodyMuscleBottom} />
       </LinearGradient>
-      <LinearGradient id={ids.muscle} x1="0.2" y1="0" x2="0.8" y2="1">
-        <Stop offset="0" stopColor={MUSCLE_TOP} />
-        <Stop offset="1" stopColor={MUSCLE_BOTTOM} />
-      </LinearGradient>
-      <LinearGradient id={ids.active} x1="0.2" y1="0" x2="0.8" y2="1">
-        <Stop offset="0" stopColor={ACTIVE_TOP} />
-        <Stop offset="1" stopColor={ACTIVE_BOTTOM} />
-      </LinearGradient>
+      {([0, 1, 2] as const)
+        .filter((s) => used.has(s))
+        .map((s) => (
+          <LinearGradient key={s} id={`${base}h${s}`} {...LIGHT_DIR}>
+            <Stop offset="0" stopColor={heatStops(t, s)[0]} />
+            <Stop offset="1" stopColor={heatStops(t, s)[1]} />
+          </LinearGradient>
+        ))}
     </Defs>
   );
 }
 
-function useIds() {
-  const base = `bm${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  return { skin: `${base}s`, muscle: `${base}m`, active: `${base}a` };
+interface FigureProps {
+  cx: number;
+  view: View2;
+  t: ArtTone;
+  base: string;
+  skinId: string;
+  levels: Map<string, number>;
+  /** Parts to draw, and which muscles. A thumb draws a few; the map draws everything. */
+  parts: Part[];
+  muscles: Muscle[];
+  /** Outline width: the full figure is drawn small and wears a line, a thumb is zoomed in. */
+  line: number;
+  details: boolean;
 }
 
-/**
- * Front and back. `primary` muscles at full strength and `secondary` softer — or pass `heat`
- * (0–1 per muscle) to shade by how much each was trained.
- */
-export function BodyMap({
-  primary = [],
-  secondary = [],
-  heat,
-  height = 200,
-  showLabels = true,
-  style,
-  accessibilityLabel,
-}: {
-  primary?: string[];
-  secondary?: string[];
-  heat?: Partial<Record<Muscle, number>>;
-  height?: number;
-  showLabels?: boolean;
-  style?: StyleProp<ViewStyle>;
-  accessibilityLabel?: string;
-}) {
-  const ids = useIds();
+function Figure({ cx, view, t, base, skinId, levels, parts, muscles, line, details }: FigureProps) {
+  const a = artPalettes[t];
+  const x = ACCENTS[t];
+  const night = t === 'dark';
+  const ink = [...PART_ORDER.filter((p) => parts.includes(p))];
+  const silhouette = ink.map((p) => partPath(p, cx)).join(' ');
+  const lines = LINES[view];
+  return (
+    <>
+      {details ? <Ellipse cx={cx} cy={185} rx={27} ry={3.4} fill={a.shadow} opacity={a.shadowOpacity} /> : null}
+      {night ? <Path d={silhouette} fill="none" stroke={a.rim} strokeOpacity={a.rimOpacity} strokeWidth={line} strokeLinejoin="round" transform="translate(1.1 1.5)" /> : null}
+      <Path d={silhouette} fill="none" stroke={x.figureEdge} strokeWidth={line + 1} strokeLinejoin="round" strokeLinecap="round" />
+      {ink.map((p) => (
+        <Path key={p} d={partPath(p, cx)} fill={`url(#${skinId})`} />
+      ))}
+      {parts.includes('head') ? <HeadDetail cx={cx} view={view} t={t} skinId={skinId} /> : null}
+      {muscles.map((m) => {
+        const level = levels.get(m) ?? 0;
+        const shapes = SHAPES[view][m];
+        if (!shapes) return null;
+        return (
+          <Path
+            key={m}
+            d={shapes.map((d) => both(d, cx)).join(' ')}
+            fill={level > 0 ? `url(#${base}h${stepOf(level)})` : `url(#${base}m)`}
+            stroke={level > 0 ? x.bodyActiveEdge : x.bodyOutline}
+            strokeWidth={STROKE.hair}
+            strokeLinejoin="round"
+          />
+        );
+      })}
+      {details ? (
+        <>
+          <Path d={`${place(lines.side, cx, 1)} ${place(lines.side, cx, -1)}`} fill="none" stroke={x.bodyOutline} strokeWidth={STROKE.hair} strokeLinecap="round" />
+          <Path d={both(JOINTS[view], cx)} fill="none" stroke={x.bodyOutline} strokeWidth={STROKE.hair} strokeLinecap="round" />
+          <Path d={place(SHADE, cx, -1)} fill="none" stroke={a.shadow} strokeOpacity={a.shadowOpacity * 0.8} strokeWidth={STROKE.bold} strokeLinecap="round" />
+          <Path d={place(lines.centre, cx, 1)} fill="none" stroke={x.bodyOutline} strokeWidth={STROKE.hair} strokeLinecap="round" />
+          <Path d={`M${cx - 20} 46 Q${cx - 24} 62 ${cx - 21} 82`} fill="none" stroke={a.highlight} strokeOpacity={a.highlightOpacity} strokeWidth={STROKE.bold} strokeLinecap="round" />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** The face and hair: a hair cap and a friendly face in front, hair all round the back. */
+function HeadDetail({ cx, view, t, skinId }: { cx: number; view: View2; t: ArtTone; skinId: string }) {
+  const a = artPalettes[t];
+  const x = (n: number) => f1(cx + n);
+  const hair =
+    view === 'front'
+      ? `M${x(-9.8)} 12 C${x(-10.4)} 3.6 ${x(-5)} 1.4 ${x(0)} 1.4 C${x(5)} 1.4 ${x(10.4)} 3.6 ${x(9.8)} 12 C${x(7)} 8.4 ${x(3)} 7 ${x(-1)} 7.4 C${x(-5)} 7.8 ${x(-8)} 9.2 ${x(-9.8)} 12 Z`
+      : `M${x(-9.9)} 15 C${x(-10.8)} 4 ${x(-5)} 1.2 ${x(0)} 1.2 C${x(5)} 1.2 ${x(10.8)} 4 ${x(9.9)} 15 C${x(9)} 20.5 ${x(4)} 22.6 ${x(0)} 22.6 C${x(-4)} 22.6 ${x(-9)} 20.5 ${x(-9.9)} 15 Z`;
+  return (
+    <>
+      <Path d={`${ell(cx - 9.6, 15, 2.1, 3)} ${ell(cx + 9.6, 15, 2.1, 3)}`} fill={`url(#${skinId})`} stroke={ACCENTS[t].figureEdge} strokeWidth={STROKE.hair} />
+      <Path d={hair} fill={a.figure.hair} stroke={ACCENTS[t].figureEdge} strokeWidth={STROKE.hair} strokeLinejoin="round" />
+      {view === 'front' ? (
+        <>
+          <Circle cx={cx - 3.6} cy={14.4} r={1.3} fill={a.featureInk} />
+          <Circle cx={cx + 3.6} cy={14.4} r={1.3} fill={a.featureInk} />
+          <Path d={`M${x(-2.4)} 19 Q${x(0)} 21.2 ${x(2.4)} 19`} fill="none" stroke={a.featureInk} strokeWidth={STROKE.hair} strokeLinecap="round" />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** How heavy to draw each figure's outline. */
+const FULL_LINE = STROKE.line;
+const THUMB_LINE = STROKE.hair;
+
+/** The levels of each muscle: `primary` at full strength, `secondary` softer, or `heat` (0 to 1 per muscle). */
+function levelsOf(primary: string[], secondary: string[], heat?: Partial<Record<Muscle, number>>) {
   const p = new Set(primary);
   const s = secondary.filter((m) => !p.has(m));
   const levels = new Map<string, number>();
@@ -154,20 +347,54 @@ export function BodyMap({
     for (const m of s) levels.set(m, 0.3);
     for (const m of p) levels.set(m, 1);
   }
+  return { levels, s };
+}
+
+/**
+ * Front and back. `primary` muscles at full strength and `secondary` softer, or pass `heat`
+ * (0 to 1 per muscle) to shade by how much each was trained.
+ */
+export function BodyMap({
+  primary = [],
+  secondary = [],
+  heat,
+  height = 200,
+  showLabels = true,
+  style,
+  accessibilityLabel,
+  tone,
+}: {
+  primary?: string[];
+  secondary?: string[];
+  heat?: Partial<Record<Muscle, number>>;
+  height?: number;
+  showLabels?: boolean;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+  tone?: ArtTone;
+}) {
+  const { t, base } = useLook(tone);
+  const { levels, s } = levelsOf(primary, secondary, heat);
   const label =
     accessibilityLabel ?? (heat ? `Muscles trained: ${[...levels.keys()].map((m) => MUSCLE_LABEL[m as Muscle] ?? m).join(', ') || 'none yet'}` : `Muscles worked: ${primary.join(', ')}${s.length ? `; also ${s.join(', ')}` : ''}`);
+  // Labels are drawn in viewBox units: sized so they come out at 12px or more at this height.
+  const labelSize = Math.min(24, Math.max(15, (12.5 * 205) / height));
+  const faint = palettes[t].textFaint;
+  const text = { fill: faint, fontSize: labelSize, fontFamily: fonts.semibold, fontWeight: '700', letterSpacing: 1.2, textAnchor: 'middle' } as const;
+  const all = PART_ORDER;
+  const every = Object.keys(MUSCLE_LABEL) as Muscle[];
   return (
     <View style={[{ height, aspectRatio: 220 / 205 }, style]} accessible accessibilityRole="image" accessibilityLabel={label}>
       <Svg width="100%" height="100%" viewBox="0 0 220 205">
-        <Gradients ids={ids} />
-        <Figure cx={55} view="front" heat={levels} ids={ids} />
-        <Figure cx={165} view="back" heat={levels} ids={ids} />
+        <Gradients t={t} base={base} levels={levels} figures={[{ cx: 55, id: `${base}sf` }, { cx: 165, id: `${base}sb` }]} />
+        <Figure cx={55} view="front" t={t} base={base} skinId={`${base}sf`} levels={levels} parts={all} muscles={every} line={FULL_LINE} details />
+        <Figure cx={165} view="back" t={t} base={base} skinId={`${base}sb`} levels={levels} parts={all} muscles={every} line={FULL_LINE} details />
         {showLabels ? (
           <>
-            <SvgText x={55} y={203} fill={colors.textFaint} fontSize={8.5} fontFamily={fonts.semibold} fontWeight="700" letterSpacing={1.2} textAnchor="middle">
+            <SvgText x={55} y={202} {...text}>
               FRONT
             </SvgText>
-            <SvgText x={165} y={203} fill={colors.textFaint} fontSize={8.5} fontFamily={fonts.semibold} fontWeight="700" letterSpacing={1.2} textAnchor="middle">
+            <SvgText x={165} y={202} {...text}>
               BACK
             </SvgText>
           </>
@@ -177,36 +404,20 @@ export function BodyMap({
   );
 }
 
-/** Where to look for each muscle: which side of the body, and the crop (x, y, w, h) around it. */
-const THUMB: Record<Muscle, { view: View2; box: [number, number, number, number] }> = {
-  chest: { view: 'front', box: [-30, 26, 60, 46] },
-  shoulders: { view: 'front', box: [-40, 24, 52, 46] },
-  biceps: { view: 'front', box: [-44, 40, 46, 50] },
-  core: { view: 'front', box: [-26, 52, 52, 52] },
-  quads: { view: 'front', box: [-28, 106, 56, 56] },
-  back: { view: 'back', box: [-32, 22, 64, 64] },
-  lats: { view: 'back', box: [-32, 38, 64, 60] },
-  triceps: { view: 'back', box: [-44, 40, 46, 50] },
-  glutes: { view: 'back', box: [-26, 90, 52, 42] },
-  hamstrings: { view: 'back', box: [-28, 110, 56, 52] },
-  calves: { view: 'back', box: [-26, 144, 52, 46] },
-};
-
-/** One muscle group, close up in a round frame — lit when `active`. For filters and muscle lists. */
-export function MuscleThumb({ muscle, size = 56, active = true, intensity = 1, style }: { muscle: Muscle; size?: number; active?: boolean; intensity?: number; style?: StyleProp<ViewStyle> }) {
-  const ids = useIds();
-  const t = THUMB[muscle];
-  const [x, y, w, h] = t.box;
-  const side = Math.max(w, h);
-  const vb = `${x + w / 2 - side / 2} ${y + h / 2 - side / 2} ${side} ${side}`;
-  const heat = new Map<string, number>(active ? [[muscle, intensity]] : []);
+/** One muscle group on a body-part silhouette, in a round frame: lit when `active`. For filters and muscle lists. */
+export function MuscleThumb({ muscle, size = 56, active = true, intensity = 1, style, tone }: { muscle: Muscle; size?: number; active?: boolean; intensity?: number; style?: StyleProp<ViewStyle>; tone?: ArtTone }) {
+  const { t, base } = useLook(tone);
+  const th = THUMB[muscle];
+  const [px, py] = th.at;
+  const vb = `${f1(px - th.span / 2)} ${f1(py - th.span / 2)} ${th.span} ${th.span}`;
+  const levels = new Map<string, number>(active ? [[muscle, intensity]] : []);
+  const pal = palettes[t];
   return (
-    <View style={[{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', backgroundColor: colors.cardRaised }, style]} accessible={false} importantForAccessibility="no-hide-descendants">
+    <View style={[{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', backgroundColor: pal.cardRaised }, style]} accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden>
       <Svg width="100%" height="100%" viewBox={vb}>
-        <Gradients ids={ids} />
-        <Rect x={x - side} y={y - side} width={side * 3} height={side * 3} fill={colors.cardRaised} />
-        <Circle cx={x + w / 2} cy={y + h / 2} r={side * 0.45} fill={active ? colors.primarySoft : 'transparent'} />
-        <Figure cx={0} view={t.view} heat={heat} ids={ids} />
+        <Gradients t={t} base={base} levels={levels} figures={[{ cx: 0, id: `${base}s` }]} />
+        {active ? <Circle cx={px} cy={py} r={th.span * 0.46} fill={pal.primarySoft} /> : null}
+        <Figure cx={0} view={th.view} t={t} base={base} skinId={`${base}s`} levels={levels} parts={th.parts} muscles={[muscle]} line={THUMB_LINE} details={false} />
       </Svg>
     </View>
   );

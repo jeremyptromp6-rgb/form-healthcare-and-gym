@@ -127,6 +127,12 @@ describe('FuelSummary', () => {
     expect(screen.getByText('Extra note')).toBeTruthy();
   });
 
+  it('counts the numeral up when given a number, and still reads as the final text', async () => {
+    await render(<FuelSummary numeral="1,420" numeralValue={1420} formatNumeral={(n) => Math.round(n).toLocaleString('en-US')} />);
+    expect(screen.getByText('1,420')).toBeTruthy();
+    expect(screen.getByLabelText('1,420')).toBeTruthy();
+  });
+
   it('has no header without a title, and omits the optional parts', async () => {
     await render(<FuelSummary numeral="0" />);
     expect(screen.queryByRole('header')).toBeNull();

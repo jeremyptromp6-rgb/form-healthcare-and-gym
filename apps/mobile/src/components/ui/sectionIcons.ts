@@ -7,6 +7,8 @@ type IconName = ComponentProps<typeof Ionicons>['name'];
 /**
  * The little icon bubble beside each section title, by title — so every section in the app gets a
  * friendly marker without each screen having to pick one. Unlisted titles simply show no bubble.
+ * These are identity markers, not state, so they stay filled; wherever a bubble can be earned or
+ * done, the icon rule applies instead (`stateIcon` in controls: outline at rest, filled when earned).
  */
 export const SECTION_ICONS: Record<string, { icon: IconName; tint: string }> = {
   "Today's fuel": { icon: 'restaurant', tint: colors.carbs },

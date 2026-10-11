@@ -1,11 +1,13 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
+import { Buddy } from '@/components/art/Buddy';
 import { CoachChatView } from '@/components/coach/CoachViews';
-import { ErrorState, IconButton, Screen, StateView } from '@/components/ui';
+import { ErrorState, IconButton, Row, Screen, StateView } from '@/components/ui';
 import { ProUpsellFor } from '@/components/pro/ProUpsellFor';
 import { uuid } from '@/lib/dates';
 import { proFeatureOf } from '@/lib/pro';
 import type { PremiumFeatureId } from '@/lib/types';
+import { space } from '@/theme/tokens';
 import { useClearCoachMessages, useCoachMessages, useCoachStatus, useSendCoachMessage } from '@/lib/queries';
 
 /** Coach chat. The server builds the context, validates every answer, and says who answered. */
@@ -36,7 +38,16 @@ export default function CoachScreen() {
   }
 
   return (
-    <Screen title="Coach" subtitle={status.data.mode === 'real_ai' ? 'AI coach · your data only' : 'Rule-based tips · your data only'} right={close}>
+    <Screen
+      title="Coach"
+      subtitle={status.data.mode === 'real_ai' ? 'AI coach · your data only' : 'Rule-based tips · your data only'}
+      right={
+        <Row gap={space.xs}>
+          {/* Pip, thinking it over, beside the way out: decoration only. */}
+          <Buddy mood="thinking" size={56} float={false} />
+          {close}
+        </Row>
+      }>
       <CoachChatView
         turns={messages.data.messages}
         status={status.data}

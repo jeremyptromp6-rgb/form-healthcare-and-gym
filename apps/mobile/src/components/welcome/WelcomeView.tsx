@@ -12,7 +12,7 @@ import { EatDayView } from '@/components/eat/EatDayView';
 import { HomeView } from '@/components/home/HomeView';
 import { LevelHero, RankLadder } from '@/components/progress/ProgressionViews';
 import { AppText, BreathingGlow, Button, Row, Screen, type IconName } from '@/components/ui';
-import { colors, gradients, radius, shadow, space } from '@/theme/tokens';
+import { colors, edgeLight, gradients, radius, shadow, space } from '@/theme/tokens';
 import { PhonePreview } from './PhonePreview';
 import { SAMPLE_DAY, SAMPLE_HOME, SAMPLE_NOW, SAMPLE_PROGRESS } from './sampleData';
 
@@ -98,7 +98,7 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
               </View>
             )}
             <View style={{ gap: space.md, maxWidth: 620 }}>
-              <AppText variant="display" header style={{ fontSize: wide ? 50 : 36, lineHeight: wide ? 56 : 42 }}>
+              <AppText variant="display" header style={wide ? { fontSize: 50, lineHeight: 56 } : undefined}>
                 Get stronger, eat well, and enjoy every step.
               </AppText>
               <AppText variant="body" color={colors.textMuted} style={{ fontSize: 17, lineHeight: 25 }}>
@@ -210,7 +210,7 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
 
         {/* Closing call to action */}
         <LinearGradient colors={gradients.heroMedia} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.closing}>
-          <Buddy mood="happy" size={96} />
+          <Buddy mood="happy" size={96} float={false} />
           <AppText variant="title" header style={{ textAlign: 'center' }}>
             Ready when you are
           </AppText>
@@ -233,16 +233,16 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
 
 const styles = StyleSheet.create({
   page: { padding: space.lg, gap: space.xxl, paddingBottom: space.xxxl, width: '100%', maxWidth: 1080, alignSelf: 'center' },
-  hero: { borderRadius: radius.xl, padding: space.xl, gap: space.lg, overflow: 'hidden', minHeight: 520, borderWidth: 1, borderColor: colors.border, ...shadow.lifted },
+  hero: { borderRadius: radius.xl, padding: space.xl, gap: space.lg, overflow: 'hidden', minHeight: 520, borderWidth: 1, borderColor: colors.border, ...shadow.lifted, ...edgeLight },
   heroWide: { flexDirection: 'row', alignItems: 'stretch', padding: space.xxl, gap: space.xxl, minHeight: 480 },
   heroArt: { width: 420, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.wash },
   ctas: { gap: space.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
-  feature: { flexGrow: 1, flexBasis: 300, gap: space.sm, padding: space.lg, borderRadius: radius.lg, borderWidth: 1 },
+  feature: { flexGrow: 1, flexBasis: 300, gap: space.sm, padding: space.lg, borderRadius: radius.lg, borderWidth: 1, ...edgeLight },
   featureArt: { height: 120, alignItems: 'center', justifyContent: 'center' },
   featureIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  band: { borderRadius: radius.xl, borderWidth: 1, padding: space.xl, gap: space.lg, alignItems: 'center', ...shadow.card },
+  band: { borderRadius: radius.xl, borderWidth: 1, padding: space.xl, gap: space.lg, alignItems: 'center', ...shadow.card, ...edgeLight },
   ranks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.sm },
   phones: { gap: space.lg, paddingHorizontal: space.xs, paddingVertical: space.sm },
-  closing: { borderRadius: radius.xl, padding: space.xl, gap: space.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  closing: { borderRadius: radius.xl, padding: space.xl, gap: space.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border, ...edgeLight },
 });

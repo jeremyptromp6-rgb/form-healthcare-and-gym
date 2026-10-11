@@ -2,6 +2,7 @@ import { router, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Buddy, type BuddyMood } from '@/components/art/Buddy';
 import { ProfileSummary } from '@/components/profile/ProfileSummary';
 import { BodySection, GoalSection, HabitsSection, NutritionSection, TrainingSection, type SectionProps } from '@/components/profile/sections';
 import { AppText, Button, ErrorState, IconButton, InlineMessage, ProgressBar, Row, StateView } from '@/components/ui';
@@ -22,6 +23,9 @@ const COPY: Record<Step, { title: string; subtitle: string }> = {
   habits: { title: 'Food habits', subtitle: 'So meal ideas fit your time and budget.' },
   review: { title: 'Check your answers', subtitle: 'Everything look right? You can edit any of this later in Profile.' },
 };
+
+/** Pip's mood follows each step: welcoming, curious about you, kitted up, fed, proud at the end. */
+const PIP_MOOD: Record<Step, BuddyMood> = { goal: 'happy', body: 'thinking', training: 'workout', nutrition: 'happy', habits: 'happy', review: 'proud' };
 
 const SECTIONS: Record<OnboardingStep, (p: SectionProps) => React.JSX.Element> = {
   goal: GoalSection,
@@ -78,14 +82,18 @@ export default function Onboarding() {
       <ProgressBar value={(index + 1) / ORDER.length} height={4} label={`Setup progress, step ${index + 1} of ${ORDER.length}`} />
 
       <StepTransition stepKey={step}>
-        <View style={{ gap: space.sm, marginBottom: space.lg }}>
-          <AppText variant="title" header>
-            {COPY[step].title}
-          </AppText>
-          <AppText variant="body" color={colors.textMuted}>
-            {COPY[step].subtitle}
-          </AppText>
-        </View>
+        <Row gap={space.md} style={{ alignItems: 'flex-start', marginBottom: space.lg }}>
+          <View style={{ flex: 1, gap: space.sm }}>
+            <AppText variant="title" header>
+              {COPY[step].title}
+            </AppText>
+            <AppText variant="body" color={colors.textMuted}>
+              {COPY[step].subtitle}
+            </AppText>
+          </View>
+          {/* One Pip at a time, still: this is a form, not a stage. */}
+          <Buddy mood={PIP_MOOD[step]} size={64} float={false} />
+        </Row>
 
         {Section ? (
           <Section me={me.data} catalog={catalog.data} submitLabel={editingFromReview ? 'Save' : 'Continue'} onSaved={next} />

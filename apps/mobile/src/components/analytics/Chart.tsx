@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   empty: { borderRadius: radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.sm, paddingVertical: 2, alignSelf: 'flex-start' },
   target: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1, borderStyle: 'dashed', borderColor: colors.textFaint },
-  targetLabel: { position: 'absolute', right: 0, top: -18, fontSize: 11 },
+  targetLabel: { position: 'absolute', right: 0, top: -18, fontSize: 12 },
   bar: { position: 'absolute', backgroundColor: colors.primary, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   estimated: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.primary },
   dot: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },

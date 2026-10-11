@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { ApiError } from '@/lib/api';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { Button, ErrorState, Screen, Segmented, StateView } from './index';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { colors, elevation } from '@/theme/tokens';
+import { Button, ChipGroup, ErrorState, ICON_BUBBLE, IconBubble, ListRow, Screen, Segmented, StateView, stateIcon } from './index';
 import { InTabsContext, TAB_BAR, tabBarBottomPadding } from './tabBar';
 
 // @testing-library/react-native v14: render and events are async.
@@ -54,6 +57,101 @@ describe('design system', () => {
     expect(screen.getByRole('radio', { name: 'Maintain' }).props.accessibilityState).toMatchObject({ checked: true });
     await fireEvent.press(screen.getByRole('radio', { name: 'Lose fat' }));
     expect(onChange).toHaveBeenCalledWith('lose');
+  });
+});
+
+describe('the icon rule', () => {
+  const glyph = (name: string) => String.fromCodePoint(Ionicons.glyphMap[name as keyof typeof Ionicons.glyphMap] as number);
+  const hasIcon = (name: string) => screen.queryAllByText(glyph(name), { includeHiddenElements: true }).length > 0;
+
+  it('stateIcon maps outline and filled both ways', () => {
+    expect(stateIcon('home', false)).toBe('home-outline');
+    expect(stateIcon('home-outline', true)).toBe('home');
+    expect(stateIcon('home', true)).toBe('home');
+    expect(stateIcon('home-outline', false)).toBe('home-outline');
+  });
+
+  it('stateIcon keeps the given name when a variant does not exist, so it never becomes a missing glyph', () => {
+    expect(stateIcon('logo-github', false)).toBe('logo-github');
+    expect(stateIcon('not-an-icon', true)).toBe('not-an-icon');
+    expect(stateIcon('not-an-icon', false)).toBe('not-an-icon');
+  });
+
+  it('IconBubble is outline at rest and filled when solid or told to be, on the 32/40/48 scale', async () => {
+    expect(ICON_BUBBLE).toEqual({ sm: 32, md: 40, lg: 48 });
+    const { rerender } = await render(<IconBubble icon="flame" />);
+    expect(hasIcon('flame-outline')).toBe(true);
+    await rerender(<IconBubble icon="flame" solid />);
+    expect(hasIcon('flame')).toBe(true);
+    expect(hasIcon('flame-outline')).toBe(false);
+    await rerender(<IconBubble icon="flame-outline" filled />);
+    expect(hasIcon('flame')).toBe(true);
+  });
+
+  it('Segmented icons are outline, and filled on the selected segment', async () => {
+    await render(
+      <Segmented
+        value="a"
+        onChange={jest.fn()}
+        options={[
+          { value: 'a', label: 'One', icon: 'flame' },
+          { value: 'b', label: 'Two', icon: 'heart' },
+        ]}
+      />,
+    );
+    expect(hasIcon('flame')).toBe(true);
+    expect(hasIcon('heart-outline')).toBe(true);
+    expect(hasIcon('heart')).toBe(false);
+  });
+
+  it('chips show an outline tick circle off and a filled one on, so selecting never changes their width', async () => {
+    const { rerender } = await render(<ChipGroup options={[{ key: 'a', label: 'Nuts' }]} selected={[]} onToggle={jest.fn()} />);
+    expect(hasIcon('checkmark-circle-outline')).toBe(true);
+    await rerender(<ChipGroup options={[{ key: 'a', label: 'Nuts' }]} selected={['a']} onToggle={jest.fn()} />);
+    expect(hasIcon('checkmark-circle')).toBe(true);
+    expect(hasIcon('checkmark-circle-outline')).toBe(false);
+  });
+});
+
+describe('button states', () => {
+  // The visible surface is the pressable's first child; its style carries the variant's look.
+  const look = (label: string) => {
+    const surface = screen.getByRole('button', { name: label }).children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };
+    return StyleSheet.flatten(surface.props.style) as Record<string, unknown>;
+  };
+
+  it('a disabled button goes quiet without fading', async () => {
+    await render(<Button label="Save" disabled />);
+    const s = look('Save');
+    expect(s.backgroundColor).toBe(colors.cardRaised);
+    expect(s.shadowOpacity).toBeUndefined();
+  });
+
+  it('the primary button is lifted at rest', async () => {
+    await render(<Button label="Save" />);
+    const s = look('Save');
+    expect(s.backgroundColor).toBe(colors.primary);
+    expect(s.shadowOpacity).toBe(elevation.lifted.shadowOpacity);
+  });
+
+  it('every variant keeps a 1px border so pressing never shifts the layout', async () => {
+    for (const variant of ['primary', 'secondary', 'ghost', 'danger'] as const) {
+      await render(<Button label={variant} variant={variant} />);
+      expect(look(variant).borderWidth).toBe(1);
+    }
+  });
+
+  // Deliberately replaced: the old wash used a negative margin cancelled by padding. The wash is now
+  // the row's own rounded fill (only its colour changes when pressed), so no margin goes negative.
+  it('a pressable ListRow has no negative margin and keeps a 44pt target', async () => {
+    await render(<ListRow title="Units" accessibilityLabel="Units" onPress={jest.fn()} />);
+    const row = StyleSheet.flatten(screen.getByRole('button', { name: 'Units' }).props.style) as Record<string, number | string>;
+    for (const key of ['margin', 'marginHorizontal', 'marginVertical', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom']) {
+      expect(row[key] === undefined || (row[key] as number) >= 0).toBe(true);
+    }
+    expect(row.minHeight as number).toBeGreaterThanOrEqual(44);
+    expect(row.borderRadius).toBeGreaterThan(0);
+    expect(row.backgroundColor).toBeUndefined();
   });
 });
 

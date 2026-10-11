@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, View } from 'react-native';
 import { MUSCLE_LABEL, MuscleThumb } from '@/components/art/BodyMap';
+import { Buddy } from '@/components/art/Buddy';
 import { AppText, Badge, Button, Card, ExerciseList, ExerciseRow, ExerciseThumbStrip, HeroMedia, InlineMessage, Row, StatStrip, type BadgeTone } from '@/components/ui';
 import { setsPerMuscle } from '@/lib/muscles';
 import type { Progression, WorkoutPlan } from '@/lib/types';
@@ -15,6 +16,10 @@ const PROGRESSION_BADGE: Partial<Record<Progression, { label: string; tone: Badg
   hold_for_rom: { label: 'Full range first', tone: 'warning' },
   hold_for_form: { label: 'Form first', tone: 'warning' },
 };
+
+/** Room kept clear beside the hero's title for Pip: his width plus a gap (only when Pip is drawn, i.e. there is no photo). */
+const HERO_PIP_SIZE = 76;
+const HERO_PIP_CLEARANCE = HERO_PIP_SIZE + space.sm;
 
 /** How many muscle chips to show under the hero. */
 const MAX_MUSCLES = 6;
@@ -39,13 +44,23 @@ export function TodayView({ plan, completedToday, canStart, starting, startError
 
   return (
     <View style={{ gap: space.md }}>
-      <HeroMedia image={imagery.train} minHeight={200}>
-        <AppText variant="overline" color={colors.primary}>
-          Today&apos;s workout
-        </AppText>
-        <AppText variant="title" header style={{ fontSize: 32, lineHeight: 38 }}>
-          {plan.title}
-        </AppText>
+      <HeroMedia
+        image={imagery.train}
+        minHeight={200}
+        art={
+          // Pip, kitted up, in the top corner: the only thing that moves on this screen. The words beside it keep clear.
+          <View style={styles.heroPip}>
+            <Buddy mood="workout" size={HERO_PIP_SIZE} />
+          </View>
+        }>
+        <View style={{ gap: space.md, paddingRight: imagery.train ? 0 : HERO_PIP_CLEARANCE }}>
+          <AppText variant="overline" color={colors.primary}>
+            Today&apos;s workout
+          </AppText>
+          <AppText variant="title" header style={{ fontSize: 32, lineHeight: 38 }}>
+            {plan.title}
+          </AppText>
+        </View>
         {plan.exercises.length > 0 ? <ExerciseThumbStrip exerciseIds={plan.exercises.map((e) => e.exerciseId)} label={`${plan.exercises.length} exercises in today's workout`} /> : null}
         <StatStrip
           items={[
@@ -160,6 +175,7 @@ export function CameraCoachingRow({ camera }: { camera: TodayViewProps['camera']
 }
 
 const styles = StyleSheet.create({
+  heroPip: { position: 'absolute', top: space.md, right: space.lg },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 4, paddingLeft: 4, paddingRight: space.md, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   camera: { paddingVertical: space.md, paddingHorizontal: space.md },

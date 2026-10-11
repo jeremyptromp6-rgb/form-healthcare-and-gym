@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, type Href } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Avatar } from '@/components/profile/Avatar';
 import { ProfileSummary } from '@/components/profile/ProfileSummary';
 import { GOAL_ICONS } from '@/components/profile/sections';
 import { BodyQuestSummaryCard, RecordsList } from '@/components/recognition/RecognitionViews';
 import { RankEmblem, rankColor } from '@/components/art/RankEmblem';
+import { RingsArt } from '@/components/art/SceneArt';
 import { AppText, Badge, Button, Card, Divider, ExerciseList, GradientCard, ErrorState, IconBubble, InlineMessage, ListRow, ProgressBar, Row, Screen, SectionAction, SectionHeader, StatStrip, StateView } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
 import { useFeature } from '@/lib/features';
@@ -45,6 +46,10 @@ export default function ProfileHub() {
   return (
     <Screen title="Profile" subtitle={m.user.email} refreshing={me.isRefetching} onRefresh={refetch} right={<SettingsButton />}>
       <GradientCard colorsOverride={gradients.heroMedia} style={{ gap: space.lg }}>
+        {/* A faint sunrise behind everything, clipped to the card; low enough that the words stay on calm ground. */}
+        <View style={styles.backdrop} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+          <RingsArt style={{ flex: 1 }} />
+        </View>
         <Row gap={space.lg}>
           <Avatar name={name} hasPhoto={m.hasPhoto} />
           <View style={{ flex: 1, gap: 6 }}>
@@ -205,6 +210,10 @@ export default function ProfileHub() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.4 },
+});
 
 function SettingsButton() {
   return (

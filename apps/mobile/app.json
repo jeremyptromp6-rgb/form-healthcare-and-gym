@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#FBF5EC",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "app.form.fitness"
     },
     "android": {
@@ -33,10 +33,10 @@
         {
           "backgroundColor": "#FBF5EC",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76,
+          "imageWidth": 280,
           "dark": {
             "backgroundColor": "#17110E",
-            "image": "./assets/images/splash-icon.png"
+            "image": "./assets/images/splash-icon-dark.png"
           }
         }
       ],

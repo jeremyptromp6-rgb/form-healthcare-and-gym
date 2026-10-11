@@ -1,9 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
-import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, TextInput, View, type TextStyle } from 'react-native';
 import { useReducedMotion } from '@/lib/a11y';
-import { a11y, colors, radius, space } from '@/theme/tokens';
-import { type IconName } from './controls';
+import { a11y, colors, edgeLight, radius, space, type } from '@/theme/tokens';
+import { ICON_BUBBLE, stateIcon, type IconName } from './controls';
 import { Row } from './layout';
 import { AppText } from './text';
 
@@ -41,11 +41,11 @@ export function ChoiceCard({
           bounce();
           onPress();
         }}
-        style={[styles.card, selected && styles.cardSelected]}>
+        style={({ pressed }) => [styles.card, selected && styles.cardSelected, pressed && { backgroundColor: selected ? colors.primarySoft : colors.cardRaised }]}>
         <Row gap={space.md} style={{ alignItems: 'flex-start' }}>
           {icon ? (
             <View style={[styles.icon, selected && { backgroundColor: colors.primarySoft }]}>
-              <Ionicons name={icon} size={20} color={selected ? colors.primary : colors.textMuted} />
+              <Ionicons name={stateIcon(icon, selected)} size={20} color={selected ? colors.primary : colors.textMuted} />
             </View>
           ) : null}
           <View style={{ flex: 1, gap: 2 }}>
@@ -95,8 +95,10 @@ export function ChipGroup({
               accessibilityLabel={o.label}
               accessibilityState={{ checked: on }} aria-checked={on}
               onPress={() => onToggle(o.key)}
-              style={[styles.chip, on && { backgroundColor: active.bg, borderColor: active.border }]}>
-              {on ? <Ionicons name="checkmark" size={14} color={active.border} /> : null}
+              hitSlop={{ top: 4, bottom: 4 }}
+              style={({ pressed }) => [styles.chip, on ? { backgroundColor: active.bg, borderColor: active.border } : pressed && { backgroundColor: colors.cardRaised, borderColor: colors.borderStrong }, on && pressed && { opacity: 0.85 }]}>
+              {/* Always drawn, so selecting never changes the chip's width: an outline circle, filled with a tick when on. */}
+              <Ionicons name={stateIcon('checkmark-circle', on)} size={16} color={on ? active.border : colors.textFaint} />
               <AppText variant="caption" color={on ? colors.text : colors.textMuted}>
                 {o.label}
               </AppText>
@@ -160,7 +162,7 @@ export function TagInput({
           blurOnSubmit={false}
           style={styles.input}
         />
-        <Pressable accessibilityRole="button" accessibilityLabel={`Add to ${label}`} onPress={add} style={styles.addButton}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Add to ${label}`} onPress={add} style={({ pressed }) => [styles.addButton, pressed && { backgroundColor: colors.primarySoft, borderColor: colors.primary }]}>
           <Ionicons name="add" size={20} color={colors.text} />
         </Pressable>
       </Row>
@@ -191,9 +193,10 @@ export function TagInput({
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.lg, padding: space.lg },
-  cardSelected: { borderColor: colors.primary, backgroundColor: 'rgba(214,104,66,0.08)' },
-  icon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.cardRaised, alignItems: 'center', justifyContent: 'center' },
+  // The lit top edge (dark mode) is a side colour, so a selected card has to claim its top edge too.
+  card: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.lg, padding: space.lg, ...edgeLight },
+  cardSelected: { borderColor: colors.primary, borderTopColor: colors.primary, backgroundColor: colors.primarySoft },
+  icon: { width: ICON_BUBBLE.md, height: ICON_BUBBLE.md, borderRadius: ICON_BUBBLE.md / 2, backgroundColor: colors.cardRaised, alignItems: 'center', justifyContent: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {
     flexDirection: 'row',
@@ -215,7 +218,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     minHeight: 48,
     color: colors.text,
-    fontSize: 16,
+    ...(type.body as TextStyle),
   },
   addButton: {
     width: 48,

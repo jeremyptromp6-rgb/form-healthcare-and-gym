@@ -1,4 +1,4 @@
-import { Appearance, Platform, type TextStyle } from 'react-native';
+import { Appearance, Platform, type TextStyle, type ViewStyle } from 'react-native';
 import { readThemePreference } from './appearance';
 
 /**
@@ -30,6 +30,8 @@ const light = {
   glass: 'rgba(255,251,245,0.74)',
   /** The lit top edge of a card, as if light falls from above. */
   edge: 'rgba(255,255,255,0.95)',
+  /** Behind a modal sheet or dialog: dims the page without turning it grey. */
+  scrim: 'rgba(58,42,31,0.42)',
   text: '#3A2A1F',
   textMuted: '#6B5747',
   // Lightest text colour allowed for body-size text: ≥ 4.5:1 on card and raised surfaces (WCAG AA).
@@ -71,6 +73,7 @@ const dark: Palette = {
   overlay: 'rgba(23,17,14,0.96)',
   glass: 'rgba(36,27,22,0.72)',
   edge: 'rgba(255,236,214,0.13)',
+  scrim: 'rgba(0,0,0,0.62)',
   text: '#F8ECDF',
   textMuted: '#D2BDA9',
   textFaint: '#B39D89',
@@ -133,17 +136,44 @@ export const colors: Palette = scheme === 'dark' ? dark : light;
 export const gradients = scheme === 'dark' ? darkGradients : lightGradients;
 export const allGradients = { light: lightGradients, dark: darkGradients };
 
-/** A soft drop shadow for cards — depth without hard edges (deeper at night, where light shadows vanish). */
-export const shadow =
-  scheme === 'dark'
-    ? {
-        card: { shadowColor: '#000000', shadowOpacity: 0.28, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
-        lifted: { shadowColor: '#000000', shadowOpacity: 0.38, shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 5 },
-      }
-    : {
-        card: { shadowColor: '#7A4A26', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-        lifted: { shadowColor: '#7A4A26', shadowOpacity: 0.14, shadowRadius: 22, shadowOffset: { width: 0, height: 10 }, elevation: 4 },
-      };
+export type ElevationName = 'flat' | 'card' | 'raised' | 'lifted' | 'modal';
+
+/**
+ * Depth, in five steps. Light mode uses warm, soft shadows (small opacity, bigger radius as the
+ * level rises). Dark mode uses black, deeper shadows, and gets the rest of its depth from
+ * `edgeLight` and the tonal surface steps. Android reads `elevation` instead of the shadow props.
+ */
+const makeElevation = (tone: 'light' | 'dark'): Record<ElevationName, ViewStyle> => {
+  const lit = tone === 'light';
+  const color = lit ? '#7A4A26' : '#000000';
+  const level = (opacity: number, blur: number, y: number, android: number): ViewStyle => ({
+    shadowColor: color,
+    shadowOpacity: opacity,
+    shadowRadius: blur,
+    shadowOffset: { width: 0, height: y },
+    elevation: android,
+  });
+  return {
+    flat: level(0, 0, 0, 0),
+    card: lit ? level(0.08, 16, 5, 2) : level(0.3, 14, 5, 3),
+    raised: lit ? level(0.11, 20, 8, 4) : level(0.38, 20, 8, 5),
+    lifted: lit ? level(0.14, 24, 11, 6) : level(0.46, 26, 12, 8),
+    modal: lit ? level(0.2, 34, 18, 12) : level(0.6, 38, 20, 14),
+  };
+};
+
+export const allElevations = { light: makeElevation('light'), dark: makeElevation('dark') };
+export const elevation: Record<ElevationName, ViewStyle> = allElevations[scheme];
+
+/** The lit top edge of a surface in dark mode (light falls from above). Nothing in light mode, where the shadow does the work. */
+export const edgeLight: ViewStyle = scheme === 'dark' ? { borderTopWidth: 1, borderTopColor: colors.edge } : {};
+
+/** A soft coloured halo for the one thing that should feel lit. Dark mode only: in light mode it would just look dirty. */
+export const glow = (color: string): ViewStyle =>
+  scheme === 'dark' ? { shadowColor: color, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 0 } } : {};
+
+/** Kept for existing importers: the two steps cards and hero surfaces used before `elevation`. */
+export const shadow = { card: elevation.card, lifted: elevation.lifted };
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 48 } as const;
 export const radius = { sm: 12, md: 16, lg: 24, xl: 32, pill: 999 } as const;
@@ -184,4 +214,14 @@ export const type = {
   /** Rare uppercase eyebrow ("NEW PERSONAL RECORD"). */
   overline: { ...face(fonts.bold, '800'), fontSize: 12, lineHeight: 16, letterSpacing: 1.2, textTransform: 'uppercase' },
   number: { ...face(fonts.bold, '800'), fontSize: 32, lineHeight: 38, letterSpacing: -0.4, fontVariant: ['tabular-nums'] },
+  /** The big title at the top of a screen. */
+  screenTitle: { ...face(fonts.bold, '800'), fontSize: 34, lineHeight: 40, letterSpacing: -0.4 },
+  /** A section heading ("Today's fuel"). */
+  sectionTitle: { ...face(fonts.semibold, '700'), fontSize: 20, lineHeight: 26, letterSpacing: -0.2 },
+  /** A card or sheet title, a step under `title`. */
+  titleSm: { ...face(fonts.bold, '800'), fontSize: 24, lineHeight: 30, letterSpacing: -0.3 },
+  /** A figure inside a card (calories left, sets done). */
+  stat: { ...face(fonts.bold, '800'), fontSize: 22, lineHeight: 28, letterSpacing: -0.2, fontVariant: ['tabular-nums'] },
+  /** A large value on its own (a weight, a time). */
+  valueLg: { ...face(fonts.bold, '800'), fontSize: 34, lineHeight: 40, letterSpacing: -0.4, fontVariant: ['tabular-nums'] },
 } as const satisfies Record<string, TextStyle>;

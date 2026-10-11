@@ -1,11 +1,13 @@
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useState } from 'react';
+import { Buddy } from '@/components/art/Buddy';
 import { PaywallView } from '@/components/pro/ProViews';
-import { ErrorState, IconButton, Screen, StateView } from '@/components/ui';
+import { ErrorState, IconButton, Row, Screen, StateView } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { purchaseSupport, useBillingCatalog, useDevSimulate, usePurchase, useRestore } from '@/lib/pro';
 import { useEntitlements } from '@/lib/queries';
 import type { PremiumFeatureId } from '@/lib/types';
+import { space } from '@/theme/tokens';
 
 /** The paywall: FORM Pro's value, the store's plans and prices, purchase, restore and the subscription's state. */
 export default function ProScreen() {
@@ -38,7 +40,15 @@ export default function ProScreen() {
   const busy = purchase.isPending ? 'purchase' : restore.isPending ? 'restore' : null;
 
   return (
-    <Screen title="FORM Pro" right={close}>
+    <Screen
+      title="FORM Pro"
+      right={
+        <Row gap={space.xs}>
+          {/* Pip, proud, beside the way out: decoration only. */}
+          <Buddy mood="proud" size={56} float={false} />
+          {close}
+        </Row>
+      }>
       <PaywallView
         catalog={catalog.data}
         entitlements={entitlements.data}
