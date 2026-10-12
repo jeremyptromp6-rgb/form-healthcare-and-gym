@@ -56,7 +56,7 @@ Rules:
 | analytics | `analytics/analytics.ts` (allowlist + privacy filter) | — | boundary only |
 | notifications | `notifications/notifications.ts` | — | boundary only |
 | subscriptions | `subscriptions/entitlements.ts`, `billing.ts` | `modules/subscriptions` | entitlements live; billing unconfigured |
-| ads | `ads/adService.ts`, `adProvider.ts` | `modules/ads` | live decision; provider unconfigured |
+| ads | `ads/adService.ts`, `adProvider.ts`, `postWorkoutAd.ts` | `modules/ads` | post-workout ad: server eligibility + daily cap; AdMob on the phone (test ads unless configured) |
 | feature availability | `providers/features.ts` | `modules/system` (`GET /system/features`) | live |
 
 `GET /system/features` tells the app which features are real right now (engine built **and**
@@ -735,6 +735,39 @@ user, unconfirmed scans by expiry); v19 added provider_usage (service-wide daily
 - **Accessibility:** roles and labels on all controls, header roles, radio-group semantics for
   segmented choices, 44 dp touch targets for icon buttons, capped font scaling for large numerals
   only, reduced-motion respected.
+
+## Free-tier ads (Prompt S)
+
+One placement: **one post-workout ad per Free user per local day**, after the workout is committed
+and its summary has been shown. Pro users never get one; no ads during a workout, the camera, rep
+verification, rest, set entry, completion, or over the summary. No banners.
+
+- **Order:** Workout Engine completes the workout (XP, PRs, streak, quests applied in that
+  transaction) → summary shown → `POST /ads/post-workout { workoutId }` → if eligible, the app loads
+  the ad in the background → the user taps Done → the ad shows → Home. Pro, ineligible, not
+  configured, still loading, or any failure: Done goes straight Home. The ad is never part of
+  completion, so nothing about the workout can depend on it.
+- **AdEligibilityService** (`modules/ads/postWorkout.ts`, policy in `domain/ads/postWorkoutAd.ts`):
+  Pro (EntitlementService `AD_FREE`) is answered before anything is stored. Otherwise the workout
+  must exist, be the caller's and be completed within the last hour. One `post_workout_ads` row
+  per (user, workout); the cap counts shown/dismissed rows and live (15 min) reservations on the
+  user's local date (stored time zone authoritative, `userClock`). A failed or never-shown ad
+  doesn't use the day. Asking again for the same workout returns the same reservation.
+- **Events** (`POST /ads/post-workout/:adId/events`): requested, loaded, shown, dismissed, failed.
+  Owner-only, idempotent, forward-only (`failed` can't become `shown`; a shown ad can't be
+  un-shown). Deleting a workout sets `workout_id` to NULL, so it can't reset the cap.
+- **Analytics:** `post_workout_ad_eligible|requested|loaded|shown|dismissed|failed|capped`, only
+  with analytics consent, props limited to `placement` (+ a short failure code).
+- **App:** `lib/ads/usePostWorkoutAd.ts` (client AdService + state machine from the domain),
+  `lib/ads/provider.ts` (the boundary), `lib/ads/networkProvider.ts` (Google AdMob via
+  `react-native-google-mobile-ads`; the `.web.ts` variant reports unsupported). The SDK is
+  initialised only when an eligible ad is about to load (never at launch or during exercise).
+  Consent goes through Google's UMP first; if ads may not be requested, none is. Requests are
+  non-personalized unless the user opted in, rated PG, and carry no fitness, nutrition or camera data.
+- **Configuration:** development builds only ever use Google's test ads. Release builds: ads are off
+  unless `EXPO_PUBLIC_ADS_MODE=test` (the GitHub test APK) or `=production` with
+  `EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID` / `_IOS` and the app ids `ADMOB_ANDROID_APP_ID` /
+  `ADMOB_IOS_APP_ID` (read by `app.config.ts`; app.json holds Google's sample ids).
 
 ## Build & validation
 

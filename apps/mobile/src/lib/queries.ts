@@ -22,7 +22,6 @@ export const qk = {
   entitlements: ['entitlements'] as const,
   providers: ['providers'] as const,
   features: ['features'] as const,
-  ad: (placement: string) => ['ad', placement] as const,
   home: (today: string) => ['home', today] as const,
   todayWorkout: ['workout', 'today'] as const,
   activeSession: ['session', 'active'] as const,
@@ -93,7 +92,6 @@ export const useExercises = () => useAuthedQuery(qk.exercises, api.exercises, { 
 export const useEntitlements = () => useAuthedQuery(qk.entitlements, api.entitlements);
 export const useProviders = () => useAuthedQuery(qk.providers, api.providers, { staleTime: 5 * 60_000 });
 export const useFeatures = () => useAuthedQuery(qk.features, api.features, { staleTime: 5 * 60_000 });
-export const useAdDecision = (placement: string) => useAuthedQuery(qk.ad(placement), (t) => api.adDecision(t, placement));
 
 // ---- Recipes, meal plans, grocery ----------------------------------------------------------
 

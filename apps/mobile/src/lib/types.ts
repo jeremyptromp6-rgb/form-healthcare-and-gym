@@ -918,6 +918,9 @@ export interface HomeViewModel {
   errors: HomeSection[];
 }
 
-export type AdDecision =
-  | { served: true; creative: { adId: string; network: string; placement: string } }
-  | { served: false; reason: string; retryable: boolean };
+/** Post-workout ad (Prompt S): the server decides after the workout is committed and owns the daily cap. */
+export type PostWorkoutAdDecision =
+  | { eligible: true; adId: string; placement: 'post_workout'; personalized: boolean }
+  | { eligible: false; reason: 'pro_user' | 'workout_not_found' | 'workout_not_recent' | 'already_handled' | 'daily_cap' };
+export type PostWorkoutAdEvent = 'requested' | 'loaded' | 'shown' | 'dismissed' | 'failed';
+

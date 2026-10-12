@@ -7,6 +7,7 @@ import { ActiveWorkoutView } from '@/components/train/ActiveWorkoutView';
 import { WorkoutSummaryView } from '@/components/train/WorkoutSummaryView';
 import { AppText, Button, Card, ErrorState, InlineMessage, Segmented, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
+import { usePostWorkoutAd } from '@/lib/ads/usePostWorkoutAd';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useStartRest } from '@/lib/queries';
@@ -21,11 +22,19 @@ export default function WorkoutScreen() {
   const [result, setResult] = useState<CompletionResult | null>(null);
   useMarkWorkoutRecordsSeen(result?.workout.id ?? null);
   const coachNote = useCoachInsight('workout', !!result);
+  // The one post-workout ad (Free tier) is decided only now — the workout is already committed.
+  const ad = usePostWorkoutAd(result?.workout.id ?? null);
 
   if (result) {
     return (
       <Shell>
-        <WorkoutSummaryView summary={result} onDone={() => router.replace('/train' as Href)} coachNote={coachNote.data?.insight ?? null} onCoachAction={(route) => router.replace(route as Href)} />
+        <WorkoutSummaryView
+          summary={result}
+          onDone={() => ad.finish(() => router.replace('/' as Href))}
+          adNext={ad.adReady}
+          coachNote={coachNote.data?.insight ?? null}
+          onCoachAction={(route) => router.replace(route as Href)}
+        />
       </Shell>
     );
   }

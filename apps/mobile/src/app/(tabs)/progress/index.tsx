@@ -1,7 +1,6 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
-import { AdSlot } from '@/components/AdSlot';
 import { TrainingCard } from '@/components/progress/TrainingCard';
 import { ConsistencyCard, LevelHero, LevelUpBanner, RankLadder, ResetNotice, XpHistory } from '@/components/progress/ProgressionViews';
 import { AchievementTile, BodyQuestSummaryCard, RecordsList, sortAchievements, StreaksGrid } from '@/components/recognition/RecognitionViews';
@@ -160,8 +159,6 @@ export default function ProgressScreen() {
               <SectionHeader title="Ranks" />
               <RankLadder progress={p} />
             </View>,
-
-            <AdSlot key="ad" placement="progress_footer" />,
           ]
         : null}
     </Screen>

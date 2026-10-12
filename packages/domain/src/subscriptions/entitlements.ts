@@ -45,7 +45,7 @@ export const PREMIUM_FEATURES: readonly PremiumFeature[] = [
   { id: "WEEKLY_AI_REPORT", title: "Weekly progress report", pro: "A report every week from your real training, food, records, XP and Body Quest, with a coach note.", free: "Reports you already have stay yours." },
   { id: "ADVANCED_BODY_QUEST", title: "Body Quest insights", pro: "How each stat has moved week by week and exactly what moves it next.", free: "Your stage, stats and next goal." },
   { id: "PERSONALIZED_RECOMMENDATIONS", title: "Deeper personalization", pro: "Coaching and plans that use your trends, not just your last session.", free: "Coaching from your latest data." },
-  { id: "AD_FREE", title: "No ads", pro: "No ads anywhere.", free: "Occasional, non-personalized ads unless you opt in." },
+  { id: "AD_FREE", title: "No ads", pro: "No ads anywhere.", free: "At most one short ad a day, after a finished workout — never during training. Non-personalized unless you opt in." },
 ];
 
 /** Free-tier allowances. Servers may override them from configuration. */

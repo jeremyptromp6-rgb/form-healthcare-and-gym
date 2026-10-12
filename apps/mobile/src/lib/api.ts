@@ -1,7 +1,8 @@
 import type { MeasureUnit, RepTrace } from '@form/domain';
 import { config } from './config';
 import type {
-  AdDecision,
+  PostWorkoutAdDecision,
+  PostWorkoutAdEvent,
   CompletionResult,
   Entitlements,
   Exercise,
@@ -392,5 +393,7 @@ export const api = {
   restOfToday: (token: string) => request<{ suggestion: RestOfToday }>('/meal-plans/rest-of-today', { token }),
   providers: (token: string) => request<{ providers: ProviderStatus[] }>('/system/providers', { token }),
   features: (token: string) => request<{ features: FeatureMap }>('/system/features', { token }),
-  adDecision: (token: string, placement: string) => request<AdDecision>(`/ads/decision?placement=${placement}`, { token }),
+  postWorkoutAd: (token: string, workoutId: string) => request<PostWorkoutAdDecision>('/ads/post-workout', { method: 'POST', body: { workoutId }, token }),
+  postWorkoutAdEvent: (token: string, adId: string, event: PostWorkoutAdEvent, reason?: string) =>
+    request<{ state: string }>(`/ads/post-workout/${adId}/events`, { method: 'POST', body: reason ? { event, reason } : { event }, token }),
 };

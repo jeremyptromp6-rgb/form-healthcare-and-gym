@@ -479,6 +479,8 @@ describe("critical rules", () => {
     await ok(owner.auth, "PATCH", "/me/settings", { foodScanConsent: true });
     const scan = (await ok(owner.auth, "POST", "/nutrition/scans", scanBody())).scan;
     await ok(owner.auth, "POST", "/me/weight", { localDate: "2026-10-01", weightKg: 80 });
+    const ad = await ok(owner.auth, "POST", "/ads/post-workout", { workoutId: done.workout.id });
+    expect(ad.eligible).toBe(true); // a real reservation, so the cross-user probe below hits a real id
 
     const ids: Record<string, string> = {
       id: s.id,
@@ -496,6 +498,7 @@ describe("critical rules", () => {
       "/nutrition/scans/:id": { id: scan.id },
       "/nutrition/scans/:id/confirm": { id: scan.id },
       "/me/weight/:date": { date: "2026-10-01" },
+      "/ads/post-workout/:adId/events": { adId: ad.adId },
     };
     // Public catalogue routes (not user data) and per-user routes keyed by a date of the caller's own.
     const notUserData = new Set(["/billing/webhooks/:provider", "/exercises/:exerciseId/form-intelligence", "/exercises/:exerciseId", "/recipes/:id", "/recipes/:id/saved", "/grocery/recipes/:id", "/nutrition/days/:date", "/water/days/:date"]);
@@ -505,7 +508,7 @@ describe("critical rules", () => {
       const params = { ...ids, ...(byRoute[r.url] ?? {}) };
       const url = r.url.replace(/:(\w+)/g, (_, k: string) => params[k] ?? `missing-${k}`);
       expect(url, `${r.method} ${r.url} has an unmapped parameter`).not.toContain("missing-");
-      const res = await call(other.auth, r.method, url, r.method === "GET" || r.method === "DELETE" ? undefined : { clientLogId: randomUUID(), confirmKey: randomUUID(), reps: 1, checked: true, painLevel: "none", servings: 1, toDates: ["2026-10-02"], localDate: "2026-10-01", items: [{ itemId: "i1" }], seconds: 30, clientSetId: randomUUID(), exerciseId: "push_up" });
+      const res = await call(other.auth, r.method, url, r.method === "GET" || r.method === "DELETE" ? undefined : { clientLogId: randomUUID(), confirmKey: randomUUID(), reps: 1, checked: true, painLevel: "none", servings: 1, toDates: ["2026-10-02"], localDate: "2026-10-01", items: [{ itemId: "i1" }], seconds: 30, clientSetId: randomUUID(), exerciseId: "push_up", event: "failed" });
       expect([r.method, r.url, res.status >= 400 && res.status !== 500 ? "denied" : res.status]).toEqual([r.method, r.url, "denied"]);
       probed.add(`${r.method} ${r.url}`);
     }

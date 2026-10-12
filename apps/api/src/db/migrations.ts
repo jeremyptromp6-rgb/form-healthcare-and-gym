@@ -943,6 +943,25 @@ const V20_PRO = `
   );
 `;
 
+/** Prompt S: one post-workout ad per Free user per local day. One row per (user, workout); the cap
+ *  counts shown rows and live reservations on the user's local date. workout_id survives as NULL if
+ *  the workout is later deleted, so deleting a workout can't reset the day's cap. */
+const V21_POST_WORKOUT_ADS = `
+  CREATE TABLE post_workout_ads (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workout_id TEXT REFERENCES workouts(id) ON DELETE SET NULL,
+    local_date TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('reserved', 'shown', 'dismissed', 'failed')),
+    failure_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (user_id, workout_id)
+  );
+  CREATE INDEX post_workout_ads_user_date ON post_workout_ads(user_id, local_date);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -964,4 +983,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 18, name: "integration_indexes", up: V18_INTEGRATION_INDEXES },
   { version: 19, name: "provider_usage", up: V19_PROVIDER_USAGE },
   { version: 20, name: "pro", up: V20_PRO },
+  { version: 21, name: "post_workout_ads", up: V21_POST_WORKOUT_ADS },
 ];

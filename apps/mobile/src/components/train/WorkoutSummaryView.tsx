@@ -61,6 +61,7 @@ export function WorkoutSummaryView({
   title = 'Workout complete',
   coachNote,
   onCoachAction,
+  adNext = false,
 }: {
   summary: WorkoutSummaryDetail;
   onDone?: () => void;
@@ -68,6 +69,8 @@ export function WorkoutSummaryView({
   /** The coach on this session (validated server-side; may be a labelled rule-based tip). */
   coachNote?: CoachResponse | null;
   onCoachAction?: (route: string) => void;
+  /** Free tier: a short ad is ready to follow Done. Said up front so it is never a surprise. */
+  adNext?: boolean;
 }) {
   const { workout, totals } = summary;
   const muscles = setsPerMuscle(summary.sets);
@@ -203,7 +206,16 @@ export function WorkoutSummaryView({
 
       {coachNote ? <CoachCard response={coachNote} title="Coach on this session" onAction={onCoachAction} /> : null}
 
-      {onDone ? <Button label="Done" onPress={onDone} /> : null}
+      {onDone ? (
+        <View style={{ gap: space.sm }}>
+          <Button label="Done" onPress={onDone} accessibilityHint={adNext ? 'A short ad plays, then you return Home.' : undefined} />
+          {adNext ? (
+            <AppText variant="caption" color={colors.textMuted} style={{ textAlign: 'center' }}>
+              Next: a short ad, then Home. FORM Pro has no ads.
+            </AppText>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

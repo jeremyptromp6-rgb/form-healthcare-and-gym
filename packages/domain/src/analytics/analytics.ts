@@ -13,6 +13,13 @@ export const ANALYTICS_EVENTS = [
   "food_logged",
   "screen_viewed",
   "upgrade_viewed",
+  "post_workout_ad_eligible",
+  "post_workout_ad_requested",
+  "post_workout_ad_loaded",
+  "post_workout_ad_shown",
+  "post_workout_ad_dismissed",
+  "post_workout_ad_failed",
+  "post_workout_ad_capped",
 ] as const;
 export type AnalyticsEventName = (typeof ANALYTICS_EVENTS)[number];
 

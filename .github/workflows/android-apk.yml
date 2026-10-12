@@ -28,6 +28,10 @@ jobs:
     env:
       # The hosted FORM API (Render). A repository variable EXPO_PUBLIC_API_URL overrides it.
       EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://form-api-e68m.onrender.com' }}
+      # This APK is a test build: it serves Google's official *test* ads (labelled "Test Ad"), never
+      # production ads. A store build sets EXPO_PUBLIC_ADS_MODE=production plus the AdMob ids as
+      # secrets (ADMOB_ANDROID_APP_ID, EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID).
+      EXPO_PUBLIC_ADS_MODE: ${{ vars.EXPO_PUBLIC_ADS_MODE || 'test' }}
     steps:
       - uses: actions/checkout@v4
 

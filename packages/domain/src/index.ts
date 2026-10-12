@@ -82,3 +82,4 @@ export * from "./subscriptions/billing";
 export * from "./reports/weeklyReport";
 export * from "./ads/adProvider";
 export * from "./ads/adService";
+export * from "./ads/postWorkoutAd";

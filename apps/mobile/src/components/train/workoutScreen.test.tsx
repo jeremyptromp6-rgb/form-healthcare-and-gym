@@ -55,7 +55,9 @@ const mockReplace = jest.fn();
 jest.mock('expo-router', () => ({
   router: { replace: (...a: unknown[]) => mockReplace(...a), push: jest.fn(), back: jest.fn(), canGoBack: () => false },
 }));
-jest.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: jest.fn(() => Promise.resolve()), deactivateKeepAwake: jest.fn(() => Promise.resolve()) }));
+// Logging and session actions don't involve ads; the post-workout ad has its own tests (postWorkoutAd.test.tsx).
+jest.mock('@/lib/ads/usePostWorkoutAd', () => ({ usePostWorkoutAd: () => ({ phase: 'IDLE', adReady: false, finish: (next: () => void) => next() }) }));
+jest.mock('expo-keep-awake',() => ({ activateKeepAwakeAsync: jest.fn(() => Promise.resolve()), deactivateKeepAwake: jest.fn(() => Promise.resolve()) }));
 jest.mock('@/lib/queries', () => ({
   useActiveSession: () => ({ isPending: false, isError: false, data: mockSession, error: null, refetch: jest.fn() }),
   useExercises: () => ({ data: { exercises: [] } }),

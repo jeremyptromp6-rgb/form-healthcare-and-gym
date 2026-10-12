@@ -1,6 +1,5 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
-import { AdSlot } from '@/components/AdSlot';
 import { HomeView, type HomeRoute } from '@/components/home/HomeView';
 import { ErrorState, Screen, StateView } from '@/components/ui';
 import { uuid } from '@/lib/dates';
@@ -45,7 +44,6 @@ export default function Home() {
         refreshing={home.isRefetching}
         onRefresh={home.refetch}
         refreshFailed={home.isError}
-        footer={<AdSlot placement="home_feed" />}
         coach={{ response: coach.data?.insight ?? null, loading: coach.isPending && coach.fetchStatus !== 'idle', failed: coach.isError }}
         onOpenCoach={() => router.push('/coach' as Href)}
         onOpenRoute={(route) => router.push(route as Href)}
