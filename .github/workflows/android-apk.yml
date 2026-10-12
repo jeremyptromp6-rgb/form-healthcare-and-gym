@@ -61,7 +61,22 @@ jobs:
 
       - name: Build the release APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      # Job logs need a GitHub sign-in to read; annotations are public. On failure, surface Gradle's
+      # own explanation (the "What went wrong" block and the error lines) as annotations, so a build
+      # problem can be diagnosed from the run summary alone. Nothing secret is in a Gradle error.
+      - name: Report why the build failed
+        if: failure()
+        run: |
+          LOG="$RUNNER_TEMP/gradle.log"
+          [ -f "$LOG" ] || exit 0
+          report() { body=$(cat); body="${body//'%'/'%25'}"; body="${body//$'\n'/'%0A'}"; echo "::error title=$1::${body:0:4000}"; }
+          grep -A 25 "What went wrong" "$LOG" | head -80 | report "Gradle: what went wrong"
+          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED" "$LOG" | head -40 | report "Gradle: error lines"
+          tail -40 "$LOG" | report "Gradle: last lines"
 
       - name: Check the APK is signed (installable)
         run: |
