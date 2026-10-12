@@ -72,5 +72,8 @@
       "typedRoutes": true,
       "reactCompiler": true
     }
+  },
+  "react-native-google-mobile-ads": {
+    "delay_app_measurement_init": true
   }
 }
