@@ -69,7 +69,7 @@ jobs:
         working-directory: apps/mobile/android
         run: |
           set -o pipefail
-          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+          ./gradlew assembleRelease --no-daemon --stacktrace -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
 
       # Job logs need a GitHub sign-in to read; annotations are public. On failure, surface Gradle's
       # own explanation (the "What went wrong" block and the error lines) as annotations, so a build
@@ -82,7 +82,10 @@ jobs:
           report() { body=$(cat); body="${body//'%'/'%25'}"; body="${body//$'\n'/'%0A'}"; echo "::error title=$1::${body:0:4000}"; }
           grep -A 25 "What went wrong" "$LOG" | head -80 | report "Gradle: what went wrong"
           grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED|OutOfMemory|Java heap space|GC overhead|defined multiple times|Duplicate class|Caused by" "$LOG" | head -40 | report "Gradle: error lines"
-          tail -40 "$LOG" | report "Gradle: last lines"
+          # The 60 lines before the failure, without the ads library's banner noise: shows a failing
+          # tool's own output (e.g. a node script's error).
+          grep -n "FAILURE: Build" "$LOG" | head -1 | cut -d: -f1 | { read -r n; [ -n "$n" ] && head -n "$n" "$LOG" | grep -vE '^\*+$|^$|react-native-google-mobile-ads' | tail -60; } | report "Gradle: before the failure"
+          grep -E "^Caused by|Exception:|at org.gradle.process|node" "$LOG" | grep -vE '^[[:space:]]*at java' | head -30 | report "Gradle: causes"
 
       - name: Check the APK is signed (installable)
         run: |
