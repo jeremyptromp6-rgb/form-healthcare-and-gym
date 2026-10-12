@@ -57,7 +57,13 @@ jobs:
 
       - name: Generate the native Android project
         working-directory: apps/mobile
-        run: npx expo prebuild --platform android --no-install
+        run: |
+          npx expo prebuild --platform android --no-install
+          # The ad SDK makes the app big enough that R8/D8's dex merge can run out of the template's
+          # 2 GB Gradle heap on the runner. Give Gradle more room (the runner has 16 GB).
+          sed -i '/^org.gradle.jvmargs=/d' android/gradle.properties
+          echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8' >> android/gradle.properties
+          grep jvmargs android/gradle.properties
 
       - name: Build the release APK
         working-directory: apps/mobile/android
@@ -75,7 +81,7 @@ jobs:
           [ -f "$LOG" ] || exit 0
           report() { body=$(cat); body="${body//'%'/'%25'}"; body="${body//$'\n'/'%0A'}"; echo "::error title=$1::${body:0:4000}"; }
           grep -A 25 "What went wrong" "$LOG" | head -80 | report "Gradle: what went wrong"
-          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED" "$LOG" | head -40 | report "Gradle: error lines"
+          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED|OutOfMemory|Java heap space|GC overhead|defined multiple times|Duplicate class|Caused by" "$LOG" | head -40 | report "Gradle: error lines"
           tail -40 "$LOG" | report "Gradle: last lines"
 
       - name: Check the APK is signed (installable)
