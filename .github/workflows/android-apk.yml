@@ -62,7 +62,10 @@ jobs:
           # The ad SDK makes the app big enough that R8/D8's dex merge can run out of the template's
           # 2 GB Gradle heap on the runner. Give Gradle more room (the runner has 16 GB).
           sed -i '/^org.gradle.jvmargs=/d' android/gradle.properties
-          echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8' >> android/gradle.properties
+          # The generated file has no trailing newline: start on a fresh line, or the setting would be
+          # glued onto Expo's last property and corrupt it.
+          printf '\norg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\n' >> android/gradle.properties
+          tail -3 android/gradle.properties
           grep jvmargs android/gradle.properties
 
       - name: Build the release APK
