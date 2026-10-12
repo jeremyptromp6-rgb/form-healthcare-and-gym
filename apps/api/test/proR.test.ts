@@ -148,8 +148,8 @@ describe("subscription lifecycle (development store)", () => {
     const p = await json(u.auth, "GET", "/billing/products?platform=ios");
     expect(p.provider).toMatchObject({ configured: true, environment: "development" });
     expect(p.products.map((x: { id: string; plan: string; price: { display: string }; trialDays: number | null }) => [x.id, x.plan, x.price.display, x.trialDays])).toEqual([
-      [MONTHLY, "monthly", "$9.99", null],
-      [ANNUAL, "annual", "$59.99", null],
+      [MONTHLY, "monthly", "$3.99", null],
+      [ANNUAL, "annual", "$28.99", null],
     ]);
     expect(p.features).toHaveLength(11);
     expect(p.manageUrl).toBeNull(); // the sandbox has no store account page
@@ -259,6 +259,14 @@ describe("billing security", () => {
 
   it("production refuses the development store", () => {
     expect(() => loadConfig({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), CORS_ORIGINS: "https://app.example", BILLING_PROVIDER: "development" })).toThrow(/BILLING_PROVIDER=development is not allowed in production/);
+    expect(() => loadConfig({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), CORS_ORIGINS: "https://app.example", BILLING_PROVIDER: "development", APP_STAGE: "live" })).toThrow(/not allowed in production/);
+    expect(() => loadConfig({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), CORS_ORIGINS: "https://app.example", BILLING_PROVIDER: "development", APP_STAGE: "anything" })).toThrow();
+  });
+
+  it("a production server declared a testing stage may run the labelled sandbox store", () => {
+    const c = loadConfig({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), CORS_ORIGINS: "https://app.example", BILLING_PROVIDER: "development", APP_STAGE: "testing" });
+    expect(c.billing.provider).toBe("development");
+    expect(c.billing.dev.prices).toEqual({ monthly: 3.99, annual: 28.99 });
   });
 });
 

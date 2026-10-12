@@ -33,13 +33,17 @@ const envSchema = z.object({
   // Billing: "none" (Pro can't be bought) or "development" (a labelled sandbox store; refused in production).
   // A real store provider (App Store / Google Play / a billing service) plugs into the same interface.
   BILLING_PROVIDER: z.enum(["none", "development"]).default("none"),
+  // "testing": a pre-launch test server (throwaway data) where the labelled sandbox store may run even
+  // with NODE_ENV=production, so testers can see and try Pro on their phones. "live" (the default)
+  // refuses it — remove APP_STAGE (or set it to live) before real users and real payments.
+  APP_STAGE: z.enum(["testing", "live"]).default("live"),
   BILLING_PRODUCT_MONTHLY: z.string().regex(/^[a-z0-9_.]{3,100}$/).default("form_pro_monthly"),
   BILLING_PRODUCT_ANNUAL: z.string().regex(/^[a-z0-9_.]{3,100}$/).default("form_pro_annual"),
   // Offer a free trial only when the store product has one (0 = no trial is offered).
   BILLING_TRIAL_DAYS: z.coerce.number().int().min(0).max(31).default(0),
   // Development store only: display prices for its sandbox products and its signing secret.
-  BILLING_DEV_PRICE_MONTHLY: z.coerce.number().positive().max(1000).default(9.99),
-  BILLING_DEV_PRICE_ANNUAL: z.coerce.number().positive().max(10000).default(59.99),
+  BILLING_DEV_PRICE_MONTHLY: z.coerce.number().positive().max(1000).default(3.99),
+  BILLING_DEV_PRICE_ANNUAL: z.coerce.number().positive().max(10000).default(28.99),
   BILLING_DEV_CURRENCY: z.string().regex(/^[A-Z]{3}$/).default("USD"),
   BILLING_DEV_SECRET: z.string().min(32).optional(),
   BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(16),
@@ -120,9 +124,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (production && e.FOOD_RECOGNITION_PROVIDER === "development") {
     throw new ConfigError("FOOD_RECOGNITION_PROVIDER=development is not allowed in production");
   }
-  // The development store grants Pro without payment: it must never run in production.
-  if (production && e.BILLING_PROVIDER === "development") {
-    throw new ConfigError("BILLING_PROVIDER=development is not allowed in production");
+  // The development store grants Pro without payment: it must never run in a live production
+  // service. Only a server explicitly declared a testing stage may use it.
+  if (production && e.BILLING_PROVIDER === "development" && e.APP_STAGE !== "testing") {
+    throw new ConfigError("BILLING_PROVIDER=development is not allowed in production (only with APP_STAGE=testing)");
   }
 
   return {

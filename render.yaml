@@ -49,5 +49,15 @@ services:
         value: gemini
       - key: GEMINI_API_KEY
         sync: false
+      # TESTING ONLY: the labelled sandbox store, so FORM Pro ($3.99/month, $28.99/year) can be seen
+      # and tried on a phone. No real payment is ever taken — and anyone using this server can get
+      # Pro for free, which is fine only while it holds throwaway test data. Before real users: set
+      # BILLING_PROVIDER to none (or a real store) and remove APP_STAGE; the server then refuses the
+      # sandbox store again.
+      - key: APP_STAGE
+        value: testing
       - key: BILLING_PROVIDER
-        value: none
+        value: development
+      # Signs sandbox receipts; generated once by Render.
+      - key: BILLING_DEV_SECRET
+        generateValue: true

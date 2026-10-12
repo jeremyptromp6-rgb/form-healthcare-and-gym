@@ -637,8 +637,8 @@ streaks). Pro adds a coaching layer built only from the user's own data.
   event. A store subscription belongs to the first FORM account that verified it
   (`original_transaction_id` is unique): restoring it into another account is refused.
 - **Development store** (`providers/devBilling.ts`, `BILLING_PROVIDER=development`, refused in
-  production): a sandbox store with products (configured display prices, default $9.99/month and
-  $59.99/year), HMAC-signed receipts, restore per device "store account", and signed lifecycle
+  production): a sandbox store with products (configured display prices, default $3.99/month and
+  $28.99/year), HMAC-signed receipts, restore per device "store account", and signed lifecycle
   notifications (renew, cancel, resume, payment failure → grace → billing retry, recovery, expiry,
   refund) delivered through the real webhook endpoint. Everything it touches is labelled
   `environment: development`. No App Store / Google Play adapter is included (not configured).

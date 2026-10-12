@@ -34,8 +34,8 @@ const pro = (over: Partial<Entitlements> = {}): Entitlements => ({
 const catalog = (over: Partial<BillingCatalog> = {}): BillingCatalog => ({
   provider: { configured: true, name: 'Development store', environment: 'development' },
   products: [
-    { id: 'form_pro_monthly', plan: 'monthly', title: 'Monthly', period: 'P1M', price: { amount: 9.99, currency: 'USD', display: '$9.99' }, trialDays: null, environment: 'development' },
-    { id: 'form_pro_annual', plan: 'annual', title: 'Yearly', period: 'P1Y', price: { amount: 59.99, currency: 'USD', display: '$59.99' }, trialDays: null, environment: 'development' },
+    { id: 'form_pro_monthly', plan: 'monthly', title: 'Monthly', period: 'P1M', price: { amount: 3.99, currency: 'USD', display: '$3.99' }, trialDays: null, environment: 'development' },
+    { id: 'form_pro_annual', plan: 'annual', title: 'Yearly', period: 'P1Y', price: { amount: 28.99, currency: 'USD', display: '$28.99' }, trialDays: null, environment: 'development' },
   ],
   features: [
     { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.' },
@@ -69,11 +69,11 @@ describe('paywall', () => {
   it("shows the value, both plans with the provider's prices, and a savings figure computed from them", async () => {
     const p = await renderPaywall({ feature: 'WEEKLY_AI_REPORT' });
     expect(screen.getByText('Training that adapts to you.')).toBeTruthy();
-    expect(screen.getByText('Yearly · $59.99/year')).toBeTruthy();
-    expect(screen.getByText('Monthly · $9.99/month')).toBeTruthy();
-    expect(screen.getByText('Save 50% vs monthly')).toBeTruthy();
+    expect(screen.getByText('Yearly · $28.99/year')).toBeTruthy();
+    expect(screen.getByText('Monthly · $3.99/month')).toBeTruthy();
+    expect(screen.getByText('Save 39% vs monthly')).toBeTruthy();
     expect(screen.getByText('Free: Rule-based progression.')).toBeTruthy(); // what Free keeps is always shown
-    await fireEvent.press(screen.getByRole('button', { name: 'Subscribe · $59.99/year' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Subscribe · $28.99/year' }));
     expect(p.onPurchase).toHaveBeenCalledWith('form_pro_annual');
     await fireEvent.press(screen.getByRole('button', { name: 'Restore purchases' }));
     expect(p.onRestore).toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe('paywall', () => {
     withTrial.products = withTrial.products.map((x) => ({ ...x, trialDays: 7 }));
     await renderPaywall({ catalog: withTrial });
     expect(screen.getByRole('button', { name: 'Start 7-day free trial' })).toBeTruthy();
-    expect(screen.getByText(/After the free trial, \$59\.99\/year/)).toBeTruthy();
+    expect(screen.getByText(/After the free trial, \$28\.99\/year/)).toBeTruthy();
   });
 
   it("never pretends a purchase is possible when it isn't", async () => {

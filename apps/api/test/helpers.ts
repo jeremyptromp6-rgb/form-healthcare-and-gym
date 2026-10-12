@@ -24,7 +24,7 @@ export const testConfig: AppConfig = {
     products: { monthly: "form_pro_monthly", annual: "form_pro_annual" },
     trialDays: 0,
     graceDays: 16,
-    dev: { prices: { monthly: 9.99, annual: 59.99 }, currency: "USD", secret: "test-dev-billing-secret-at-least-32-characters" },
+    dev: { prices: { monthly: 3.99, annual: 28.99 }, currency: "USD", secret: "test-dev-billing-secret-at-least-32-characters" },
   },
   freeLimits: { foodScansPerDay: 3, coachChatPerDay: 5, aiCallsPerDay: 3 },
   coach: { provider: "rules", model: "claude-opus-5-5", timeoutMs: 20_000, dailyAiCalls: 30, chatPerHour: 20, globalDailyAiCalls: 10_000 },

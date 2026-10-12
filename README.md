@@ -74,9 +74,9 @@ append-only repairs (`node dist/reconcile.js` in production). Logs are JSON line
 (`LOG_LEVEL`, default `info`); `RATE_LIMIT_PER_MINUTE` sets the per-client ceiling (default 300).
 
 FORM Pro: `BILLING_PROVIDER=development` enables the labelled sandbox store for local work (refused in
-production; set `BILLING_DEV_SECRET` so sandbox receipts survive restarts). Product ids:
+production unless `APP_STAGE=testing` marks a throwaway test server — the hosted test API uses this; set `BILLING_DEV_SECRET` so sandbox receipts survive restarts). Product ids:
 `BILLING_PRODUCT_MONTHLY` / `BILLING_PRODUCT_ANNUAL`; `BILLING_TRIAL_DAYS` (0 = no trial offered);
-sandbox display prices `BILLING_DEV_PRICE_MONTHLY` / `BILLING_DEV_PRICE_ANNUAL`. Free allowances:
+sandbox display prices `BILLING_DEV_PRICE_MONTHLY` / `BILLING_DEV_PRICE_ANNUAL` (default $3.99 / $28.99). Free allowances:
 `FREE_SCANS_PER_DAY`, `FREE_COACH_CHAT_PER_DAY`, `FREE_AI_CALLS_PER_DAY`. No App Store / Google Play
 billing is configured — Pro can't be bought in production yet.
 
