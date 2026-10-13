@@ -48,10 +48,13 @@ jobs:
       BUILD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       # The hosted FORM API (Render). A repository variable EXPO_PUBLIC_API_URL overrides it.
       EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://form-api-e68m.onrender.com' }}
-      # This APK is a test build: it serves Google's official *test* ads (labelled "Test Ad"), never
-      # production ads. A store build sets EXPO_PUBLIC_ADS_MODE=production plus the AdMob ids as
-      # secrets (ADMOB_ANDROID_APP_ID, EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID).
-      EXPO_PUBLIC_ADS_MODE: ${{ vars.EXPO_PUBLIC_ADS_MODE || 'test' }}
+      # Ads: Google's official *test* ads (labelled "Test Ad") unless the repository variable
+      # EXPO_PUBLIC_ADS_MODE is "production", with the AdMob app id as the secret ADMOB_ANDROID_APP_ID and
+      # the interstitial unit id as the variable EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID. Preview
+      # (preview/**) builds always use test ads and Google's sample app id, whatever those settings say.
+      EXPO_PUBLIC_ADS_MODE: ${{ !startsWith(github.ref_name, 'preview/') && vars.EXPO_PUBLIC_ADS_MODE || 'test' }}
+      ADMOB_ANDROID_APP_ID: ${{ !startsWith(github.ref_name, 'preview/') && secrets.ADMOB_ANDROID_APP_ID || '' }}
+      EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID: ${{ !startsWith(github.ref_name, 'preview/') && vars.EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID || '' }}
       # A preview/** branch build: runs the Kotlin unit tests and turns on the in-app diagnostics. For
       # workflow_run, ref_name is the default branch, so main builds get "false" / "main".
       IS_PREVIEW: ${{ startsWith(github.ref_name, 'preview/') }}

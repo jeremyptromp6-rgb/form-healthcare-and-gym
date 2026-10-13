@@ -154,6 +154,8 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
           cb.onPose({ kind: 'ready', backend: s.backend });
           push(skel.current());
         } else if (m.kind === 'model') {
+          // A model message is progress too (the engine is working through its start-up steps).
+          s.progressAt = Date.now();
           // Nothing in the app depends on which model runs. While the lite one is being created the engine
           // may go quiet for a few seconds, so the stall limit is relaxed until the next frame or model message.
           s.stallMs = m.variant === 'switching' ? MODEL_SWITCH_STALL_MS : STALL_MS;

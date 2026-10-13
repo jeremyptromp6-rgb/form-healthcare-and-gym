@@ -80,8 +80,8 @@ class FormPoseCameraView(
     private var cameraController: CameraController? = null
     @Volatile private var regionW = 0
     @Volatile private var regionH = 0
-    // Frame events to JS are capped near 30 Hz (the rep engine samples at most every 50 ms anyway);
-    // the overlay still gets every result.
+    // Frame events to JS are capped at about 40 Hz, so 30 fps results with a little jitter are not
+    // dropped (the rep engine samples at most every 50 ms anyway); the overlay still gets every result.
     @Volatile private var lastFrameEventNs = 0L
 
     private val diagTick = object : Runnable {
@@ -137,6 +137,18 @@ class FormPoseCameraView(
             if (key != null) startSession()
         }
         syncDiagnostics()
+    }
+
+    // A view that is detached but not destroyed must never keep the camera running; the session key is
+    // kept so that re-attaching restarts it.
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        if (engine != null || cameraController != null) stopSession()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (sessionKey != null && engine == null && cameraController == null) startSession()
     }
 
     /** Called when React Native drops the view (OnViewDestroys). */
@@ -350,7 +362,7 @@ class FormPoseCameraView(
 
     private companion object {
         const val DIAG_PERIOD_MS = 1000L
-        const val MIN_FRAME_EVENT_NS = 30_000_000L
+        const val MIN_FRAME_EVENT_NS = 24_000_000L
         val NO_LANDMARKS = FloatArray(0)
 
         /** JS rung name: mask (full or lite), capsule or joints. */

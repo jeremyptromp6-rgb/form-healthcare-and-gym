@@ -64,6 +64,7 @@ class CameraController(
     private var stateData: LiveData<CameraState>? = null
     private var stateObserver: Observer<CameraState>? = null
     private var bindRunnable: Runnable? = null
+    private var endedRunnable: Runnable? = null
     private var viewPortRetries = 0
     private var layoutWaitMs = 0L
     private var everLive = false
@@ -114,6 +115,7 @@ class CameraController(
         generation++
         bindRunnable?.let { main.removeCallbacks(it) }
         bindRunnable = null
+        cancelEnded()
         val data = stateData
         val obs = stateObserver
         if (data != null && obs != null) data.removeObserver(obs)
@@ -227,16 +229,35 @@ class CameraController(
                 liveSent = false // frames after recovery report live again
                 listener.onError(errorName(err.code))
             } else if (state.type == CameraState.Type.OPEN) {
-                // The camera itself is open; "live" waits for the first frame.
-            } else if (state.type == CameraState.Type.CLOSED && everLive &&
-                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            ) {
-                listener.onEnded()
+                // The camera itself is open; "live" waits for the first frame. A close that was
+                // only a hand-over to another app and back is not an end.
+                cancelEnded()
+            } else if (state.type == CameraState.Type.CLOSED) {
+                liveSent = false // frames after the camera comes back report live again
+                if (everLive && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    scheduleEnded(gen)
+                }
             }
         }
         stateData = data
         stateObserver = obs
         data.observeForever(obs)
+    }
+
+    /** Reports "ended" only if the camera has not reopened within [ENDED_GRACE_MS]. Main thread. */
+    private fun scheduleEnded(gen: Int) {
+        cancelEnded()
+        val r = Runnable {
+            endedRunnable = null
+            if (gen == generation) listener.onEnded()
+        }
+        endedRunnable = r
+        main.postDelayed(r, ENDED_GRACE_MS)
+    }
+
+    private fun cancelEnded() {
+        endedRunnable?.let { main.removeCallbacks(it) }
+        endedRunnable = null
     }
 
     private fun errorName(code: Int): String = when (code) {
@@ -304,5 +325,6 @@ class CameraController(
         const val RETRY_MS = 50L
         const val MAX_VIEWPORT_RETRIES = 5
         const val MAX_LAYOUT_WAIT_MS = 10_000L
+        const val ENDED_GRACE_MS = 2_000L
     }
 }

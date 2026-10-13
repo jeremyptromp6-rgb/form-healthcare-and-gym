@@ -273,6 +273,45 @@ describe('native pose feed', () => {
     }
   });
 
+  it('a ready native engine that never delivers a frame result hands over to the WebView engine', async () => {
+    jest.useFakeTimers();
+    try {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'live', name: null });
+      await fire('onPose', { kind: 'ready', backend: 'GPU', variant: 'full', rung: 'mask' });
+      await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS - 100));
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+      await act(async () => jest.advanceTimersByTime(200));
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(h.onEngine).toHaveBeenLastCalledWith('webview');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a ready native engine that delivers a frame is never handed over by the ready timer', async () => {
+    jest.useFakeTimers();
+    try {
+      const { session } = fakeSession();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+      await fire('onCamera', { kind: 'live', name: null });
+      await fire('onPose', { kind: 'ready', backend: 'GPU', variant: 'full', rung: 'mask' });
+      await fire('onFrame', frame(flat(body())));
+      await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 1000));
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('gives the native view an accessibility label like the other engines', async () => {
+    await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...handlers()} />);
+    expect(mockNativeProps).toMatchObject({ accessibilityLabel: 'Live camera preview' });
+  });
+
   it('a fatal native failure hands this session to the WebView engine', async () => {
     const { session } = fakeSession();
     const h = handlers();

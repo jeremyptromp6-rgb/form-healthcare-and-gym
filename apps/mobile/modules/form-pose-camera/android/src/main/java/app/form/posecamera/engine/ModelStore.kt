@@ -75,6 +75,16 @@ internal class ModelStore(context: Context) {
         return "$stem-${Integer.toHexString(url.hashCode())}.task"
     }
 
+    /** Deletes part files of [target] that nobody has written to for [STALE_PART_MS] (a killed download). */
+    private fun removeStaleParts(target: File) {
+        val prefix = target.name + ".part"
+        val files = dir.listFiles() ?: return
+        val now = System.currentTimeMillis()
+        for (f in files) {
+            if (f.name.startsWith(prefix) && now - f.lastModified() > STALE_PART_MS) f.delete()
+        }
+    }
+
     private fun download(
         url: String,
         target: File,
@@ -82,8 +92,9 @@ internal class ModelStore(context: Context) {
         isCancelled: () -> Boolean,
         onProgress: (Int) -> Unit,
     ) {
-        val part = File(dir, target.name + ".part")
-        part.delete()
+        // A unique name per download: two engines (a quick close and reopen) never write the same file.
+        removeStaleParts(target)
+        val part = File(dir, target.name + ".part." + System.nanoTime())
         var conn: HttpURLConnection? = null
         var ok = false
         try {
@@ -168,5 +179,6 @@ internal class ModelStore(context: Context) {
         const val READ_TIMEOUT_MS = 30_000
         const val MAX_REDIRECTS = 5
         const val BUFFER_BYTES = 64 * 1024
+        const val STALE_PART_MS = 5 * 60 * 1000L
     }
 }

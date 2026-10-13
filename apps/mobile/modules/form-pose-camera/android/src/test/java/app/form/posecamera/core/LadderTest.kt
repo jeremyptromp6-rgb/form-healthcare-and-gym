@@ -187,11 +187,20 @@ class LadderTest {
     }
 
     @Test
-    fun lowFrameRateAlsoStepsDown() {
+    fun lowFrameRateWithCostlyInferenceAlsoStepsDown() {
         val l = ladder()
-        assertSame(LadderAction.Stay, l.onSecond(20f, 10f, 0))
-        assertSame(LadderAction.Stay, l.onSecond(20f, 10f, 1_000))
-        assertSwitch(l.onSecond(20f, 10f, 2_000), Rung.LITE_MASK, Delegate.GPU)
+        // 35 ms is within the budget (45) but above 0.7 * 45 = 31.5
+        assertSame(LadderAction.Stay, l.onSecond(35f, 10f, 0))
+        assertSame(LadderAction.Stay, l.onSecond(35f, 10f, 1_000))
+        assertSwitch(l.onSecond(35f, 10f, 2_000), Rung.LITE_MASK, Delegate.GPU)
+    }
+
+    @Test
+    fun lowFrameRateWithCheapInferenceDoesNotStepDown() {
+        val l = ladder()
+        // a dim room slows the camera, not the model: 20 ms is far below 0.7 * 45
+        for (s in 0 until 30) assertSame(LadderAction.Stay, l.onSecond(20f, 10f, s * 1_000L))
+        assertEquals(Rung.FULL_MASK, l.rung)
     }
 
     @Test

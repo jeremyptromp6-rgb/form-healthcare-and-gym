@@ -40,13 +40,22 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
   // A native camera that never delivers a frame (a device quirk) must not end in an error screen:
   // the WebView engine, which worked on every phone before, takes over instead.
   const live = useRef(false);
+  // The same for a model that reported ready but never delivers a frame result.
+  const framed = useRef(false);
+  const readyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!running) return;
     live.current = false;
+    framed.current = false;
+    readyTimer.current = null;
     const t = setTimeout(() => {
       if (!live.current) handOver();
     }, NATIVE_LIVE_FALLBACK_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      if (readyTimer.current) clearTimeout(readyTimer.current);
+      readyTimer.current = null;
+    };
   }, [running, p.retryToken, handOver]);
 
   const onCamera = useCallback(
@@ -63,21 +72,33 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
         handOver();
         return;
       }
+      if (ev.kind === 'ready' && !framed.current && !readyTimer.current) {
+        readyTimer.current = setTimeout(() => {
+          if (!framed.current) handOver();
+        }, NATIVE_LIVE_FALLBACK_MS);
+      }
       handle(toEngineMessage('pose', ev));
     },
     [handle, handOver],
   );
-  const onFrame = useCallback((e: { nativeEvent: NativeFrameEvent }) => handle(toEngineMessage('frame', e.nativeEvent)), [handle]);
+  const onFrame = useCallback(
+    (e: { nativeEvent: NativeFrameEvent }) => {
+      framed.current = true;
+      handle(toEngineMessage('frame', e.nativeEvent));
+    },
+    [handle],
+  );
   const onDiag = useCallback((e: { nativeEvent: NativeDiagEvent }) => latest.current.onDiag?.(toPoseDiag(e.nativeEvent, latest.current.leadMs)), []);
 
   if (!running || !NativePoseView) return null;
   const state = skel.current();
-  // testID is a plain React Native view prop that the module's own prop types leave out.
-  const View = NativePoseView as ComponentType<FormPoseCameraViewProps & { testID?: string }>;
+  // testID and accessibilityLabel are plain React Native view props that the module's own prop types leave out.
+  const View = NativePoseView as ComponentType<FormPoseCameraViewProps & { testID?: string; accessibilityLabel?: string }>;
   return (
     <View
       key={p.retryToken}
       testID="camera-view-native"
+      accessibilityLabel="Live camera preview"
       style={styles.view}
       active
       facing="front"

@@ -120,14 +120,18 @@ class Ladder(private val cfg: LadderConfig, gpuAllowed: Boolean) {
     /**
      * In-session governor, called once per second with the rolling median inference time (NaN = no
      * data), the frame rate over the last second, and a monotonic clock. Step down after 3
-     * consecutive seconds with the median above 1.25 x the current rung's budget, or fps in (0, 14).
+     * consecutive seconds with the median above 1.25 x the current rung's budget, or fps in (0, 14)
+     * together with a median above 0.7 x the current rung's budget (a slow camera is not a slow model).
      * Step up (at most 2 per session, 60 s after any switch, 2 min after the previous up-step) after
      * 20 consecutive seconds with the median below half of the base budget.
      */
     fun onSecond(medianMs: Float, fps: Float, nowMs: Long): LadderAction {
         if (lastSwitchMs == UNSET) lastSwitchMs = nowMs
         val over = !medianMs.isNaN() && medianMs > cfg.budgetFor(rung) * OVER_FACTOR
-        val lowFps = fps > 0f && fps < MIN_FPS
+        // A low frame rate only counts when inference is also close to the budget: in dim light the
+        // camera itself delivers fewer frames, and a cheaper rung would not help.
+        val lowFps = fps > 0f && fps < MIN_FPS &&
+            !medianMs.isNaN() && medianMs > cfg.budgetFor(rung) * LOW_FPS_COST_FACTOR
         val fast = !medianMs.isNaN() && medianMs < FAST_FACTOR * cfg.budgetMs
         overSecs = if (over) overSecs + 1 else 0
         lowFpsSecs = if (lowFps) lowFpsSecs + 1 else 0
@@ -168,6 +172,7 @@ class Ladder(private val cfg: LadderConfig, gpuAllowed: Boolean) {
         const val OVER_FACTOR = 1.25f
         const val FAST_FACTOR = 0.5f
         const val MIN_FPS = 14f
+        const val LOW_FPS_COST_FACTOR = 0.7f
         const val DOWN_SECS = 3
         const val UP_SECS = 20
         const val MIN_SWITCH_GAP_MS = 60_000L

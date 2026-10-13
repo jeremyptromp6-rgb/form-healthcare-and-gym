@@ -144,9 +144,19 @@ private class CreateJob(private val build: () -> PoseLandmarker) : Runnable {
     }
 
     fun await(timeoutMs: Long): PoseLandmarker {
-        if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-            if (state.compareAndSet(0, 2)) throw TimeoutException("landmarker creation timed out")
-            latch.await(1, TimeUnit.SECONDS) // it finished in the same instant
+        try {
+            if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+                if (state.compareAndSet(0, 2)) throw TimeoutException("landmarker creation timed out")
+                latch.await(1, TimeUnit.SECONDS) // it finished in the same instant
+            }
+        } catch (e: InterruptedException) {
+            // close() interrupts the worker: abandon the job so that run() closes a late landmarker.
+            if (state.compareAndSet(0, 2)) throw e
+            try {
+                latch.await(1, TimeUnit.SECONDS) // it finished in the same instant
+            } catch (ignored: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
         }
         error?.let { throw it }
         return result ?: throw IllegalStateException("landmarker creation gave nothing")
@@ -274,8 +284,12 @@ class PoseEngine(
     // Warm-up.
     private val warmLock = ReentrantLock()
     private val warmCond = warmLock.newCondition()
+    // Only results with a person count: an empty scene skips the mask work and would look cheap. If
+    // nobody steps into view, the any-result sample (warmAnyTimes) is used after EMPTY_SCENE_MS.
     private val warmTimes = FloatArray(WARM_TOTAL)
+    private val warmAnyTimes = FloatArray(WARM_TOTAL)
     private var warmCount = 0
+    private var warmAnyCount = 0
     private var warmGen = -1
     private var warmActive = false
 
@@ -360,6 +374,9 @@ class PoseEngine(
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         phase = Phase.FAILED
+        // Closing is not a crash. Clear the persisted GPU attempt flag now, not after the slow
+        // teardown below: a quick reopen would otherwise read a stale flag as "the GPU crashed".
+        endGpuAttempt()
         try {
             worker.shutdownNow()
         } catch (ignored: Throwable) {
@@ -415,7 +432,6 @@ class PoseEngine(
     }
 
     private fun startup() {
-        val startMs = SystemClock.elapsedRealtime()
         val ladder = Ladder(LadderConfig(config.budgetMs), guard.gpuAllowed())
         this.ladder = ladder
         var rung = if (maskAllowed()) ladder.rung else Rung.LITE_CAPSULE
@@ -423,10 +439,14 @@ class PoseEngine(
         var used = installInstance(rung, ladder.delegate, closeOldFirst = true, warm = true)
         ladder.rung = rung
         ladder.delegate = used
+        // Model creation can take seconds, so the start-up clock only starts once the first landmarker
+        // is installed, and every recreate gets its own measurement window (the total stays capped).
+        val startMs = SystemClock.elapsedRealtime()
+        var windowMs = startMs
 
         loop@ while (true) {
             if (closed.get()) throw EngineClosedException()
-            awaitWarm(startMs + STARTUP_CAP_MS, rung.hasMask)
+            awaitWarm(min(windowMs + STARTUP_CAP_MS, startMs + STARTUP_TOTAL_CAP_MS), windowMs + EMPTY_SCENE_MS, rung.hasMask)
             if (closed.get()) throw EngineClosedException()
             if (used == Delegate.GPU) endGpuAttempt() // warm-up survived (or the cap passed): not a crash
 
@@ -437,12 +457,15 @@ class PoseEngine(
                 emitModel("switching", rung)
                 used = installInstance(rung, used, closeOldFirst = true, warm = true)
                 ladder.delegate = used
+                windowMs = SystemClock.elapsedRealtime()
                 continue@loop
             }
 
             val blank = rung.hasMask && blankStreak >= BLANK_FRAMES
             val medianMs = warmMedian()
-            val elapsed = SystemClock.elapsedRealtime() - startMs
+            val nowMs = SystemClock.elapsedRealtime()
+            // The ladder's cap is per measurement window; the total cap ends start-up whatever happens.
+            val elapsed = if (nowMs - startMs >= STARTUP_TOTAL_CAP_MS) STARTUP_CAP_MS else nowMs - windowMs
             val action = ladder.startupAction(medianMs, blank, rung, used, elapsed)
             when (action) {
                 is LadderAction.Accept -> break@loop
@@ -452,6 +475,7 @@ class PoseEngine(
                     emitModel("switching", rung)
                     used = installInstance(rung, Delegate.CPU, closeOldFirst = true, warm = true)
                     ladder.delegate = used
+                    windowMs = SystemClock.elapsedRealtime()
                 }
                 is LadderAction.Switch -> {
                     rung = action.rung
@@ -459,6 +483,7 @@ class PoseEngine(
                     used = installInstance(rung, action.delegate, closeOldFirst = true, warm = true)
                     ladder.rung = rung
                     ladder.delegate = used
+                    windowMs = SystemClock.elapsedRealtime()
                 }
             }
         }
@@ -554,8 +579,16 @@ class PoseEngine(
         liteFile?.let { return it }
         val url = config.liteModelUrl
         if (url.isNullOrBlank() || liteFailed) return full
+        // While start-up waits for this download, JS must see progress or it takes the wait for a stall.
+        var lastReportMs = 0L
         return try {
-            store.ensure(url, EXPECTED_LITE_BYTES, { closed.get() }) { }.also { liteFile = it }
+            store.ensure(url, EXPECTED_LITE_BYTES, { closed.get() }) { pct ->
+                val nowMs = SystemClock.elapsedRealtime()
+                if (phase != Phase.READY && pct < 100 && nowMs - lastReportMs >= LITE_PROGRESS_EVERY_MS) {
+                    lastReportMs = nowMs
+                    safe { listener.onLoading("starting", pct) }
+                }
+            }.also { liteFile = it }
         } catch (t: Throwable) {
             if (closed.get()) throw EngineClosedException()
             Log.w(TAG, "lite model unavailable, using the full model", t)
@@ -598,6 +631,7 @@ class PoseEngine(
             warmLock.withLock {
                 warmGen = newGen
                 warmCount = 0
+                warmAnyCount = 0
                 warmActive = true
             }
         }
@@ -766,7 +800,7 @@ class PoseEngine(
             lastResultGen = myGen
             resultCount.incrementAndGet()
             val warm = phase != Phase.READY
-            if (warm) recordWarm(myGen, inferMs)
+            if (warm) recordWarm(myGen, inferMs, lm != null)
             safe { listener.onResult(r, warm) }
         } catch (t: Throwable) {
             Log.w(TAG, "result handling failed", t)
@@ -900,20 +934,26 @@ class PoseEngine(
         return copy[copy.size / 2]
     }
 
-    private fun recordWarm(myGen: Int, inferMs: Float) {
+    private fun recordWarm(myGen: Int, inferMs: Float, hasPerson: Boolean) {
         warmLock.withLock {
-            if (warmActive && myGen == warmGen && warmCount < WARM_TOTAL) {
-                warmTimes[warmCount++] = inferMs
+            if (warmActive && myGen == warmGen) {
+                if (warmAnyCount < WARM_TOTAL) warmAnyTimes[warmAnyCount++] = inferMs
+                if (hasPerson && warmCount < WARM_TOTAL) warmTimes[warmCount++] = inferMs
                 warmCond.signalAll()
             }
         }
     }
 
-    /** Waits for the warm-up sample (3 discarded + 12 kept), a blank mask, a dead mask, or the cap. */
-    private fun awaitWarm(deadlineMs: Long, rungHasMask: Boolean) {
+    /**
+     * Waits for the warm-up sample (3 discarded + 12 kept, results with a person), a blank mask, a
+     * dead mask, or [deadlineMs]. From [emptyFromMs] on, a full sample of results without a person
+     * also ends the wait, so an empty scene does not hold start-up for the whole cap.
+     */
+    private fun awaitWarm(deadlineMs: Long, emptyFromMs: Long, rungHasMask: Boolean) {
         warmLock.withLock {
             while (!closed.get()) {
                 if (warmCount >= WARM_TOTAL) break
+                if (warmAnyCount >= WARM_TOTAL && SystemClock.elapsedRealtime() >= emptyFromMs) break
                 if (rungHasMask && (blankStreak >= BLANK_FRAMES || maskDisabled)) break
                 val left = deadlineMs - SystemClock.elapsedRealtime()
                 if (left <= 0) break
@@ -923,8 +963,12 @@ class PoseEngine(
     }
 
     private fun warmMedian(): Float = warmLock.withLock {
-        if (warmCount < WARM_TOTAL) return@withLock Float.NaN
-        val kept = warmTimes.copyOfRange(WARM_DISCARD, WARM_TOTAL)
+        val sample = when {
+            warmCount >= WARM_TOTAL -> warmTimes
+            warmAnyCount >= WARM_TOTAL -> warmAnyTimes
+            else -> return@withLock Float.NaN
+        }
+        val kept = sample.copyOfRange(WARM_DISCARD, WARM_TOTAL)
         kept.sort()
         kept[kept.size / 2]
     }
@@ -1002,6 +1046,7 @@ class PoseEngine(
         const val NS_PER_MS = 1_000_000L
         const val CLOCK_TOLERANCE_NS = 1_000_000_000L
         const val LUMA_EVERY_MS = 500L
+        const val LITE_PROGRESS_EVERY_MS = 400L
         const val RING_SIZE = 8
         const val STAT_RING = 30
         const val MIN_GOVERNOR_SAMPLES = 8
@@ -1014,6 +1059,8 @@ class PoseEngine(
         const val BLANK_SESSION_FRAMES = 90
         const val BLANK_VISIBILITY = 0.8f
         const val STARTUP_CAP_MS = 8_000L
+        const val STARTUP_TOTAL_CAP_MS = 20_000L
+        const val EMPTY_SCENE_MS = 3_000L
         const val STAY_SLEEP_MS = 50L
         const val TICK_MS = 1_000L
         const val FIRST_RESULT_WAIT_MS = 3_000L
