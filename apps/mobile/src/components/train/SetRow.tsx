@@ -3,13 +3,14 @@ import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useReducedMotion } from '@/lib/a11y';
 import { a11y, colors, radius, space } from '@/theme/tokens';
-import { AppText, Badge, IconButton } from '@/components/ui';
+import { AppText, Badge, IconButton, InlineMessage } from '@/components/ui';
 
 /** Fixed column widths (pt). PREVIOUS takes whatever is left, so the table fits a 360 px screen. */
 const COL = { set: 30, input: 62, check: a11y.minTouch } as const;
 const GAP = 6;
 
-const KG_MAX = 1000;
+/** Largest load a field takes, in its unit (1000 kg, the API's limit). */
+const LOAD_MAX = { kg: 1000, lb: 2204.6 } as const;
 const REPS_MAX = 200;
 
 export interface SetRowProps {
@@ -21,7 +22,9 @@ export interface SetRowProps {
   /** Done: the logged values. Queued: the target text. */
   kg: string | null;
   reps: string | null;
-  /** Active: the editable values. */
+  /** Unit of the load column and field; kg when omitted. Loads here are already in this unit. */
+  unit?: 'kg' | 'lb';
+  /** Active: the editable values. Done: the logged values, used when the row is edited. */
   kgValue?: number;
   repsValue?: number;
   onChangeKg?: (v: number) => void;
@@ -29,21 +32,28 @@ export interface SetRowProps {
   /** Receives the numbers committed from the typed text, so the logged set never lags a keystroke. */
   onComplete?: (values: { kg: number | null; reps: number | null }) => void;
   completeLabel?: string;
+  /**
+   * Done rows only: when given, tapping the row opens its reps and load for editing. Save calls this with the
+   * typed numbers and a `done` callback: `done()` closes the editor, `done('message')` keeps it open with the message.
+   */
+  onEdit?: (values: { kg: number | null; reps: number | null }, done: (error?: string | null) => void) => void;
   onDelete?: () => void;
-  verified?: { label: string } | null;
+  verified?: { label: string; tone?: 'primary' | 'warning' } | null;
+  /** Camera-verified reps on this set: editing the reps below this lowers it (the server's rule), and the editor says so. */
+  verifiedReps?: number;
   busy?: boolean;
   disabled?: boolean;
 }
 
 /** Column captions for a table of SetRows. */
-export function SetTableHeader({ loadable }: { loadable: boolean }) {
+export function SetTableHeader({ loadable, unit = 'kg' }: { loadable: boolean; unit?: 'kg' | 'lb' }) {
   return (
     <View style={styles.row} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <Caption width={COL.set}>SET</Caption>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Caption>PREVIOUS</Caption>
       </View>
-      {loadable ? <Caption width={COL.input} center>KG</Caption> : null}
+      {loadable ? <Caption width={COL.input} center>{unit.toUpperCase()}</Caption> : null}
       <Caption width={COL.input} center>REPS</Caption>
       <View style={{ width: COL.check }} />
     </View>
@@ -62,10 +72,10 @@ function Caption({ children, width, center }: { children: string; width?: number
 
 const fmt = (n: number | undefined) => (n === undefined || !Number.isFinite(n) ? '' : String(n));
 
-function parse(text: string, max: number, integer: boolean): number | null {
+function parse(text: string, max: number, integer: boolean, dp = 2): number | null {
   const n = parseFloat(text.replace(',', '.'));
   if (!Number.isFinite(n)) return null;
-  const v = Math.min(max, Math.max(0, integer ? Math.round(n) : Math.round(n * 100) / 100));
+  const v = Math.min(max, Math.max(0, integer ? Math.round(n) : Math.round(n * 10 ** dp) / 10 ** dp));
   return v;
 }
 
@@ -74,12 +84,12 @@ function parse(text: string, max: number, integer: boolean): number | null {
  * text is kept while it still parses to the parent's number (so "22." stays "22." and "0" stays "0"
  * after each keystroke is reported); it is replaced only when the number moved elsewhere (a stepper).
  */
-function useNumberText(value: number | undefined, max: number, integer: boolean) {
+function useNumberText(value: number | undefined, max: number, integer: boolean, dp = 2) {
   const [text, setText] = useState(fmt(value));
   const [seen, setSeen] = useState(value);
   if (value !== seen) {
     setSeen(value);
-    if (parse(text, max, integer) !== value) setText(fmt(value));
+    if (parse(text, max, integer, dp) !== value) setText(fmt(value));
   }
   return [text, setText] as const;
 }
@@ -113,14 +123,17 @@ export function SetRow({
   previous,
   kg,
   reps,
+  unit = 'kg',
   kgValue,
   repsValue,
   onChangeKg,
   onChangeReps,
   onComplete,
   completeLabel,
+  onEdit,
   onDelete,
   verified,
+  verifiedReps = 0,
   busy,
   disabled,
 }: SetRowProps) {
@@ -154,25 +167,29 @@ export function SetRow({
     return () => anim.stop();
   }, [pulse, reduce, scale, flash]);
 
-  const [kgText, setKgText] = useNumberText(kgValue, KG_MAX, false);
+  // Pounds are typed to 0.1 (the precision loads round-trip at); kilograms to 0.01.
+  const loadDp = unit === 'lb' ? 1 : 2;
+  const loadMax = LOAD_MAX[unit];
+  const unitName = unit === 'lb' ? 'pounds' : 'kilograms';
+  const [kgText, setKgText] = useNumberText(kgValue, loadMax, false, loadDp);
   const [repsText, setRepsText] = useNumberText(repsValue, REPS_MAX, true);
   /** Every keystroke that parses is reported (clamped) at once, so a tap on the big Log button never reads a stale draft. */
   const type = (text: string, value: number | undefined, max: number, integer: boolean, setText: (t: string) => void, onChange?: (v: number) => void) => {
     setText(text);
-    const parsed = parse(text, max, integer);
+    const parsed = parse(text, max, integer, loadDp);
     if (parsed !== null && parsed !== value) onChange?.(parsed);
   };
-  const typeKg = (t: string) => type(t, kgValue, KG_MAX, false, setKgText, onChangeKg);
+  const typeKg = (t: string) => type(t, kgValue, loadMax, false, setKgText, onChangeKg);
   const typeReps = (t: string) => type(t, repsValue, REPS_MAX, true, setRepsText, onChangeReps);
   /** Parse + clamp the typed text (falling back to the prop), tidy the field, report a change. */
   const commit = (text: string, value: number | undefined, max: number, integer: boolean, setText: (t: string) => void, onChange?: (v: number) => void) => {
-    const parsed = parse(text, max, integer);
+    const parsed = parse(text, max, integer, loadDp);
     const final = parsed ?? value;
     setText(fmt(final));
     if (final !== undefined && final !== value) onChange?.(final);
     return final;
   };
-  const commitKg = () => commit(kgText, kgValue, KG_MAX, false, setKgText, onChangeKg);
+  const commitKg = () => commit(kgText, kgValue, loadMax, false, setKgText, onChangeKg);
   const commitReps = () => commit(repsText, repsValue, REPS_MAX, true, setRepsText, onChangeReps);
   const complete = () => {
     const k = loadable ? commitKg() : undefined;
@@ -180,33 +197,81 @@ export function SetRow({
     onComplete?.({ kg: k ?? null, reps: r ?? null });
   };
 
+  // Editing a logged (done) row: the same fields, saved with the check; Cancel puts the logged values back.
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editable = done && !!onEdit && !editing;
+  const startEdit = () => {
+    setKgText(fmt(kgValue));
+    setRepsText(fmt(repsValue));
+    setEditError(null);
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditError(null);
+  };
+  const save = () => {
+    const k = loadable ? commitKg() : undefined;
+    const r = commitReps();
+    setSaving(true);
+    setEditError(null);
+    onEdit?.({ kg: k ?? null, reps: r ?? null }, (error) => {
+      setSaving(false);
+      if (error) setEditError(error);
+      else setEditing(false);
+    });
+  };
+  const editedReps = editing ? parse(repsText, REPS_MAX, true) : null;
+  const lowersVerified = verifiedReps > 0 && editedReps !== null && editedReps < verifiedReps;
+
   const blocked = !!disabled || !!busy;
   const completeName = completeLabel ?? `Complete set ${number}`;
 
+  const fields = active || editing;
+  const labelPrefix = editing ? 'Edit set' : 'Set';
+  const cells = (
+    <>
+      <View style={{ width: COL.set }}>
+        <AppText variant="bodyStrong" color={textColor} style={styles.num}>
+          {String(number)}
+        </AppText>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
+          {previous}
+        </AppText>
+      </View>
+      {fields ? (
+        <>
+          {loadable ? <NumberField label={`${labelPrefix} ${number} weight in ${unitName}`} text={kgText} onChangeText={typeKg} integer={false} onCommit={commitKg} /> : null}
+          <NumberField label={`${labelPrefix} ${number} reps`} text={repsText} onChangeText={typeReps} integer onCommit={commitReps} />
+        </>
+      ) : (
+        <>
+          {loadable ? <Value color={textColor}>{kg ?? '—'}</Value> : null}
+          <Value color={textColor}>{reps ?? '—'}</Value>
+        </>
+      )}
+    </>
+  );
+
   return (
     <View style={[styles.wrap, done && styles.wrapDone]}>
-      {done ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.flash, { opacity: flash }]} /> : null}
+      {done ? <Animated.View style={[StyleSheet.absoluteFill, styles.flash, { opacity: flash, pointerEvents: 'none' }]} /> : null}
       <View style={styles.row}>
-        <View style={{ width: COL.set }}>
-          <AppText variant="bodyStrong" color={textColor} style={styles.num}>
-            {String(number)}
-          </AppText>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
-            {previous}
-          </AppText>
-        </View>
-        {active ? (
-          <>
-            {loadable ? <NumberField label={`Set ${number} weight in kilograms`} text={kgText} onChangeText={typeKg} integer={false} onCommit={commitKg} /> : null}
-            <NumberField label={`Set ${number} reps`} text={repsText} onChangeText={typeReps} integer onCommit={commitReps} />
-          </>
+        {editable ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Edit set ${number}: ${reps ?? 0} reps${loadable && kg ? ` at ${kg} ${unit}` : ''}`}
+            accessibilityHint="Change the reps or weight of this set"
+            onPress={startEdit}
+            style={styles.cells}>
+            {cells}
+          </Pressable>
         ) : (
-          <>
-            {loadable ? <Value color={textColor}>{kg ?? '—'}</Value> : null}
-            <Value color={textColor}>{reps ?? '—'}</Value>
-          </>
+          <View style={styles.cells}>{cells}</View>
         )}
         <View style={styles.checkCol}>
           {active ? (
@@ -219,6 +284,16 @@ export function SetRow({
               style={[styles.check, blocked && { opacity: 0.45 }]}>
               <Ionicons name="checkmark" size={20} color={colors.primary} />
             </Pressable>
+          ) : editing ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Save set ${number}`}
+              accessibilityState={{ disabled: saving, busy: saving }} aria-disabled={saving} aria-busy={saving}
+              disabled={saving}
+              onPress={save}
+              style={[styles.check, saving && { opacity: 0.45 }]}>
+              <Ionicons name="checkmark" size={20} color={colors.primary} />
+            </Pressable>
           ) : done ? (
             <Animated.View accessible accessibilityLabel={`Set ${number} done`} style={[styles.checkDone, { transform: [{ scale }] }]}>
               <Ionicons name="checkmark" size={18} color={colors.onPrimary} />
@@ -228,10 +303,21 @@ export function SetRow({
           )}
         </View>
       </View>
-      {done && (verified || onDelete) ? (
+      {done && (verified || onDelete || editing) ? (
         <View style={styles.extra}>
-          <View style={{ flex: 1, alignItems: 'flex-start' }}>{verified ? <Badge label={verified.label} tone="primary" icon="camera-outline" /> : null}</View>
+          <View style={{ flex: 1, alignItems: 'flex-start' }}>{verified ? <Badge label={verified.label} tone={verified.tone ?? 'primary'} icon="camera-outline" /> : null}</View>
+          {editing ? <IconButton icon="close" label={`Cancel editing set ${number}`} onPress={cancelEdit} /> : null}
           {onDelete ? <IconButton icon="trash-outline" label={`Delete set ${number}`} onPress={onDelete} /> : null}
+        </View>
+      ) : null}
+      {editing && lowersVerified ? (
+        <AppText variant="caption" color={colors.textMuted} style={styles.editNote}>
+          {`Camera-verified reps drop to ${editedReps} to match. Changing the weight keeps them.`}
+        </AppText>
+      ) : null}
+      {editing && editError ? (
+        <View style={styles.editNote}>
+          <InlineMessage tone="danger">{editError}</InlineMessage>
         </View>
       ) : null}
     </View>
@@ -253,6 +339,8 @@ const styles = StyleSheet.create({
   wrapDone: { backgroundColor: colors.successSoft },
   flash: { backgroundColor: colors.successSoft, borderRadius: radius.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: GAP, minHeight: a11y.minTouch + 4, paddingVertical: 2 },
+  cells: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: GAP, minHeight: a11y.minTouch },
+  editNote: { paddingLeft: COL.set + GAP, paddingBottom: space.xs },
   num: { fontVariant: ['tabular-nums'] },
   input: {
     width: COL.input,

@@ -962,6 +962,26 @@ const V21_POST_WORKOUT_ADS = `
   CREATE INDEX post_workout_ads_user_date ON post_workout_ads(user_id, local_date);
 `;
 
+/** Usage ledger for the Free per-day and per-hour limits on paid-provider features. One row per
+ *  reserved or used call, written before the provider is called and never touched when the thing it
+ *  paid for (a scan's review) is discarded or pruned, so deleting a scan can't refund the allowance.
+ *  Released rows (the provider failed) don't count. Backfilled from existing scans (UTC day). */
+const V22_PROVIDER_USAGE_EVENTS = `
+  CREATE TABLE provider_usage_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('food_scan', 'coach_call')),
+    local_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('reserved', 'used', 'released'))
+  );
+  CREATE INDEX provider_usage_events_user_date ON provider_usage_events(user_id, kind, local_date);
+  CREATE INDEX provider_usage_events_user_created ON provider_usage_events(user_id, kind, created_at);
+  CREATE INDEX provider_usage_events_created ON provider_usage_events(created_at);
+  INSERT INTO provider_usage_events (id, user_id, kind, local_date, created_at, state)
+    SELECT lower(hex(randomblob(16))), user_id, 'food_scan', substr(created_at, 1, 10), created_at, 'used' FROM food_scans;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -984,4 +1004,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 19, name: "provider_usage", up: V19_PROVIDER_USAGE },
   { version: 20, name: "pro", up: V20_PRO },
   { version: 21, name: "post_workout_ads", up: V21_POST_WORKOUT_ADS },
+  { version: 22, name: "provider_usage_events", up: V22_PROVIDER_USAGE_EVENTS },
 ];

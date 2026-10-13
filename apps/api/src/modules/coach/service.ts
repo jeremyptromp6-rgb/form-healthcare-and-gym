@@ -19,7 +19,7 @@ import type { Db } from "../../db";
 import { HttpError } from "../../http/errors";
 import type { AppContext } from "../../shared/context";
 import { errorKind } from "../../shared/observability";
-import { can, proRequired } from "../billing/entitlements";
+import { can, entitlementsFor, proRequired } from "../billing/entitlements";
 import { coachChatsToday } from "../billing/service";
 import { reserveProviderCall } from "../../shared/providerBudget";
 import { leaksInstructions } from "../../providers/aiCoach";
@@ -197,12 +197,12 @@ export function loadCoachContext(ctx: AppContext, userId: string, clock: UserClo
     },
     quests: [...quests.daily, ...quests.weekly].map((q) => ({ title: q.title, cadence: q.cadence, progress: q.progress, target: q.target, completed: q.completed })),
     // Already settled above, so no second sync.
-    analytics: analyticsForCoach(progressAnalytics(ctx, userId, clock, { range: 30 }, { sync: false })),
+    analytics: analyticsForCoach(progressAnalytics(ctx, userId, clock, { range: 30 }, { sync: false }), entitlementsFor(ctx, userId)),
     // FORM Pro: the longer view and the stat that most needs work.
     ...(can(ctx, userId, "PERSONALIZED_RECOMMENDATIONS")
       ? (() => {
           const focus = bodyQuestInsights(bq, bq.snapshots).focus;
-          return { analyticsLong: analyticsForCoach(progressAnalytics(ctx, userId, clock, { range: 90 }, { sync: false })), bodyQuestFocus: focus ? { stat: focus.stat, value: focus.value } : null };
+          return { analyticsLong: analyticsForCoach(progressAnalytics(ctx, userId, clock, { range: 90 }, { sync: false }), entitlementsFor(ctx, userId)), bodyQuestFocus: focus ? { stat: focus.stat, value: focus.value } : null };
         })()
       : {}),
   });
@@ -236,29 +236,46 @@ function aiCallsToday(db: Db, userId: string, today: string): number {
   return (db.prepare("SELECT COUNT(*) AS n FROM coach_calls WHERE user_id = ? AND local_date = ? AND provider_type = 'real_ai'").get(userId, today) as { n: number }).n;
 }
 
-function recordCall(db: Db, userId: string, today: string, kind: "insight" | "chat", type: CoachProviderType, outcome: string, now: Date) {
-  db.prepare("INSERT INTO coach_calls (user_id, local_date, kind, provider_type, outcome, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(userId, today, kind, type, outcome, now.toISOString());
+/**
+ * Opens a call record in the same synchronous step as the cap checks, before the provider is awaited,
+ * so parallel requests can't all pass the same cap. `provider_type` is 'pending' until the call is
+ * settled; `real_ai` rows count against the per-user AI allowance (failures included, as before).
+ */
+function openCall(db: Db, userId: string, today: string, kind: "insight" | "chat", now: Date): number {
+  return Number(db.prepare("INSERT INTO coach_calls (user_id, local_date, kind, provider_type, outcome, created_at) VALUES (?, ?, ?, 'pending', 'pending', ?)").run(userId, today, kind, now.toISOString()).lastInsertRowid);
+}
+
+function recordCall(db: Db, callId: number, type: CoachProviderType, outcome: string) {
+  db.prepare("UPDATE coach_calls SET provider_type = ?, outcome = ? WHERE id = ?").run(type, outcome, callId);
+}
+
+/** A request that broke before it was settled: a call that never reached a provider leaves no trace; one that did stays counted. */
+function abandonCall(db: Db, callId: number) {
+  db.prepare("DELETE FROM coach_calls WHERE id = ? AND provider_type = 'pending'").run(callId);
+  db.prepare("UPDATE coach_calls SET outcome = 'failed:error' WHERE id = ? AND outcome = 'pending'").run(callId);
 }
 
 /** One coaching answer: real AI when allowed and valid, otherwise the rules — always validated. */
-async function answer(ctx: AppContext, userId: string, c: CoachContext, topic: CoachTopic, message: string | null, history: { role: "user" | "coach"; text: string }[], kind: "insight" | "chat"): Promise<CoachResponse> {
+async function answer(ctx: AppContext, userId: string, c: CoachContext, topic: CoachTopic, message: string | null, history: { role: "user" | "coach"; text: string }[], callId: number): Promise<CoachResponse> {
   const mode = coachMode(ctx, userId);
   const now = ctx.now();
   const today = String(c.facts["now.localDate"]);
   if (mode.type !== COACH_PROVIDER_TYPES.REAL_AI_PROVIDER) {
-    recordCall(ctx.db, userId, today, kind, mode.type, mode.reason ?? "rules", now);
+    recordCall(ctx.db, callId, mode.type, mode.reason ?? "rules");
     return rulesAnswer(c, topic, message, now, mode.reason === "unconfigured" ? "unconfigured" : mode.reason === "consent_required" ? "no_consent" : null);
   }
   // Pro: the configured daily AI budget. Free: a smaller allowance, then labelled rule-based tips.
   const dailyCap = can(ctx, userId, "AI_COACH_ADVANCED") ? ctx.config.coach.dailyAiCalls : Math.min(ctx.config.coach.dailyAiCalls, ctx.config.freeLimits.aiCallsPerDay);
   if (aiCallsToday(ctx.db, userId, today) >= dailyCap) {
-    recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.DETERMINISTIC_FALLBACK, "daily_limit", now);
+    recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.DETERMINISTIC_FALLBACK, "daily_limit");
     return rulesAnswer(c, topic, message, now, "daily_limit");
   }
+  // Count this call now (a pending real-AI row), before the provider is awaited.
+  recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "pending");
   // Service-wide ceiling: many accounts together can't run up the bill either.
   if (!reserveProviderCall(ctx.db, "ai_coach", now, ctx.config.coach.globalDailyAiCalls)) {
     ctx.log.warn({ provider: "ai_coach", limit: ctx.config.coach.globalDailyAiCalls }, "global daily AI budget reached");
-    recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.DETERMINISTIC_FALLBACK, "global_limit", now);
+    recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.DETERMINISTIC_FALLBACK, "global_limit");
     return rulesAnswer(c, topic, message, now, "rate_limited");
   }
   // The provider gets an abort signal; a provider that ignores it (or throws) still can't hang or break the request.
@@ -274,23 +291,23 @@ async function answer(ctx: AppContext, userId: string, c: CoachContext, topic: C
     }),
   ]).finally(() => clearTimeout(timer));
   if (!result.ok) {
-    recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, `failed:${result.code}`, now);
+    recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, `failed:${result.code}`);
     return rulesAnswer(c, topic, message, now, DEGRADE[result.code]);
   }
   const v = validateCoachOutput(result.value, c, { topic, generatedAt: now.toISOString(), provider: { type: COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, name: mode.provider } });
   // An answer that repeats FORM's own instructions (a prompt-injection "print your rules") is never shown.
   if (v.ok && leaksInstructions(v.response.message)) {
     ctx.log.warn({ provider: "ai_coach", reasons: ["instruction_leak"] }, "coach answer rejected by validation");
-    recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "invalid_output", now);
+    recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "invalid_output");
     return rulesAnswer(c, topic, message, now, "invalid_output");
   }
   if (!v.ok) {
     // Never shown: log the reasons (no content) so prompt problems are visible in operations.
     ctx.log.warn({ provider: "ai_coach", reasons: v.reasons.map((r) => r.split(":")[0]) }, "coach answer rejected by validation");
-    recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "invalid_output", now);
+    recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "invalid_output");
     return rulesAnswer(c, topic, message, now, "invalid_output");
   }
-  recordCall(ctx.db, userId, today, kind, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "ok", now);
+  recordCall(ctx.db, callId, COACH_PROVIDER_TYPES.REAL_AI_PROVIDER, "ok");
   return v.response;
 }
 
@@ -313,7 +330,14 @@ export async function coachInsight(ctx: AppContext, userId: string, clock: UserC
 }
 
 async function freshInsight(ctx: AppContext, userId: string, clock: UserClock, topic: Exclude<CoachTopic, "chat">, c: CoachContext, hash: string): Promise<CoachResponse> {
-  const response = await answer(ctx, userId, c, topic, null, [], "insight");
+  const callId = openCall(ctx.db, userId, clock.today, "insight", ctx.now());
+  let response: CoachResponse;
+  try {
+    response = await answer(ctx, userId, c, topic, null, [], callId);
+  } catch (e) {
+    abandonCall(ctx.db, callId);
+    throw e;
+  }
   // Only cache real answers and deliberate rules answers; a transient failure should be retried later.
   if (response.degraded === null || response.degraded === "unconfigured" || response.degraded === "no_consent" || response.degraded === "daily_limit") {
     ctx.db.prepare("INSERT OR REPLACE INTO coach_insights (user_id, topic, local_date, context_hash, response, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(userId, topic, clock.today, hash, JSON.stringify(response), ctx.now().toISOString());
@@ -365,7 +389,15 @@ async function chatTurn(ctx: AppContext, userId: string, clock: UserClock, body:
   // With history off, nothing earlier is kept, so nothing earlier is sent.
   const history = keep ? chatHistory(db, userId, now, CHAT_HISTORY_TURNS * 2).map((t) => ({ role: t.role, text: t.role === "coach" ? (t.response?.message ?? t.text) : t.text })) : [];
   const c = loadCoachContext(ctx, userId, clock);
-  const response = await answer(ctx, userId, c, "chat", body.message, history, "chat");
+  // Counts toward the hourly and daily caps from here on, even while the provider is still answering.
+  const callId = openCall(db, userId, clock.today, "chat", now);
+  let response: CoachResponse;
+  try {
+    response = await answer(ctx, userId, c, "chat", body.message, history, callId);
+  } catch (e) {
+    abandonCall(db, callId);
+    throw e;
+  }
   if (keep) {
     const insert = db.prepare("INSERT OR IGNORE INTO coach_messages (user_id, client_message_id, role, text, response, created_at) VALUES (?, ?, ?, ?, ?, ?)");
     insert.run(userId, body.clientMessageId, "user", body.message, null, now.toISOString());

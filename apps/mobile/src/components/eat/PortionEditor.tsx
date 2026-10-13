@@ -254,7 +254,7 @@ export function PortionEditor({ food, initial, submitLabel, busy, error, onSubmi
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {
-    minHeight: 40,
+    minHeight: 44,
     minWidth: 44,
     alignItems: 'center',
     justifyContent: 'center',

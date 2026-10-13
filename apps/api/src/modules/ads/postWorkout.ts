@@ -58,6 +58,23 @@ function track(ctx: AppContext, userId: string, name: string, props: Record<stri
   void ctx.providers.analytics.track(event).catch(() => undefined);
 }
 
+/**
+ * Ads are served client-side (AdMob), so the server cannot know whether an ad provider is configured
+ * on the device. It therefore keeps reserving the day's slot and answering "eligible"; an app with no
+ * ad unit simply never reports back. What it must not do is let that inflate analytics, so the
+ * informational "requested" and "loaded" events (which never change state) are tracked once per ad.
+ * The memory of what was tracked is per process and bounded; a restart can at worst repeat one event.
+ */
+const TRACKED_ONCE_LIMIT = 10_000;
+const trackedOnce = new Set<string>();
+function firstTime(adId: string, event: PostWorkoutAdEvent): boolean {
+  const key = `${adId}:${event}`;
+  if (trackedOnce.has(key)) return false;
+  trackedOnce.add(key);
+  if (trackedOnce.size > TRACKED_ONCE_LIMIT) trackedOnce.delete(trackedOnce.values().next().value!);
+  return true;
+}
+
 export function decidePostWorkoutAd(ctx: AppContext, userId: string, workoutId: string): PostWorkoutDecision {
   const isPro = hasFeature(entitlementsFor(ctx, userId), "AD_FREE");
   if (isPro) return { eligible: false, reason: "pro_user" };
@@ -128,7 +145,7 @@ export function recordPostWorkoutAdEvent(
     }
     return { state: next, changed: next !== row.state };
   });
-  // Analytics follow real transitions (and the two informational events), never a replayed duplicate.
-  if (result.changed || event === "requested" || event === "loaded") track(ctx, userId, EVENT_ANALYTICS[event], event === "failed" ? { reason: failureReason ?? "unknown" } : {});
+  // Analytics follow real transitions and the first report of the two informational events, never a replayed duplicate.
+  if (result.changed || ((event === "requested" || event === "loaded") && firstTime(adId, event))) track(ctx, userId, EVENT_ANALYTICS[event], event === "failed" ? { reason: failureReason ?? "unknown" } : {});
   return { state: result.state };
 }

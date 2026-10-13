@@ -4,6 +4,7 @@ import {
   EXERCISE_BY_ID,
   evaluateSet,
   summarizeSet,
+  traceBudgetMs,
   restRemainingSeconds,
   sessionIdleMs,
   type PainLevel,
@@ -207,15 +208,20 @@ export function logSet(
     const s = ownSession(db, userId, sessionId);
     const existing = db.prepare("SELECT * FROM session_sets WHERE session_id = ? AND client_set_id = ?").get(sessionId, body.clientSetId) as SetRow | undefined;
     if (existing) return { created: false, set: setView(existing) }; // retried request: same set, never a second one
-    act(ctx, s, "log");
+    const open = act(ctx, s, "log");
     const count = (db.prepare("SELECT COUNT(*) AS n FROM session_sets WHERE session_id = ?").get(sessionId) as { n: number }).n;
     if (count >= 100) throw new HttpError(422, "too_many_sets", "A workout can have at most 100 sets");
-    const setIndex = (db.prepare("SELECT COUNT(*) AS n FROM session_sets WHERE session_id = ? AND exercise_id = ?").get(sessionId, body.exerciseId) as { n: number }).n;
+    // Stable and never repeating: the next number in the session (completion renumbers the same global order).
+    const setIndex = (db.prepare("SELECT COALESCE(MAX(set_index), -1) + 1 AS n FROM session_sets WHERE session_id = ?").get(sessionId) as { n: number }).n;
 
-    // Server-side verification: the client reports reps; only the engine decides verified reps.
-    const evaluated = evaluateSet({ exerciseId: body.exerciseId, reps: body.reps, loadKg: body.loadKg, trace: body.trace }, setIndex);
-    const id = randomUUID();
+    // Server-side verification: the client reports reps; only the engine decides verified reps. The traces
+    // of the session's verified sets must fit in the time the session really ran (server clock, pauses and
+    // idle time excluded); a trace that doesn't fit is kept as unverified reps.
     const now = ctx.now();
+    const realMs = Math.max(0, now.getTime() - new Date(open.started_at).getTime() - open.paused_ms);
+    const traceUsedMs = sets(db, sessionId).reduce((a, r) => a + (r.analysis ? ((JSON.parse(r.analysis) as SetAnalysisRecord).spanMs ?? 0) : 0), 0);
+    const evaluated = evaluateSet({ exerciseId: body.exerciseId, reps: body.reps, loadKg: body.loadKg, trace: body.trace }, setIndex, traceBudgetMs(realMs) - traceUsedMs);
+    const id = randomUUID();
     db.prepare(
       `INSERT INTO session_sets (id, session_id, client_set_id, exercise_id, set_index, target_reps, target_load_kg, reps, load_kg, verified_reps,
          verification_status, rom_percent, form_score, verified_rep_details, analysis, created_at, updated_at)

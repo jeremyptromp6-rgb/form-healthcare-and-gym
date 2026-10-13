@@ -61,19 +61,24 @@ describe("authentication", () => {
     expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409, 409]);
   });
 
-  it("throttles password guessing per account, even spread across many IPs — without revealing which accounts exist", async () => {
+  // Changed in bug-hunt S3b (A1-13): the throttle is keyed on (email, IP) so one attacker can't lock a
+  // victim out; a looser per-account ceiling (50) still covers guessing spread across many addresses.
+  // The old version expected 10 failures spread over 10 IPs to lock the account, which is the DoS.
+  it("throttles password guessing per account across many IPs (looser ceiling) — without revealing which accounts exist", async () => {
     ({ app, ctx } = await makeApp());
     const u = await registerUser(app);
-    for (let i = 0; i < 10; i++) {
-      expect((await call("POST", "/auth/login", { payload: { email: u.email, password: `wrong-guess-${i}` }, ip: `198.51.100.${i}` })).statusCode).toBe(401);
+    for (let ip = 0; ip < 5; ip++) {
+      for (let i = 0; i < 10; i++) {
+        expect((await call("POST", "/auth/login", { payload: { email: u.email, password: `wrong-guess-${i}` }, ip: `198.51.100.${ip}` })).statusCode).toBe(401);
+      }
     }
-    // The 11th attempt is refused — even with the right password, from a fresh IP.
+    // The 51st attempt is refused — even with the right password, from a fresh IP.
     const blocked = await call("POST", "/auth/login", { payload: { email: u.email, password: "correct-horse-battery" }, ip: "203.0.113.9" });
     expect(blocked.statusCode).toBe(429);
     expect(blocked.json().error.code).toBe("too_many_attempts");
-    // An unknown email behaves the same way.
-    for (let i = 0; i < 10; i++) await call("POST", "/auth/login", { payload: { email: "nobody@example.com", password: "x" }, ip: `192.0.2.${i}` });
-    expect((await call("POST", "/auth/login", { payload: { email: "nobody@example.com", password: "x" }, ip: "192.0.2.200" })).json().error.code).toBe("too_many_attempts");
+    // An unknown email behaves the same way (10 failures from one address block that address).
+    for (let i = 0; i < 10; i++) await call("POST", "/auth/login", { payload: { email: "nobody@example.com", password: "x" }, ip: "192.0.2.1" });
+    expect((await call("POST", "/auth/login", { payload: { email: "nobody@example.com", password: "x" }, ip: "192.0.2.1" })).statusCode).toBe(429);
     // Other accounts are unaffected.
     const v = await registerUser(app);
     expect((await call("POST", "/auth/login", { payload: { email: v.email, password: "correct-horse-battery" }, ip: "203.0.113.10" })).statusCode).toBe(200);
@@ -240,7 +245,7 @@ describe("backups", () => {
       await onboard(app, u.auth);
       const out = join(dir, "backups");
       const results = [0, 1, 2].map((i) => backupDatabase(dbPath, out, { now: new Date(Date.UTC(2026, 9, 2, 3, 0, i)), keep: 2 }));
-      expect(results[2]).toMatchObject({ integrity: "ok", users: 1, schemaVersion: 21 });
+      expect(results[2]).toMatchObject({ integrity: "ok", users: 1, schemaVersion: 22 });
       expect(readdirSync(out).sort()).toEqual(["form-20261002T030001Z.db", "form-20261002T030002Z.db"]);
       expect(results[2]!.removed).toEqual(["form-20261002T030000Z.db"]);
       // A damaged file is never accepted as a backup.

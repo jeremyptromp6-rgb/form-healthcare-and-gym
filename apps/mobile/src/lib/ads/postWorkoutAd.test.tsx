@@ -12,6 +12,9 @@ let mockEntitlementsPending = false;
 const mockDecide = jest.fn();
 const mockEvent = jest.fn();
 
+// usePostWorkoutAd only needs pro's pure hasFeature(); the real module drags in expo-router and the whole
+// navigation stack, which was most of this file's run time.
+jest.mock('@/lib/pro', () => ({ hasFeature: (e: { features: string[] } | undefined, f: string) => !!e?.features.includes(f) }));
 jest.mock('@/lib/queries', () => ({
   useEntitlements: () => ({ isPending: mockEntitlementsPending, data: mockEntitlementsPending ? undefined : { tier: 'free', features: mockFeatures } }),
 }));

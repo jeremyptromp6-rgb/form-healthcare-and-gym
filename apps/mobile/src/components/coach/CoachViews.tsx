@@ -90,19 +90,28 @@ export interface CoachChatViewProps {
   status: CoachStatus;
   sending: boolean;
   error: string | null;
-  onSend: (text: string) => void;
+  /** Return a promise that resolves to false when the send failed, and the typed text comes back. */
+  onSend: (text: string) => void | Promise<boolean | void>;
   onAction: (route: string) => void;
   onClear: () => void;
+  /** Why the last "Clear chat" failed, if it did. */
+  clearError?: string | null;
+  clearing?: boolean;
 }
 
 /** Coach chat: the conversation, quick questions, the composer, and plain privacy and safety notes. */
-export function CoachChatView({ turns, status, sending, error, onSend, onAction, onClear }: CoachChatViewProps) {
+export function CoachChatView({ turns, status, sending, error, onSend, onAction, onClear, clearError, clearing }: CoachChatViewProps) {
   const [draft, setDraft] = useState('');
-  const send = (text: string) => {
+  const [confirmClear, setConfirmClear] = useState(false);
+  const send = (text: string, fromDraft: boolean) => {
     const t = text.trim();
     if (!t || sending) return;
-    onSend(t);
+    const result = onSend(t);
+    // A quick question leaves whatever is typed alone; only the composer's own text is cleared.
+    if (!fromDraft) return;
     setDraft('');
+    // A failed send must not eat what the user wrote: put it back, unless they've started something new.
+    if (result && typeof result.then === 'function') void result.then((ok) => (ok === false ? setDraft((d) => (d ? d : t)) : undefined));
   };
   const rules = status.mode === 'deterministic_fallback';
 
@@ -145,7 +154,7 @@ export function CoachChatView({ turns, status, sending, error, onSend, onAction,
 
       <View style={styles.suggestions}>
         {COACH_SUGGESTIONS.map((s) => (
-          <Pressable key={s} accessibilityRole="button" onPress={() => send(s)} disabled={sending} style={({ pressed }) => [styles.suggestion, pressed && { opacity: 0.7 }]}>
+          <Pressable key={s} accessibilityRole="button" onPress={() => send(s, false)} disabled={sending} style={({ pressed }) => [styles.suggestion, pressed && { opacity: 0.7 }]}>
             <AppText variant="caption" color={colors.text}>
               {s}
             </AppText>
@@ -164,9 +173,9 @@ export function CoachChatView({ turns, status, sending, error, onSend, onAction,
           maxLength={status.chat.maxChars}
           multiline
           style={styles.input}
-          onSubmitEditing={() => send(draft)}
+          onSubmitEditing={() => send(draft, true)}
         />
-        <Button label="Send" onPress={() => send(draft)} disabled={!draft.trim() || sending} loading={sending} />
+        <Button label="Send" onPress={() => send(draft, true)} disabled={!draft.trim() || sending} loading={sending} />
       </View>
       {draft.length > status.chat.maxChars * 0.8 ? (
         <AppText variant="caption" color={colors.textFaint}>
@@ -179,7 +188,26 @@ export function CoachChatView({ turns, status, sending, error, onSend, onAction,
           ? 'Coaching, not medical advice — for pain or health concerns, see a professional. Chat history is off: nothing here is stored. Don’t share passwords or personal details.'
           : `Coaching, not medical advice — for pain or health concerns, see a professional. Chats are kept for ${status.retentionDays} days. Don’t share passwords or personal details.`}
       </AppText>
-      {turns.length > 0 ? <Button label="Clear chat" variant="ghost" icon="trash-outline" onPress={onClear} /> : null}
+      {clearError ? <InlineMessage tone="danger">{clearError}</InlineMessage> : null}
+      {turns.length > 0 && !confirmClear ? <Button label="Clear chat" variant="ghost" icon="trash-outline" loading={clearing} onPress={() => setConfirmClear(true)} /> : null}
+      {turns.length > 0 && confirmClear ? (
+        <Card style={{ gap: space.sm }}>
+          <AppText variant="bodyStrong">Clear this whole chat?</AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            Your messages and the coach&apos;s answers are deleted. This can&apos;t be undone.
+          </AppText>
+          <Button
+            label="Yes, clear chat"
+            variant="secondary"
+            icon="trash-outline"
+            onPress={() => {
+              setConfirmClear(false);
+              onClear();
+            }}
+          />
+          <Button label="Keep chat" variant="ghost" onPress={() => setConfirmClear(false)} />
+        </Card>
+      ) : null}
     </View>
   );
 }
@@ -191,7 +219,7 @@ const styles = StyleSheet.create({
   actions: { gap: space.xs },
   mine: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.primarySoft, borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: space.sm },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  suggestion: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 36, justifyContent: 'center' },
+  suggestion: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 44, justifyContent: 'center' },
   composer: { gap: space.sm },
   input: { minHeight: 48, maxHeight: 140, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.sm, color: colors.text, backgroundColor: colors.card, fontSize: 16 },
 });

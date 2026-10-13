@@ -14,7 +14,16 @@ import type { MealPlanView as Plan, PlannedMealView } from '@/lib/types';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
-const message = (e: ApiError) => (e.kind === 'network' ? 'Not saved — check your connection and try again.' : e.message);
+const message = (e: ApiError) => {
+  if (e.kind === 'network') return 'Not saved — check your connection and try again.';
+  // A meal that now clashes with the user's allergies: say exactly why, not "something went wrong".
+  if (e.code === 'meal_unsuitable') {
+    const reason = (e.details as { reason?: unknown } | undefined)?.reason;
+    if (typeof reason === 'string' && reason) return reason;
+    return 'That meal no longer fits your allergies or diet. Swap it for another.';
+  }
+  return e.message;
+};
 
 /** Meal planning: make a plan for today or the week, then eat, swap, resize, add or repeat meals. */
 export default function MealPlanScreen() {
@@ -90,6 +99,8 @@ function PlanEditor({ plan, today, onNew, creating, createError }: { plan: Plan;
   const [swapFor, setSwapFor] = useState<PlannedMealView | null>(null);
   const [repeatFrom, setRepeatFrom] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
 
   const run = (a: Parameters<typeof action.mutate>[0], mealId: string | null, after?: () => void) => {
     setError(null);
@@ -132,10 +143,29 @@ function PlanEditor({ plan, today, onNew, creating, createError }: { plan: Plan;
           </Row>
           <Button label="Keep this plan" variant="ghost" onPress={() => setReplacing(false)} />
         </Card>
+      ) : discarding ? (
+        <Card style={{ gap: space.sm }}>
+          <AppText variant="bodyStrong">Discard this plan?</AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            The plan is removed. Meals you’ve already marked eaten stay in your food log.
+          </AppText>
+          {discardError ? <InlineMessage tone="danger">{discardError}</InlineMessage> : null}
+          <Button
+            label="Yes, discard plan"
+            variant="secondary"
+            icon="trash-outline"
+            loading={del.isPending}
+            onPress={() => {
+              setDiscardError(null);
+              del.mutate(plan.id, { onError: (e) => setDiscardError(message(e)) });
+            }}
+          />
+          <Button label="Keep this plan" variant="ghost" onPress={() => (setDiscarding(false), setDiscardError(null))} />
+        </Card>
       ) : (
         <Row gap={space.sm}>
           <Button label="New plan" variant="ghost" onPress={() => setReplacing(true)} style={{ flex: 1 }} />
-          <Button label="Discard plan" variant="ghost" onPress={() => del.mutate(plan.id, { onError: (e) => setError(message(e)) })} loading={del.isPending} style={{ flex: 1 }} />
+          <Button label="Discard plan" variant="ghost" onPress={() => setDiscarding(true)} style={{ flex: 1 }} />
         </Row>
       )}
     </Screen>

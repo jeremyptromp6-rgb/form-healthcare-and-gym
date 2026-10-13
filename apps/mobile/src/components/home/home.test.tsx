@@ -273,3 +273,16 @@ describe('Home hierarchy and header chips', () => {
     expect(screen.getByLabelText(/^Water: /)).toBeTruthy();
   });
 });
+
+describe('Home last session in display units', () => {
+  it('keeps 60 kg as 60 kg for a metric user', async () => {
+    await renderHome(vm(), { units: 'metric' });
+    expect(screen.getByText(/Squat: 3 sets, 24 reps · top 60 kg/)).toBeTruthy();
+  });
+
+  it('shows the top load in pounds for an imperial user (60 kg is 132.3 lb)', async () => {
+    await renderHome(vm(), { units: 'imperial' });
+    expect(screen.getByText(/Squat: 3 sets, 24 reps · top 132.3 lb/)).toBeTruthy();
+    expect(screen.queryByText(/ kg/)).toBeNull();
+  });
+});

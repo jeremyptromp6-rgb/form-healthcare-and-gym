@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import {
   AISLE_LABEL,
   AISLE_ORDER,
+  assessFood,
   customGroceryItem,
   groceryAmountText,
   GROCERY_LIMITS,
   groceryNeedsFor,
   libraryRecipe,
+  recipeAsFood,
   scaledIngredients,
   type Aisle,
 } from "@form/domain";
@@ -16,6 +18,7 @@ import { HttpError } from "../../http/errors";
 import type { AppContext } from "../../shared/context";
 import type { UserClock } from "../../shared/userClock";
 import { logExists } from "../nutrition/service";
+import { userState } from "../users/service";
 
 /**
  * The grocery list. Items from the plan are regenerated whenever the plan changes (a ticked item
@@ -40,7 +43,10 @@ interface ItemRow {
   updated_at: string;
 }
 
-/** Planned meals not yet eaten, from today on, across active plans. */
+/**
+ * Planned meals not yet eaten, from today on, across active plans — except meals the user's current
+ * allergies or diet exclude (preferences can change after a plan was made), which must not drive shopping.
+ */
 function upcomingPlannedMeals(db: Db, userId: string, today: string): { recipeId: string; servings: number }[] {
   const rows = db
     .prepare(
@@ -48,7 +54,12 @@ function upcomingPlannedMeals(db: Db, userId: string, today: string): { recipeId
        WHERE m.user_id = ? AND p.status = 'active' AND m.local_date >= ?`,
     )
     .all(userId, today) as { recipe_id: string; servings: number; food_log_id: string | null }[];
-  return rows.filter((m) => !(m.food_log_id && logExists(db, userId, m.food_log_id))).map((m) => ({ recipeId: m.recipe_id, servings: m.servings }));
+  const prefs = userState(db, userId, today).personalization;
+  const safe = (recipeId: string) => {
+    const r = libraryRecipe(recipeId);
+    return !r || assessFood(recipeAsFood(r), prefs).verdict === "ok";
+  };
+  return rows.filter((m) => !(m.food_log_id && logExists(db, userId, m.food_log_id)) && safe(m.recipe_id)).map((m) => ({ recipeId: m.recipe_id, servings: m.servings }));
 }
 
 function insertItem(ctx: AppContext, userId: string, item: Omit<ItemRow, "id" | "user_id" | "created_at" | "updated_at">) {

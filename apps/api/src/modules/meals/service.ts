@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   addDays,
+  ALLERGENS,
   assessFood,
   eligibleRecipes,
   generateMealPlan,
@@ -154,10 +155,28 @@ function isEaten(db: Db, userId: string, m: MealRow): boolean {
   return m.food_log_id !== null && logExists(db, userId, m.food_log_id);
 }
 
-function mealView(db: Db, userId: string, m: MealRow, today: string) {
+/**
+ * Why a recipe is no longer safe for the user (null when it is). Preferences can change after a plan
+ * was made, so this is re-checked against the current allergies and diet every time a plan is read,
+ * not only when it was generated. "caution" (can't confirm safe) counts as unsafe, like everywhere else.
+ */
+function unsafeReason(r: LibraryRecipe, p: PersonalizationProfile): string | null {
+  const a = assessFood(recipeAsFood(r), p);
+  if (a.verdict === "ok") return null;
+  if (a.reasons.includes("allergen") || a.reasons.includes("custom_allergy")) {
+    const names = a.matchedAllergens.map((k) => ALLERGENS.find((x) => x.key === k)?.label.toLowerCase() ?? k);
+    return `Contains ${names.join(", ")} — on your allergy list`;
+  }
+  if (a.reasons.includes("diet_restriction")) return "Doesn't fit your diet";
+  return "We can't confirm this meal is safe for you";
+}
+
+function mealView(db: Db, userId: string, m: MealRow, today: string, p: PersonalizationProfile) {
   const r = libraryRecipe(m.recipe_id);
   const n = r ? portionNutrients(r, m.servings) : { kcal: 0, proteinG: 0, carbsG: 0, fatG: 0 };
   const eaten = isEaten(db, userId, m);
+  // Food already eaten is history; only a meal still to be eaten can be unsafe.
+  const unsafe = !eaten && r ? unsafeReason(r, p) : null;
   return {
     id: m.id,
     date: m.local_date,
@@ -170,19 +189,25 @@ function mealView(db: Db, userId: string, m: MealRow, today: string) {
     status: eaten ? ("eaten" as const) : ("planned" as const),
     foodLogId: eaten ? m.food_log_id : null,
     /** Food can be logged for today or up to 7 days back — never ahead of time. */
-    canMarkEaten: !eaten && m.local_date <= today && m.local_date >= addDays(today, -NUTRITION_LIMITS.maxBackdateDays),
+    canMarkEaten: !eaten && unsafe === null && m.local_date <= today && m.local_date >= addDays(today, -NUTRITION_LIMITS.maxBackdateDays),
+    /** True when the user's allergies or diet now exclude this recipe; swap it (see the alternatives). */
+    unsafe: unsafe !== null,
+    unsafeReason: unsafe,
     _exact: n,
     _eaten: eaten,
+    _unsafe: unsafe !== null,
   };
 }
 
 export function planView(db: Db, userId: string, p: PlanRow, today: string) {
-  const meals = mealRows(db, p.id).map((m) => mealView(db, userId, m, today));
+  const prefs = personalization(db, userId, today);
+  const meals = mealRows(db, p.id).map((m) => mealView(db, userId, m, today, prefs));
   const dates = planDates(p);
   const byDate = Object.fromEntries(
     dates.map((d) => {
       const day = meals.filter((m) => m.date === d);
-      return [d, { planned: presentMacros(sumNutrients(day.map((m) => m._exact))), eaten: presentMacros(sumNutrients(day.filter((m) => m._eaten).map((m) => m._exact))), meals: day.length }];
+      // Meals the user can no longer eat don't count towards what the day is planned to provide.
+      return [d, { planned: presentMacros(sumNutrients(day.filter((m) => !m._unsafe).map((m) => m._exact))), eaten: presentMacros(sumNutrients(day.filter((m) => m._eaten).map((m) => m._exact))), meals: day.length }];
     }),
   );
   return {
@@ -194,7 +219,7 @@ export function planView(db: Db, userId: string, p: PlanRow, today: string) {
     status: p.status,
     targets: JSON.parse(p.targets) as PlanTargets,
     warnings: JSON.parse(p.warnings) as string[],
-    meals: meals.map(({ _exact, _eaten, ...m }) => m),
+    meals: meals.map(({ _exact, _eaten, _unsafe, ...m }) => m),
     totalsByDate: byDate,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
@@ -366,7 +391,13 @@ export function repeatDay(ctx: AppContext, userId: string, planId: string, fromD
     const p = ownPlan(db, userId, planId);
     const dates = planDates(p);
     if (!dates.includes(fromDate) || toDates.some((d) => !dates.includes(d) || d === fromDate)) throw new HttpError(422, "date_out_of_range", "Choose other days of this plan");
-    const source = mealRows(db, planId).filter((m) => m.local_date === fromDate);
+    // Meals the user's allergies or diet now exclude are never copied onto other days.
+    const prefs = personalization(db, userId, clock.today);
+    const source = mealRows(db, planId).filter((m) => {
+      if (m.local_date !== fromDate) return false;
+      const r = libraryRecipe(m.recipe_id);
+      return !r || unsafeReason(r, prefs) === null;
+    });
     if (source.length === 0) throw new HttpError(422, "nothing_to_repeat", "That day has no meals to repeat");
     for (const d of new Set(toDates)) {
       const target = mealRows(db, planId).filter((m) => m.local_date === d);
@@ -393,7 +424,11 @@ export function markEaten(ctx: AppContext, userId: string, planId: string, mealI
     if (m.local_date > clock.today) throw new HttpError(422, "not_yet", "You can mark a meal eaten on the day you eat it");
     const r = libraryRecipe(m.recipe_id);
     if (!r) throw new HttpError(422, "recipe_unavailable", "This recipe is no longer available — log the food another way");
-    const log = insertRecipeLog(ctx, userId, { clientLogId, localDate: m.local_date, mealType: m.slot, title: r.title, servings: m.servings, servingGrams: r.servingGrams, perServing: r.perServing }, clock);
+    // Allergies/diet may have changed since the plan was made: never log (and so never nudge the user to eat) an excluded recipe.
+    const why = unsafeReason(r, personalization(db, userId, clock.today));
+    if (why) throw new HttpError(422, "meal_unsuitable", `${why}. Swap this meal for one of the alternatives instead.`, { mealId: m.id, reason: why });
+    // The log key is scoped to this meal, so a client-supplied id can never attach another log (or another meal's) to it.
+    const log = insertRecipeLog(ctx, userId, { clientLogId: `planmeal:${m.id}:${clientLogId}`, localDate: m.local_date, mealType: m.slot, title: r.title, servings: m.servings, servingGrams: r.servingGrams, perServing: r.perServing }, clock);
     db.prepare("UPDATE planned_meals SET food_log_id = ?, eaten_at = ?, updated_at = ? WHERE id = ?").run(log.id, ctx.now().toISOString(), ctx.now().toISOString(), m.id);
     touch(ctx, planId);
     syncPlanGroceries(ctx, userId, clock);
@@ -413,6 +448,26 @@ export function unmarkEaten(ctx: AppContext, userId: string, planId: string, mea
     syncPlanGroceries(ctx, userId, clock);
     return getPlan(ctx, userId, planId, clock);
   });
+}
+
+/**
+ * Runs after the user's allergies or diet change (inside the same transaction): the grocery list is
+ * rebuilt without anything only needed by meals that are now unsafe, and plans holding such meals are
+ * touched so clients refetch them. The meals themselves are flagged `unsafe` by `planView`, which
+ * re-checks on every read (so a missed call here can never make an unsafe meal look fine).
+ */
+export function reconcilePlansWithPreferences(ctx: AppContext, userId: string, clock: UserClock): void {
+  const { db } = ctx;
+  const prefs = personalization(db, userId, clock.today);
+  const plans = db.prepare("SELECT * FROM meal_plans WHERE user_id = ? AND status = 'active'").all(userId) as unknown as PlanRow[];
+  for (const p of plans) {
+    const hasUnsafe = mealRows(db, p.id).some((m) => {
+      const r = libraryRecipe(m.recipe_id);
+      return !!r && !isEaten(db, userId, m) && unsafeReason(r, prefs) !== null;
+    });
+    if (hasUnsafe) touch(ctx, p.id);
+  }
+  syncPlanGroceries(ctx, userId, clock);
 }
 
 export function alternatives(ctx: AppContext, userId: string, planId: string, mealId: string, clock: UserClock) {

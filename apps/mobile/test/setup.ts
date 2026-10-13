@@ -14,3 +14,9 @@ jest.mock('react-native-google-mobile-ads', () => ({
   MaxAdContentRating: { G: 'G', PG: 'PG', T: 'T', MA: 'MA' },
   TestIds: { INTERSTITIAL: 'test-interstitial' },
 }));
+
+// Expo installs `fetch` as a lazy global that loads a native logger the first time it's read. If a
+// test's first read lands after Jest has torn the environment down, that logger writes "Cannot log
+// after tests are done" and Jest exits 1 even though every test passed. Reading it once here, while
+// the environment is alive, settles the getter up front.
+void globalThis.fetch;

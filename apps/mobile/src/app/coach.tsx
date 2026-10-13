@@ -4,6 +4,7 @@ import { Buddy } from '@/components/art/Buddy';
 import { CoachChatView } from '@/components/coach/CoachViews';
 import { ErrorState, IconButton, Row, Screen, StateView } from '@/components/ui';
 import { ProUpsellFor } from '@/components/pro/ProUpsellFor';
+import type { ApiError } from '@/lib/api';
 import { uuid } from '@/lib/dates';
 import { proFeatureOf } from '@/lib/pro';
 import type { PremiumFeatureId } from '@/lib/types';
@@ -17,10 +18,12 @@ export default function CoachScreen() {
   const send = useSendCoachMessage();
   const clear = useClearCoachMessages();
   const [error, setError] = useState<string | null>(null);
+  const [clearError, setClearError] = useState<string | null>(null);
   const [proLocked, setProLocked] = useState<PremiumFeatureId | null>(null);
   const close = <IconButton icon="close" label="Close coach" onPress={() => (router.canGoBack() ? router.back() : router.replace('/' as Href))} />;
 
   if (status.isError && !status.data) return <Screen title="Coach" right={close}><ErrorState error={status.error} onRetry={status.refetch} /></Screen>;
+  if (messages.isError && !messages.data) return <Screen title="Coach" right={close}><ErrorState error={messages.error} onRetry={messages.refetch} /></Screen>;
   if (!status.data || !messages.data) return <Screen title="Coach" right={close}><StateView kind="loading" /></Screen>;
   if (status.data.mode === 'unavailable') {
     const byUser = status.data.reason === 'disabled_by_user';
@@ -53,20 +56,26 @@ export default function CoachScreen() {
         status={status.data}
         sending={send.isPending}
         error={error}
-        onSend={(message) => {
+        // Resolves to false on failure so the chat puts the typed text back.
+        onSend={async (message) => {
           setError(null);
-          send.mutate(
-            { message, clientMessageId: uuid() },
-            {
-              onError: (e) => {
-                setProLocked(proFeatureOf(e));
-                setError(e.kind === 'rate_limited' || e.kind === 'pro_required' ? e.message : e.kind === 'network' ? "Couldn't reach the coach. Check your connection and try again." : e.message);
-              },
-            },
-          );
+          try {
+            await send.mutateAsync({ message, clientMessageId: uuid() });
+            return true;
+          } catch (e) {
+            const err = e as ApiError;
+            setProLocked(proFeatureOf(err));
+            setError(err.kind === 'rate_limited' || err.kind === 'pro_required' ? err.message : err.kind === 'network' ? "Couldn't reach the coach. Check your connection and try again." : err.message);
+            return false;
+          }
         }}
         onAction={(route) => router.push(route as Href)}
-        onClear={() => clear.mutate()}
+        onClear={() => {
+          setClearError(null);
+          clear.mutate(undefined, { onError: (e) => setClearError(e.kind === 'network' ? "Couldn't clear the chat. Check your connection and try again." : e.message) });
+        }}
+        clearError={clearError}
+        clearing={clear.isPending}
       />
       {proLocked ? <ProUpsellFor feature={proLocked} compact /> : null}
     </Screen>

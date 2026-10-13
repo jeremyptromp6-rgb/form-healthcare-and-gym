@@ -14,7 +14,7 @@ import { transaction } from "../../db";
 import { HttpError } from "../../http/errors";
 import { loadSettings } from "../users/repo";
 import type { AppContext } from "../../shared/context";
-import { reserveProviderCall } from "../../shared/providerBudget";
+import { refundProviderCall, reserveProviderCall } from "../../shared/providerBudget";
 import { providerFailure } from "../../shared/providers";
 import { lastRecognitionFailure } from "../../providers/foodRecognition";
 import { userClock } from "../../shared/userClock";
@@ -100,37 +100,68 @@ export async function createScan(ctx: AppContext, userId: string, clientScanId: 
   if (!provider.development && !loadSettings(db, userId).foodScanConsent) {
     throw new HttpError(403, "scan_consent_required", "Scanning sends your meal photo to an outside recognition service. Allow it in Settings → Food scanner first.", { retryable: false });
   }
-  if (!can(ctx, userId, "FOOD_SCANNER_PREMIUM")) {
-    const clock = userClock(ctx, userId);
-    const limit = ctx.config.freeLimits.foodScansPerDay;
-    if (scansToday(ctx, userId, clock.timezone, clock.today) >= limit) {
-      throw proRequired("FOOD_SCANNER_PREMIUM", `You've used today's ${limit} free meal scans. Weighing, search and labels are always unlimited — or scan more with FORM Pro.`);
-    }
-  }
   // A retry while the first upload is still being recognised shares that one provider call.
   return ctx.flights.run(`scan:${userId}:${clientScanId}`, () => recognizeAndStore(ctx, userId, clientScanId, image));
+}
+
+/** Marks a ledger row `used` (the provider answered) or `released` (it didn't: the attempt doesn't count). */
+function settleUsage(db: Db, id: string, state: "used" | "released"): void {
+  db.prepare("UPDATE provider_usage_events SET state = ? WHERE id = ?").run(state, id);
 }
 
 async function recognizeAndStore(ctx: AppContext, userId: string, clientScanId: string, image: { mimeType: PhotoMime; base64: string }) {
   const { db } = ctx;
   const provider = ctx.providers.food;
   const now = ctx.now();
-  // Service-wide ceiling on paid recognition calls (the development sample costs nothing).
-  if (!provider.development && !reserveProviderCall(db, "food_recognition", now, ctx.config.foodRecognition.globalPerDay)) {
+
+  // Everything up to the provider call is one synchronous step, so parallel requests can't all pass
+  // the same check: each reserves its place in the usage ledger before the next one looks.
+  // 1) The cheapest check first: a bad image costs the user nothing and the service nothing.
+  // Validates type and size, strips EXIF/metadata. The bytes never touch the database or disk.
+  const data = sanitizePhoto(image.mimeType, image.base64, SCAN_LIMITS.maxImageBytes);
+  // 2) This user's own limits, counted from the ledger (reserved + used; discarding a scan can't refund them).
+  const clock = userClock(ctx, userId);
+  const counted = "state IN ('reserved', 'used')";
+  if (!can(ctx, userId, "FOOD_SCANNER_PREMIUM")) {
+    const limit = ctx.config.freeLimits.foodScansPerDay;
+    if (scansToday(ctx, userId, clock.timezone, clock.today) >= limit) {
+      throw proRequired("FOOD_SCANNER_PREMIUM", `You've used today's ${limit} free meal scans. Weighing, search and labels are always unlimited — or scan more with FORM Pro.`);
+    }
+  }
+  const recent = (db.prepare(`SELECT COUNT(*) AS n FROM provider_usage_events WHERE user_id = ? AND kind = 'food_scan' AND created_at > ? AND ${counted}`).get(userId, new Date(now.getTime() - 3_600_000).toISOString()) as { n: number }).n;
+  if (recent >= ctx.config.foodRecognition.scansPerHour) throw new HttpError(429, "scan_limit", "You've scanned a lot this hour. Try again later, or log food by search.");
+  // 3) Reserve this user's place.
+  const usageId = randomUUID();
+  db.prepare("DELETE FROM provider_usage_events WHERE created_at < ?").run(new Date(now.getTime() - 7 * 86_400_000).toISOString());
+  db.prepare("INSERT INTO provider_usage_events (id, user_id, kind, local_date, created_at, state) VALUES (?, ?, 'food_scan', ?, ?, 'reserved')").run(usageId, userId, clock.today, now.toISOString());
+  // 4) Service-wide ceiling on paid recognition calls (the development sample costs nothing), last,
+  // so a request that was going to be refused anyway never spends it.
+  const paid = !provider.development;
+  if (paid && !reserveProviderCall(db, "food_recognition", now, ctx.config.foodRecognition.globalPerDay)) {
+    settleUsage(db, usageId, "released");
     ctx.log.warn({ provider: "food_recognition", limit: ctx.config.foodRecognition.globalPerDay }, "global daily recognition budget reached");
     throw new HttpError(503, "food_scan_unavailable", "Meal scanning has reached today's capacity. Log food by search, a label or your scale — scanning will be back tomorrow.", { retryable: false });
   }
-  const recent = (db.prepare("SELECT COUNT(*) AS n FROM food_scans WHERE user_id = ? AND created_at > ?").get(userId, new Date(now.getTime() - 3_600_000).toISOString()) as { n: number }).n;
-  if (recent >= ctx.config.foodRecognition.scansPerHour) throw new HttpError(429, "scan_limit", "You've scanned a lot this hour. Try again later, or log food by search.");
 
-  // Validates type and size, strips EXIF/metadata. The bytes never touch the database or disk.
-  const data = sanitizePhoto(image.mimeType, image.base64, SCAN_LIMITS.maxImageBytes);
-  const result = await recognizeWithDeadline(ctx, { mimeType: image.mimeType, data });
+  // From here the attempt can still fail: give the user's place (and, when nothing was billed, the
+  // global call) back, so only scans that were actually recognised use up the allowance.
+  let result;
+  try {
+    result = await recognizeWithDeadline(ctx, { mimeType: image.mimeType, data });
+  } catch (e) {
+    settleUsage(db, usageId, "released");
+    // A timeout may still have been billed by the provider; anything else never reached it.
+    if (paid && !(e instanceof HttpError && e.code === "scan_timeout")) refundProviderCall(db, "food_recognition", now);
+    throw e;
+  }
   if (!result.ok) {
+    settleUsage(db, usageId, "released");
+    if (paid) refundProviderCall(db, "food_recognition", now);
     // Say why in the logs (never the photo or the user): the app only shows a short message.
     ctx.log.warn({ provider: "food_recognition", code: result.code, detail: lastRecognitionFailure(ctx) }, result.message);
     throw providerFailure(result);
   }
+  settleUsage(db, usageId, "used");
 
   const review = buildScanReview(result.value, VERIFIED_FOODS);
   const row: ScanRow = {

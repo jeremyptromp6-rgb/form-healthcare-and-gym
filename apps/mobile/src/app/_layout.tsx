@@ -5,14 +5,15 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StateView } from '@/components/ui';
+import { AppText, StateView } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { reportCrash } from '@/lib/crashReport';
 import { useMe } from '@/lib/queries';
 import { bindAppFocus, createQueryClient } from '@/lib/queryClient';
 import { useTimeZoneSync } from '@/lib/timezone';
+import { useAfterDelay } from '@/lib/timing';
 import { installFocusRing } from '@/lib/webFocus';
-import { colors, scheme } from '@/theme/tokens';
+import { colors, scheme, space } from '@/theme/tokens';
 
 const baseTheme = scheme === 'dark' ? DarkTheme : DefaultTheme;
 const navTheme = {
@@ -20,10 +21,18 @@ const navTheme = {
   colors: { ...baseTheme.colors, background: colors.bg, card: colors.surface, primary: colors.primary, text: colors.text, border: colors.border },
 };
 
-function FullScreenLoading() {
+/** How long the first load may take before we say the server is probably asleep. */
+const WAKING_CAPTION_AFTER_MS = 6000;
+
+function FullScreenLoading({ waking }: { waking?: boolean }) {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center' }}>
       <StateView kind="loading" />
+      {waking ? (
+        <AppText variant="caption" color={colors.textMuted} style={{ textAlign: 'center', paddingHorizontal: space.xl }}>
+          Waking up the server — this can take up to a minute
+        </AppText>
+      ) : null}
     </View>
   );
 }
@@ -39,7 +48,9 @@ function RootNavigator() {
   useTimeZoneSync();
   // Wait for /me only while it has a chance: after one failure (offline, API down) go on in, and
   // let each screen show its own error state instead of holding everyone on a spinner through retries.
-  if (status === 'loading' || (status === 'signedIn' && me.isPending && me.failureCount === 0)) return <FullScreenLoading />;
+  const waitingForMe = status === 'signedIn' && me.isPending && me.failureCount === 0;
+  const waking = useAfterDelay(waitingForMe, WAKING_CAPTION_AFTER_MS);
+  if (status === 'loading' || waitingForMe) return <FullScreenLoading waking={waking} />;
 
   const signedIn = status === 'signedIn';
   const needsOnboarding = signedIn && me.data !== undefined && !me.data.onboarding.completed;

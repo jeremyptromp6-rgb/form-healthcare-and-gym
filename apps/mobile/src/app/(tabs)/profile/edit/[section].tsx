@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BodySection, GoalSection, HabitsSection, NutritionSection, TrainingSection, type SectionProps } from '@/components/profile/sections';
 import { ErrorState, InlineMessage, Screen, StateView } from '@/components/ui';
 import { useCatalog, useMe } from '@/lib/queries';
@@ -19,6 +19,11 @@ export default function EditSection() {
   const me = useMe();
   const catalog = useCatalog();
   const [saved, setSaved] = useState(false);
+  // The pending "go back" after saving; leaving by hand first must cancel it, or it pops a second screen.
+  const backTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (backTimer.current) clearTimeout(backTimer.current);
+  }, []);
   const def = SECTIONS[section as OnboardingStep];
 
   if (!def) {
@@ -43,7 +48,8 @@ export default function EditSection() {
           onSaved={() => {
             setSaved(true);
             // The profile stack always has the hub underneath (initialRouteName), so Back returns to it.
-            setTimeout(() => router.back(), 600);
+            if (backTimer.current) clearTimeout(backTimer.current);
+            backTimer.current = setTimeout(() => router.back(), 600);
           }}
         />
       ) : !me.isError && !catalog.isError ? (

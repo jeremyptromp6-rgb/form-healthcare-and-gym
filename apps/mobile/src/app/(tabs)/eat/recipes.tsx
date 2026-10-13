@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { AppText, Card, Divider, ErrorState, Field, ListRow, Screen, Segmented, StateView } from '@/components/ui';
 import { MEAL_LABEL } from '@/lib/eat';
-import { useRecipes } from '@/lib/queries';
+import { SEARCH_DEBOUNCE_MS, useRecipes } from '@/lib/queries';
+import { useDebouncedValue } from '@/lib/timing';
 import type { MealType } from '@/lib/types';
 import { colors, space } from '@/theme/tokens';
 
@@ -14,7 +15,8 @@ export default function Recipes() {
   const params = useLocalSearchParams<{ planId?: string; date?: string }>();
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
-  const recipes = useRecipes({ ...(filter === 'saved' ? { saved: true } : filter !== 'all' ? { slot: filter } : {}), ...(q.trim().length >= 2 ? { q: q.trim() } : {}) });
+  const searchText = useDebouncedValue(q.trim(), SEARCH_DEBOUNCE_MS);
+  const recipes = useRecipes({ ...(filter === 'saved' ? { saved: true } : filter !== 'all' ? { slot: filter } : {}), ...(searchText.length >= 2 ? { q: searchText } : {}) });
   const picking = params.planId && params.date;
 
   return (

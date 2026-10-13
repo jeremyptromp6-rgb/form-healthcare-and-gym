@@ -51,14 +51,38 @@ export interface RouteInfo {
   url: string;
 }
 
+/** Trust the first `hops` addresses counting from the socket (hop 0 is the connected proxy). */
+const trustHops = (hops: number) => (_address: string, hop: number) => hop < hops;
+
+/**
+ * What a request line carries: the method, the route pattern (/foods/:id) or, for an unmatched
+ * route, the path without its query string, and the client address. Never the query string
+ * (food search terms) and never headers.
+ */
+function serializeRequest(req: { method?: string; url?: string; routeOptions?: { url?: string }; raw?: { url?: string }; ip?: string; socket?: { remoteAddress?: string } }) {
+  const path = (req.url ?? req.raw?.url ?? "").split("?")[0];
+  return { method: req.method, url: req.routeOptions?.url ?? path, remoteAddress: req.ip ?? req.socket?.remoteAddress };
+}
+
 export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstance; ctx: AppContext; routes: RouteInfo[] }> {
   // Structured JSON logs with a request id on every line; secrets and personal fields are redacted
   // (see shared/observability). Bodies are never logged.
   const app = Fastify({
-    logger: opts.logger ? { level: opts.config.logLevel, redact: { paths: LOG_REDACT_PATHS, censor: "[redacted]" }, ...(opts.logStream ? { stream: opts.logStream } : {}) } : false,
-    trustProxy: opts.config.env === "production",
+    logger: opts.logger
+      ? { level: opts.config.logLevel, redact: { paths: LOG_REDACT_PATHS, censor: "[redacted]" }, serializers: { req: serializeRequest }, ...(opts.logStream ? { stream: opts.logStream } : {}) }
+      : false,
+    // Production runs behind Render's load balancer: exactly one proxy hop, so only the address that
+    // proxy appended to X-Forwarded-For is believed (req.ip is what the proxy saw as its client).
+    // `true` would trust the whole header, which a client can forge to dodge per-IP limits.
+    // TRUST_PROXY_HOPS raises the count if a CDN is ever added in front of Render.
+    // A function, not the number: Fastify 5 treats a bare hop count as "trust nobody" (fail closed),
+    // which would make every client share the load balancer's address.
+    trustProxy: opts.config.env === "production" ? trustHops(opts.config.trustProxyHops ?? 1) : false,
     genReqId: () => randomUUID(),
   });
+  if (opts.config.stage === "testing" && opts.config.billing.provider === "development") {
+    app.log.warn("APP_STAGE=testing with BILLING_PROVIDER=development: Pro is free for everyone on this server. Remove both before real users and real payments.");
+  }
   const db = openDb(opts.config.databasePath);
   const now = opts.now ?? (() => new Date());
   const providers = opts.providers ?? { ...createUnconfiguredProviders(), ...foodRecognitionFromConfig(opts.config), ...aiCoachFromConfig(opts.config) };
@@ -105,13 +129,16 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     }
   });
   // Public, for operators: which build is running and which features are live. No user data and
-  // no secrets — only what the app already shows every signed-in user, plus provider names.
+  // no secrets — only what the app already shows every signed-in user, plus provider names. The last
+  // food-recognition failure carries codes and times only, never free text (model output can echo a photo).
   app.get("/status", async () => {
     const statuses = providerStatuses(ctx.providers);
     const features = featureAvailability(statuses);
     const food = statuses.find((s) => s.kind === "food_recognition");
     return {
       version: (process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "").slice(0, 7) || null,
+      // "testing" is a throwaway pre-launch server (sandbox store allowed); anything else is live.
+      stage: ctx.config.stage ?? "live",
       features: { foodScan: features.food_scan.available, aiCoach: features.ai_coach.available, cameraVerification: features.camera_verification.available },
       foodRecognition: food ? { state: food.state, provider: food.provider, lastFailure: lastRecognitionFailure(ctx) } : null,
     };

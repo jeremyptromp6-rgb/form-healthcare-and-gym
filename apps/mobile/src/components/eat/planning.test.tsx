@@ -1,5 +1,6 @@
 import { libraryRecipe } from '@form/domain';
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import type { GroceryListView as List, MealPlanView as Plan, PlannedMealView, Recipe } from '@/lib/types';
 import { GroceryListView } from './GroceryListView';
 import { MealPlanView } from './MealPlanView';
@@ -20,6 +21,8 @@ function meal(over: Partial<PlannedMealView>): PlannedMealView {
     status: 'planned',
     foodLogId: null,
     canMarkEaten: true,
+    unsafe: false,
+    unsafeReason: null,
     ...over,
   };
 }
@@ -104,6 +107,50 @@ describe('MealPlanView', () => {
     expect(screen.getByText('Tomorrow dinner')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Mark eaten' })).toBeNull();
     expect(screen.getByText(/some meals repeat/)).toBeTruthy();
+  });
+
+  describe('a meal that now clashes with an allergy', () => {
+    const unsafe = meal({ id: 'u1', title: 'Egg fried rice', unsafe: true, unsafeReason: 'Contains eggs — on your allergy list', canMarkEaten: false });
+
+    it('warns with the reason, blocks Mark eaten, and puts Swap front and centre', async () => {
+      const h = handlers();
+      await render(<MealPlanView plan={plan([unsafe])} today={TODAY} date={TODAY} {...h} />);
+      expect(screen.getByText('Contains eggs — on your allergy list')).toBeTruthy();
+      expect(screen.getByText('Not safe for you')).toBeTruthy();
+      const eat = screen.getByRole('button', { name: 'Mark eaten' });
+      expect(eat.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+      await fireEvent.press(eat);
+      expect(h.onMarkEaten).not.toHaveBeenCalled();
+      await fireEvent.press(screen.getByRole('button', { name: 'Swap this meal' }));
+      expect(h.onSwap).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }));
+    });
+
+    it('falls back to a plain warning when the server gave no reason', async () => {
+      await render(<MealPlanView plan={plan([{ ...unsafe, unsafeReason: null }])} today={TODAY} date={TODAY} {...handlers()} />);
+      expect(screen.getByText(/no longer fits your allergies or diet/)).toBeTruthy();
+    });
+
+    it('a safe meal shows no warning and keeps a working Mark eaten', async () => {
+      const h = handlers();
+      await render(<MealPlanView plan={plan([meal({})])} today={TODAY} date={TODAY} {...h} />);
+      expect(screen.queryByText('Not safe for you')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Swap this meal' })).toBeNull();
+      await fireEvent.press(screen.getByRole('button', { name: 'Mark eaten' }));
+      expect(h.onMarkEaten).toHaveBeenCalled();
+    });
+
+    it('an eaten meal is history: no warning even if the recipe is flagged now', async () => {
+      await render(<MealPlanView plan={plan([{ ...unsafe, status: 'eaten', foodLogId: 'l9' }])} today={TODAY} date={TODAY} {...handlers()} />);
+      expect(screen.queryByText('Not safe for you')).toBeNull();
+      expect(screen.queryByText('Contains eggs — on your allergy list')).toBeNull();
+    });
+  });
+
+  it('day chips reach a 44-point touch target', async () => {
+    await render(<MealPlanView plan={plan(meals, {})} today={TODAY} date={TODAY} {...handlers()} />);
+    const tab = screen.getByRole('tab', { name: 'Today' });
+    const style = StyleSheet.flatten(typeof tab.props.style === 'function' ? tab.props.style({ pressed: false }) : tab.props.style);
+    expect(style.minHeight).toBeGreaterThanOrEqual(44);
   });
 });
 

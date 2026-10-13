@@ -9,12 +9,15 @@ import { AppText, Button, Card, HeroMedia, InlineMessage, MuscleBars, Row, StatS
 import { useReducedMotion } from '@/lib/a11y';
 import { CoachCard } from '@/components/coach/CoachViews';
 import type { CoachResponse, WorkoutSummaryDetail } from '@/lib/types';
+import { formatLoad, formatVolume, useUnits, type Units } from '@/lib/units';
+import { verificationNote } from '@/lib/workoutSession';
 import { imagery } from '@/theme/imagery';
 import { colors, space } from '@/theme/tokens';
 
 const FLAG_MESSAGE: Record<string, { tone: 'warning' | 'danger'; text: string }> = {
   serious_pain_no_xp: { tone: 'danger', text: "Sessions with serious pain don't earn XP or PRs. Rest, and see a professional if the pain continues." },
   daily_training_cap_reached: { tone: 'warning', text: "You'd already trained 2 hours today, so this session earns no XP. Recovery is where you progress." },
+  daily_workout_cap_reached: { tone: 'warning', text: "You've already earned XP for 3 workouts today — this one is saved but earns no XP." },
   partially_capped: { tone: 'warning', text: "Part of this session went past today's 2-hour cap, so it earned partial XP." },
 };
 const PR_LABEL: Record<string, string> = {
@@ -28,13 +31,13 @@ const PR_LABEL: Record<string, string> = {
 };
 
 /** How a record value reads, matching the server's units. */
-export function prValue(kind: string, value: number): string {
+export function prValue(kind: string, value: number, units: Units = 'metric'): string {
   const v = Math.round(value * 10) / 10;
   if (kind === 'best_form') return `form ${v}`;
   if (kind === 'best_rom') return `${v}%`;
   if (kind === 'longest_streak') return `${v} ${v === 1 ? 'day' : 'days'}`;
   if (kind === 'max_reps' || kind === 'workout_verified_reps') return `${v} ${v === 1 ? 'rep' : 'reps'}`;
-  return `${v} kg`;
+  return units === 'imperial' ? formatLoad(value, units) : `${v} kg`;
 }
 
 /** A gentle arrival for the reward — a small rise and fade, skipped with reduced motion. */
@@ -62,6 +65,7 @@ export function WorkoutSummaryView({
   coachNote,
   onCoachAction,
   adNext = false,
+  units: unitsProp,
 }: {
   summary: WorkoutSummaryDetail;
   onDone?: () => void;
@@ -71,7 +75,11 @@ export function WorkoutSummaryView({
   onCoachAction?: (route: string) => void;
   /** Free tier: a short ad is ready to follow Done. Said up front so it is never a surprise. */
   adNext?: boolean;
+  /** Display units for loads (stored in kg). Defaults to the user's setting. */
+  units?: Units;
 }) {
+  const units = useUnits(unitsProp);
+  const volume = formatVolume(summary.totals.volumeKg, units);
   const { workout, totals } = summary;
   const muscles = setsPerMuscle(summary.sets);
   const byExercise = new Map<string, WorkoutSummaryDetail['sets']>();
@@ -102,7 +110,7 @@ export function WorkoutSummaryView({
             style={{ alignSelf: 'stretch', marginTop: space.sm }}
             items={[
               { label: 'Time', value: String(workout.durationMinutes), unit: 'min' },
-              { label: 'Volume', value: totals.volumeKg.toLocaleString(), unit: 'kg' },
+              { label: 'Volume', value: volume.value, unit: volume.unit },
               { label: 'Sets', value: String(totals.sets) },
               { label: 'Reps', value: String(totals.reps) },
             ]}
@@ -112,7 +120,7 @@ export function WorkoutSummaryView({
 
       {awarded.map((p, i) => {
         const name = p.exerciseId === '*' ? (PR_LABEL[p.kind] ?? p.kind) : (summary.sets.find((s) => s.exerciseId === p.exerciseId)?.name ?? p.exerciseId);
-        const value = prValue(p.kind, p.value);
+        const value = prValue(p.kind, p.value, units);
         return (
           <Arrive key={i} delay={200 + i * 120}>
             <View accessible accessibilityLabel={`New personal record: ${name}, ${PR_LABEL[p.kind] ?? p.kind} ${value}`}>
@@ -125,7 +133,7 @@ export function WorkoutSummaryView({
                   <AppText variant="heading">{name}</AppText>
                   <AppText variant="display">{value}</AppText>
                   <AppText variant="caption" color={colors.textMuted}>
-                    {p.exerciseId === '*' ? 'Across all training' : (PR_LABEL[p.kind] ?? p.kind)} · up from {prValue(p.kind, p.previous!)}
+                    {p.exerciseId === '*' ? 'Across all training' : (PR_LABEL[p.kind] ?? p.kind)} · up from {prValue(p.kind, p.previous!, units)}
                   </AppText>
                 </View>
               </HeroMedia>
@@ -141,7 +149,7 @@ export function WorkoutSummaryView({
             <AppText variant="bodyStrong">First records set</AppText>
           </Row>
           <AppText variant="caption" color={colors.textMuted}>
-            {baselines.map((p) => `${summary.sets.find((s) => s.exerciseId === p.exerciseId)?.name ?? p.exerciseId}: ${(PR_LABEL[p.kind] ?? p.kind).toLowerCase()} ${prValue(p.kind, p.value)}`).join(' · ')}
+            {baselines.map((p) => `${summary.sets.find((s) => s.exerciseId === p.exerciseId)?.name ?? p.exerciseId}: ${(PR_LABEL[p.kind] ?? p.kind).toLowerCase()} ${prValue(p.kind, p.value, units)}`).join(' · ')}
           </AppText>
           <AppText variant="caption" color={colors.textFaint}>
             Your baseline — beat it next time for a new PR.
@@ -192,9 +200,10 @@ export function WorkoutSummaryView({
               <Row key={i} gap={space.sm} style={{ paddingVertical: 6, paddingHorizontal: space.sm, borderRadius: 10, backgroundColor: colors.successSoft }}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.success} />
               <AppText variant="caption" color={colors.text} style={{ flex: 1 }}>
-                Set {i + 1}: {s.reps} reps{s.loadKg > 0 ? ` × ${s.loadKg} kg` : ''}
+                Set {i + 1}: {s.reps} reps{s.loadKg > 0 ? ` × ${formatLoad(s.loadKg, units)}` : ''}
                 {s.targetReps ? ` · target ${s.targetReps}` : ''}
                 {s.verifiedReps > 0 ? ` · ${s.verifiedReps} verified` : ''}
+                {s.verifiedReps === 0 && verificationNote(s.verificationStatus) ? ` · ${verificationNote(s.verificationStatus)}` : ''}
                 {s.formScore !== null ? ` · form ${s.formScore}` : ''}
                 {s.romPercent !== null ? ` · ROM ${s.romPercent}%` : ''}
               </AppText>

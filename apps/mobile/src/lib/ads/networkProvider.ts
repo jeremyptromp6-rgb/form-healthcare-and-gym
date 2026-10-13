@@ -11,6 +11,11 @@ import { AdFailure, type AdAvailability, type InterstitialAdProvider, type Loade
  * Test mode always uses Google's official test unit ids. Production ids come only from the build's
  * environment (EXPO_PUBLIC_ADMOB_INTERSTITIAL_*). No fitness, nutrition or camera data is ever
  * passed to the network — the ad request carries no keywords and no content URL.
+ *
+ * EXTERNAL (iOS only): ads are served non-personalised unless the user opts in, so the app doesn't
+ * ask for App Tracking Transparency (ATT) today and needs no NSUserTrackingUsageDescription. If
+ * personalised ads are ever offered on iOS, add the ATT prompt (expo-tracking-transparency, or the
+ * SDK's own flow) before the first personalised request, and answer Apple's "tracking" privacy label.
  */
 
 function unitIdFor(settings: AdsSettings): string | null {
@@ -30,13 +35,22 @@ const withTimeout = <T,>(p: Promise<T>, ms: number, code: string) =>
     );
   });
 
+/**
+ * The consent step includes Google's form, which waits on the person reading it, so its limit is
+ * generous: it only bounds a hung network or a stuck SDK. A short limit here would drop slow readers
+ * (the ad flow never blocks the user while it waits; they just carry on without the ad).
+ */
+const CONSENT_TIMEOUT_MS = 120_000;
+/** The SDK's own start-up has no user in the loop; if it stalls the ad is skipped. */
+const INIT_TIMEOUT_MS = 15_000;
+
 let ready: Promise<void> | null = null;
 /** Consent first (Google's UMP form, only where the user's region requires it), then the SDK — once per app run. */
 function prepare(): Promise<void> {
   ready ??= (async () => {
     let canRequest = true;
     try {
-      const info = await withTimeout(AdsConsent.gatherConsent(), 8000, 'consent_timeout');
+      const info = await withTimeout(AdsConsent.gatherConsent(), CONSENT_TIMEOUT_MS, 'consent_timeout');
       canRequest = info.canRequestAds;
     } catch {
       // No consent answer (offline, or the consent form isn't set up for this app): only proceed if
@@ -45,7 +59,7 @@ function prepare(): Promise<void> {
     }
     if (!canRequest) throw new AdFailure('consent_required');
     await mobileAds().setRequestConfiguration({ maxAdContentRating: MaxAdContentRating.PG, tagForChildDirectedTreatment: false });
-    await mobileAds().initialize();
+    await withTimeout(mobileAds().initialize(), INIT_TIMEOUT_MS, 'sdk_init_timeout');
   })().catch((e) => {
     ready = null; // let a later workout try again
     throw e instanceof AdFailure ? e : new AdFailure('sdk_init_failed');

@@ -8,10 +8,12 @@ import { WorkoutSummaryView } from '@/components/train/WorkoutSummaryView';
 import { AppText, Button, Card, ErrorState, InlineMessage, Segmented, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
 import { usePostWorkoutAd } from '@/lib/ads/usePostWorkoutAd';
+import type { ApiError } from '@/lib/api';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { livePoseSupport } from '@/lib/pose/support';
-import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useStartRest } from '@/lib/queries';
+import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useStartRest, useUpdateSet } from '@/lib/queries';
 import type { CompletionResult, PainLevel, WorkoutSession } from '@/lib/types';
+import { useUnits } from '@/lib/units';
 import { currentExerciseIndex, exerciseDone, nextSetDefaults } from '@/lib/workoutSession';
 import { colors, MAX_CONTENT_WIDTH, space } from '@/theme/tokens';
 
@@ -62,6 +64,8 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const library = useExercises();
   const logSet = useLogSet(session.id);
   const deleteSet = useDeleteSet(session.id);
+  const updateSet = useUpdateSet(session.id);
+  const units = useUnits();
   const action = useSessionAction(session.id);
   const rest = useStartRest(session.id);
   const complete = useCompleteSession(session.id);
@@ -77,6 +81,11 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const [finishing, setFinishing] = useState(false);
   const [pain, setPain] = useState<PainLevel>('none');
   const [finishError, setFinishError] = useState<string | null>(null);
+  // Discarding deletes the whole workout, so it takes two taps: the first asks, the second does it.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
+  // The last pause / resume / rest / delete that failed, shown on the workout until the next try.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -86,7 +95,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const index = selected ?? currentExerciseIndex(session);
   const exercise = session.exercises[index];
   const draftKey = exercise ? `${exercise.exerciseId}:${exercise.loggedSets.length}` : '';
-  const draft = override?.key === draftKey ? override : exercise ? nextSetDefaults(exercise) : { reps: 10, loadKg: 0 };
+  const draft = override?.key === draftKey ? override : exercise ? nextSetDefaults(exercise, units) : { reps: 10, loadKg: 0 };
   const loadStepKg = library.data?.exercises.find((e) => e.id === exercise?.exerciseId)?.loadIncrementKg || 2.5;
 
   /** Logs the next set of exercise `i` with exactly `values` — the focused exercise or any other. */
@@ -127,6 +136,12 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
       },
     );
   };
+  /** The onError for a session action: says what failed, and keeps the workout as it was. */
+  const failed = (what: string) => (e: ApiError) => setActionError(e.kind === 'network' ? `${what} — check your connection and try again.` : e.message);
+  const act = (what: string, mutate: (onError: (e: ApiError) => void) => void) => {
+    setActionError(null);
+    mutate(failed(what));
+  };
   // The focused row's check passes the values it just typed; the Log button logs the current draft.
   const onLogSet = (typed?: { reps: number; loadKg: number }) => logAt(index, typed ?? draft);
 
@@ -164,12 +179,35 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
         </Card>
         <Button label="Keep training" variant="secondary" onPress={() => setFinishing(false)} />
         <View style={{ height: space.xl }} />
-        <Button
-          label="Discard workout"
-          variant="danger"
-          onPress={() => action.mutate('discard', { onSuccess: () => router.replace('/train' as Href) })}
-          accessibilityHint="Deletes this workout without saving it"
-        />
+        {confirmDiscard ? (
+          <Card style={{ gap: space.md }}>
+            <InlineMessage tone="danger">Discard this workout? Everything you logged is deleted and can&apos;t be brought back.</InlineMessage>
+            {discardError ? <InlineMessage tone="danger">{discardError}</InlineMessage> : null}
+            <Button
+              label="Yes, discard it"
+              variant="danger"
+              loading={action.isPending}
+              onPress={() => {
+                setDiscardError(null);
+                action.mutate('discard', {
+                  onSuccess: () => router.replace('/train' as Href),
+                  onError: (e) => setDiscardError(e.kind === 'network' ? "Couldn't discard — check your connection and try again." : e.message),
+                });
+              }}
+            />
+            <Button label="No, keep it" variant="secondary" onPress={() => setConfirmDiscard(false)} />
+          </Card>
+        ) : (
+          <Button
+            label="Discard workout"
+            variant="danger"
+            onPress={() => {
+              setDiscardError(null);
+              setConfirmDiscard(true);
+            }}
+            accessibilityHint="Deletes this workout without saving it"
+          />
+        )}
       </Shell>
     );
   }
@@ -187,15 +225,22 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
       logging={logSet.isPending}
       logError={logError}
       logErrorIndex={logErrorIndex}
-      onDeleteSet={(setId) => deleteSet.mutate(setId)}
-      onPause={() => action.mutate('pause')}
-      onResume={() => action.mutate('resume')}
-      onSkipRest={() => action.mutate('rest/skip')}
-      onAddRest={(seconds) => rest.mutate(Math.min(600, seconds))}
+      onDeleteSet={(setId) => act("Couldn't delete the set", (onError) => deleteSet.mutate(setId, { onError }))}
+      onEditSet={(setId, patch, done) =>
+        updateSet.mutate(
+          { setId, ...patch },
+          { onSuccess: () => done(), onError: (e) => done(e.kind === 'network' ? "Couldn't save the change — check your connection and try again." : e.message) },
+        )
+      }
+      onPause={() => act("Couldn't pause", (onError) => action.mutate('pause', { onError }))}
+      onResume={() => act("Couldn't resume", (onError) => action.mutate('resume', { onError }))}
+      onSkipRest={() => act("Couldn't skip the rest", (onError) => action.mutate('rest/skip', { onError }))}
+      onAddRest={(seconds) => act("Couldn't change the rest", (onError) => rest.mutate(Math.min(600, seconds), { onError }))}
+      actionError={actionError}
       onEnd={() => setFinishing(true)}
       onClose={() => (router.canGoBack() ? router.back() : router.replace('/train' as Href))}
       onOpenCamera={
-        exercise?.cameraVerifiable && livePoseSupport().available ? () => router.push(`/camera?exerciseId=${exercise.exerciseId}` as Href) : undefined
+        exercise?.cameraVerifiable && livePoseSupport().available ? () => router.push(`/camera?exerciseId=${exercise.exerciseId}${exercise.loadable ? `&loadKg=${draft.loadKg}` : ''}` as Href) : undefined
       }
       now={now}
       today={localDateKey(now)}

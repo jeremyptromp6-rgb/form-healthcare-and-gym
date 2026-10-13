@@ -18,6 +18,8 @@ export default function WeightScreen() {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Deleting is two steps: the trash icon asks, this date is the entry being asked about.
+  const [confirmDate, setConfirmDate] = useState<string | null>(null);
 
   const submit = () => {
     setError(null);
@@ -100,15 +102,35 @@ export default function WeightScreen() {
           ) : (
             <Card style={{ gap: space.xs }}>
               {entries.map((e) => (
-                <Row key={e.localDate} style={{ justifyContent: 'space-between' }}>
-                  <AppText variant="body">{new Date(`${e.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</AppText>
-                  <Row gap={space.xs}>
-                    <AppText variant="bodyStrong">{formatWeight(e.weightKg, units)}</AppText>
-                    <IconButton icon="trash-outline" label={`Delete entry for ${e.localDate}`} onPress={() => del.mutate(e.localDate)} />
+                <View key={e.localDate} style={{ gap: space.sm }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <AppText variant="body">{new Date(`${e.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</AppText>
+                    <Row gap={space.xs}>
+                      <AppText variant="bodyStrong">{formatWeight(e.weightKg, units)}</AppText>
+                      <IconButton
+                        icon="trash-outline"
+                        label={`Delete entry for ${e.localDate}`}
+                        onPress={() => {
+                          del.reset();
+                          setConfirmDate(e.localDate);
+                        }}
+                      />
+                    </Row>
                   </Row>
-                </Row>
+                  {confirmDate === e.localDate ? (
+                    <View style={{ gap: space.sm }}>
+                      <AppText variant="caption" color={colors.textMuted}>
+                        Delete this entry? This can&apos;t be undone.
+                      </AppText>
+                      <Row gap={space.sm}>
+                        <Button label="Delete entry" variant="secondary" icon="trash-outline" loading={del.isPending} onPress={() => del.mutate(e.localDate, { onSuccess: () => setConfirmDate(null) })} style={{ flex: 1 }} />
+                        <Button label="Keep" variant="ghost" onPress={() => (del.reset(), setConfirmDate(null))} style={{ flex: 1 }} />
+                      </Row>
+                    </View>
+                  ) : null}
+                </View>
               ))}
-              {del.isError ? <InlineMessage tone="danger">Couldn&apos;t delete that entry. Try again.</InlineMessage> : null}
+              {del.isError ? <InlineMessage tone="danger">{del.error.kind === 'network' ? "Couldn't delete that entry. Check your connection and try again." : `Couldn't delete that entry. ${del.error.message}`}</InlineMessage> : null}
             </Card>
           )}
         </>

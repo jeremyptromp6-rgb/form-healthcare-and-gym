@@ -8,6 +8,8 @@ import type { Db } from "../db";
  * Reserves one call atomically; returns false once today's budget is spent.
  */
 export function reserveProviderCall(db: Db, provider: "ai_coach" | "food_recognition", now: Date, dailyLimit: number): boolean {
+  // A zero (or negative) budget means "none": never write a row, never count a call.
+  if (dailyLimit <= 0) return false;
   const day = now.toISOString().slice(0, 10);
   const r = db
     .prepare(
@@ -15,7 +17,12 @@ export function reserveProviderCall(db: Db, provider: "ai_coach" | "food_recogni
        ON CONFLICT(day, provider) DO UPDATE SET calls = calls + 1 WHERE calls < ?`,
     )
     .run(day, provider, dailyLimit);
-  return r.changes > 0 && dailyLimit > 0;
+  return r.changes > 0;
+}
+
+/** Gives back one reserved call (the provider was never reached or answered with nothing billable). */
+export function refundProviderCall(db: Db, provider: "ai_coach" | "food_recognition", now: Date): void {
+  db.prepare("UPDATE provider_usage SET calls = calls - 1 WHERE day = ? AND provider = ? AND calls > 0").run(now.toISOString().slice(0, 10), provider);
 }
 
 export function providerCallsToday(db: Db, provider: string, now: Date): number {

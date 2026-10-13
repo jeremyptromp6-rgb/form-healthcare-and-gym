@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
-import { localDateKey, setUserTimeZone } from './dates';
+import { setUserTimeZone } from './dates';
 import { purgeLocalExports } from './privateFiles';
 import { tokenStore } from './tokenStore';
 
@@ -42,23 +42,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const saved = await tokenStore.get();
-      if (cancelled) return;
-      if (!saved) return setStatus('signedOut');
+      // A keystore that fails to read (corrupt entry, locked keychain) counts as signed out, and
+      // must never leave the startup skeleton up forever.
+      let saved: string | null = null;
       try {
-        await api.me(saved, localDateKey());
+        saved = await tokenStore.get();
       } catch (e) {
-        if (!cancelled && e instanceof ApiError && e.kind === 'unauthorized') return signOut();
-        // Offline or API down: keep the session; screens show their own error states.
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[auth] could not read the saved session', e);
+        try {
+          await tokenStore.clear();
+        } catch {
+          // best effort
+        }
       }
       if (cancelled) return;
+      if (!saved) return setStatus('signedOut');
+      // Go straight in: the root waits on useMe, and `authed` signs out on a 401. A sleeping server
+      // must not hold the app behind a second, silent bootstrap request.
       setToken(saved);
       setStatus('signedIn');
     })();
     return () => {
       cancelled = true;
     };
-  }, [signOut]);
+  }, []);
 
   const accept = useCallback(
     async (res: { token: string }) => {

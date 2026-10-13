@@ -226,6 +226,12 @@ describe('SetRow', () => {
 });
 
 describe('RestTimerPill', () => {
+  // The SetRow animation tests above leave motion switched on. Reset it, or the pill's progress bar animates on real
+  // timers and its frames land after the test, outside act().
+  beforeEach(() => {
+    mockReduce = true;
+  });
+
   it('shows the time and wires +15, +30 and Skip', async () => {
     const onAdd = jest.fn();
     const onSkip = jest.fn();

@@ -29,7 +29,7 @@ export default function ExerciseDetailScreen() {
       <ExerciseDetailView
         detail={q.data}
         poseAvailable={poseSupport.available}
-        onPractise={(exerciseId) => router.push(`/camera?exerciseId=${exerciseId}` as Href)}
+        onPractise={(exerciseId) => router.push(`/camera?exerciseId=${exerciseId}&practice=1` as Href)}
         formHistory={e.cameraVerifiable ? <FormHistory exerciseId={e.id} /> : undefined}
       />
     </Screen>

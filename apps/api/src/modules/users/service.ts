@@ -64,7 +64,14 @@ export function applyPreferencesPatch(db: Db, userId: string, patch: Partial<Nut
   return { preferences: normalized, movedToAllergies };
 }
 
-/** Recomputes the current weight after the weight history changes, and re-snapshots targets. */
+/**
+ * Recomputes the current weight after the weight history changes, and re-snapshots targets.
+ *
+ * When the history is empty (the last entry was deleted) the profile weight is deliberately kept:
+ * it is the weight the user stated, their targets and onboarding depend on it, and clearing it would
+ * leave them with no targets. It is not a "measured" value — the weight history, which is what
+ * progress and the weight list read, is simply empty until they log a weight again.
+ */
 export function syncWeightFromHistory(db: Db, userId: string, effectiveFrom: string, now: Date): void {
   const profile = loadProfile(db, userId);
   const latest = latestWeight(db, userId);

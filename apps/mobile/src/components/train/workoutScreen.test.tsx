@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
 import WorkoutScreen from '@/app/workout';
 
@@ -47,13 +48,15 @@ type Opts = { onSuccess?: (r: { session: WorkoutSession }) => void; onError?: (e
 let mockSession: WorkoutSession = makeSession();
 const mockLogMutate = jest.fn();
 const mockDeleteMutate = jest.fn();
+const mockUpdateMutate = jest.fn();
+const mockPush = jest.fn();
 const mockActionMutate = jest.fn();
 const mockRestMutate = jest.fn();
 const mockCompleteMutate = jest.fn();
 const mockReplace = jest.fn();
 
 jest.mock('expo-router', () => ({
-  router: { replace: (...a: unknown[]) => mockReplace(...a), push: jest.fn(), back: jest.fn(), canGoBack: () => false },
+  router: { replace: (...a: unknown[]) => mockReplace(...a), push: (...a: unknown[]) => mockPush(...a), back: jest.fn(), canGoBack: () => false },
 }));
 // Logging and session actions don't involve ads; the post-workout ad has its own tests (postWorkoutAd.test.tsx).
 jest.mock('@/lib/ads/usePostWorkoutAd', () => ({ usePostWorkoutAd: () => ({ phase: 'IDLE', adReady: false, finish: (next: () => void) => next() }) }));
@@ -63,7 +66,8 @@ jest.mock('@/lib/queries', () => ({
   useExercises: () => ({ data: { exercises: [] } }),
   useLogSet: () => ({ mutate: mockLogMutate, isPending: false }),
   useDeleteSet: () => ({ mutate: mockDeleteMutate }),
-  useSessionAction: () => ({ mutate: mockActionMutate }),
+  useUpdateSet: () => ({ mutate: mockUpdateMutate, isPending: false }),
+  useSessionAction: () => ({ mutate: mockActionMutate, isPending: false }),
   useStartRest: () => ({ mutate: mockRestMutate }),
   useCompleteSession: () => ({ mutate: mockCompleteMutate, isPending: false }),
   useCoachInsight: () => ({ data: undefined }),
@@ -80,6 +84,7 @@ beforeEach(() => {
   mockSession = makeSession();
   jest.clearAllMocks();
   mockLogMutate.mockReset();
+  mockUpdateMutate.mockReset();
 });
 
 describe('WorkoutScreen logging', () => {
@@ -174,7 +179,7 @@ describe('WorkoutScreen session actions', () => {
   it('pauses the session', async () => {
     await render(<WorkoutScreen />);
     await fireEvent.press(screen.getByRole('button', { name: 'Pause workout' }));
-    expect(mockActionMutate).toHaveBeenCalledWith('pause');
+    expect(mockActionMutate).toHaveBeenCalledWith('pause', expect.objectContaining({ onError: expect.any(Function) }));
   });
 
   it('discards the workout from the finish screen', async () => {
@@ -182,9 +187,32 @@ describe('WorkoutScreen session actions', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'End workout' }));
     expect(screen.getByText('Finish workout?')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Discard workout' }));
-    expect(mockActionMutate).toHaveBeenCalledWith('discard', expect.objectContaining({ onSuccess: expect.any(Function) }));
+    // The first tap only asks: nothing is deleted yet.
+    expect(mockActionMutate).not.toHaveBeenCalled();
+    expect(screen.getByText(/Everything you logged is deleted/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Yes, discard it' }));
+    expect(mockActionMutate).toHaveBeenCalledWith('discard', expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }));
     mockActionMutate.mock.calls[0]![1].onSuccess();
     expect(mockReplace).toHaveBeenCalledWith('/train');
+  });
+
+  it('lets the user back out of a discard without deleting anything', async () => {
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'End workout' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Discard workout' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'No, keep it' }));
+    expect(mockActionMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Discard workout' })).toBeTruthy();
+  });
+
+  it('shows why a discard failed instead of doing nothing', async () => {
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'End workout' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Discard workout' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Yes, discard it' }));
+    await act(async () => mockActionMutate.mock.calls[0]![1].onError({ kind: 'network', message: 'offline' }));
+    expect(screen.getByText("Couldn't discard — check your connection and try again.")).toBeTruthy();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('ends the workout with the chosen pain level', async () => {
@@ -192,5 +220,184 @@ describe('WorkoutScreen session actions', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'End workout' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Finish & save' }));
     expect(mockCompleteMutate).toHaveBeenCalledWith('none', expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }));
+  });
+});
+
+/** Fails the n-th call of a mutate mock the way the API client would. */
+const failCall = async (mock: jest.Mock, n = 0, error = { kind: 'network', message: 'offline' }) => {
+  const opts = mock.mock.calls[n]!.at(-1) as Opts;
+  await act(async () => opts.onError?.(error));
+};
+
+describe('WorkoutScreen failures are shown, never silent', () => {
+  it('says so when pausing fails', async () => {
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Pause workout' }));
+    await failCall(mockActionMutate);
+    expect(screen.getByText("Couldn't pause — check your connection and try again.")).toBeTruthy();
+  });
+
+  it('says so when resuming fails, on the pause screen', async () => {
+    mockSession = { ...makeSession(), status: 'paused', pausedAt: '2026-09-28T10:10:00Z' };
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Resume' }));
+    await failCall(mockActionMutate);
+    expect(screen.getAllByText("Couldn't resume — check your connection and try again.").length).toBeGreaterThan(0);
+  });
+
+  it('says so when deleting a set fails, with the server message for a server error', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ loggedSets: [loggedSet()] })] };
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Delete set 1' }));
+    expect(mockDeleteMutate).toHaveBeenCalledWith('set-1', expect.objectContaining({ onError: expect.any(Function) }));
+    await failCall(mockDeleteMutate, 0, { kind: 'server', message: 'Set not found' });
+    expect(screen.getByText('Set not found')).toBeTruthy();
+  });
+
+  it('says so when skipping or adding rest fails', async () => {
+    mockSession = { ...makeSession(), rest: { seconds: 90, remainingSeconds: 60, endsAt: new Date(Date.now() + 60_000).toISOString() } };
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /skip/i }));
+    expect(mockActionMutate).toHaveBeenCalledWith('rest/skip', expect.objectContaining({ onError: expect.any(Function) }));
+    await failCall(mockActionMutate);
+    expect(screen.getByText("Couldn't skip the rest — check your connection and try again.")).toBeTruthy();
+  });
+
+  it('clears the message when the next try starts', async () => {
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Pause workout' }));
+    await failCall(mockActionMutate);
+    expect(screen.getByText(/Couldn't pause/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Pause workout' }));
+    expect(screen.queryByText(/Couldn't pause/)).toBeNull();
+  });
+});
+
+function loggedSet(over: Record<string, unknown> = {}) {
+  return {
+    id: 'set-1',
+    clientSetId: 'cs-1',
+    exerciseId: 'bicep_curl',
+    setIndex: 0,
+    targetReps: 12,
+    targetLoadKg: 12,
+    reps: 10,
+    loadKg: 12,
+    verifiedReps: 0,
+    verificationStatus: 'not_tracked',
+    romPercent: null,
+    formScore: null,
+    quality: null,
+    createdAt: '2026-09-28T10:05:00Z',
+    ...over,
+  } as WorkoutSession['exercises'][number]['loggedSets'][number];
+}
+
+describe('WorkoutScreen editing a logged set', () => {
+  it('saves new reps and load for a done row, sending only what changed', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ loggedSets: [loggedSet()] })] };
+    mockUpdateMutate.mockImplementation((_v: unknown, opts: Opts) => opts.onSuccess?.({ session: mockSession }));
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /Edit set 1/ }));
+    await fireEvent.changeText(screen.getByLabelText('Edit set 1 reps'), '8');
+    await fireEvent.changeText(screen.getByLabelText('Edit set 1 weight in kilograms'), '14');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 1' }));
+    expect(mockUpdateMutate).toHaveBeenCalledWith({ setId: 'set-1', reps: 8, loadKg: 14 }, expect.any(Object));
+    // The editor closes once the server accepts it.
+    expect(screen.queryByLabelText('Edit set 1 reps')).toBeNull();
+  });
+
+  it('sends only the load when only the load changed (reps and their verification are untouched)', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ loggedSets: [loggedSet({ verifiedReps: 10, verificationStatus: 'verified' })] })] };
+    mockUpdateMutate.mockImplementation((_v: unknown, opts: Opts) => opts.onSuccess?.({ session: mockSession }));
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /Edit set 1/ }));
+    await fireEvent.changeText(screen.getByLabelText('Edit set 1 weight in kilograms'), '15');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 1' }));
+    expect(mockUpdateMutate).toHaveBeenCalledWith({ setId: 'set-1', loadKg: 15 }, expect.any(Object));
+  });
+
+  it('keeps the editor open with the message when the save fails', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ loggedSets: [loggedSet()] })] };
+    mockUpdateMutate.mockImplementation((_v: unknown, opts: Opts) => opts.onError?.({ kind: 'network', message: 'offline' }));
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /Edit set 1/ }));
+    await fireEvent.changeText(screen.getByLabelText('Edit set 1 reps'), '9');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 1' }));
+    expect(screen.getByText("Couldn't save the change — check your connection and try again.")).toBeTruthy();
+    expect(screen.getByLabelText('Edit set 1 reps')).toBeTruthy();
+  });
+
+  it('does not call the API when nothing changed', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ loggedSets: [loggedSet()] })] };
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /Edit set 1/ }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 1' }));
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Edit set 1 reps')).toBeNull();
+  });
+
+  it('warns when lowering the reps below the camera-verified count, and not for a load change', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ cameraVerifiable: true, loggedSets: [loggedSet({ verifiedReps: 10, verificationStatus: 'verified' })] })] };
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('button', { name: /Edit set 1/ }));
+    expect(screen.queryByText(/Camera-verified reps drop/)).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText('Edit set 1 reps'), '7');
+    expect(screen.getByText('Camera-verified reps drop to 7 to match. Changing the weight keeps them.')).toBeTruthy();
+  });
+});
+
+describe('WorkoutScreen camera hand-off', () => {
+  it('passes the current weight draft to the camera route', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ cameraVerifiable: true })] };
+    await render(<WorkoutScreen />);
+    await fireEvent.changeText(screen.getByLabelText('Set 1 weight in kilograms'), '22,5');
+    await fireEvent.press(screen.getByRole('button', { name: 'Use camera coaching' }));
+    expect(mockPush).toHaveBeenCalledWith('/camera?exerciseId=bicep_curl&loadKg=22.5');
+  });
+});
+
+describe('WorkoutScreen in pounds', () => {
+  const renderImperial = async () => {
+    const client = new QueryClient();
+    client.setQueryData(['me'], { settings: { units: 'imperial' } });
+    await render(
+      <QueryClientProvider client={client}>
+        <WorkoutScreen />
+      </QueryClientProvider>,
+    );
+  };
+
+  it('shows pounds, and logs a typed 135 lb as about 61.2 kg', async () => {
+    succeed();
+    await renderImperial();
+    expect(screen.getByLabelText('Set 1 weight in pounds')).toBeTruthy();
+    expect(screen.getByText('LB', { includeHiddenElements: true })).toBeTruthy(); // the column caption
+    await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
+    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1' }));
+    expect(logBody(0).loadKg).toBeCloseTo(61.2, 1);
+    expect(logBody(0).loadKg).toBe(61.23);
+  });
+
+  it('starts the draft at the plan target in a round number of pounds (12 kg → 26.5 lb)', async () => {
+    await renderImperial();
+    expect(screen.getByLabelText('Set 1 weight in pounds').props.value).toBe('26.5');
+  });
+
+  it('steps the weight by plate-sized pounds and logs the stepped value in kg', async () => {
+    succeed();
+    await renderImperial();
+    await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
+    await fireEvent.press(screen.getByRole('button', { name: 'Increase Weight' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' }));
+    expect(logBody(0).loadKg).toBe(63.5); // 140 lb
+  });
+
+  it('hands the camera the draft in kg, whatever the display unit', async () => {
+    mockSession = { ...makeSession(), exercises: [ex({ cameraVerifiable: true })] };
+    await renderImperial();
+    await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
+    await fireEvent.press(screen.getByRole('button', { name: 'Use camera coaching' }));
+    expect(mockPush).toHaveBeenCalledWith('/camera?exerciseId=bicep_curl&loadKg=61.23');
   });
 });

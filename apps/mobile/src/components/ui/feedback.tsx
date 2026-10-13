@@ -96,7 +96,7 @@ export function ProgressRing({
       accessibilityLabel={label}
       accessibilityValue={label ? { min: 0, max: 100, now: Math.round(v * 100) } : undefined}>
       {/* Hero rings (not the small ones in a strip) catch a little lamplight in dark mode. */}
-      <View style={[StyleSheet.absoluteFill, size >= HERO_RING && v > 0 && glow(color)]} pointerEvents="none">
+      <View style={[StyleSheet.absoluteFill, size >= HERO_RING && v > 0 && glow(color), { pointerEvents: 'none' }]}>
         <Svg width={size} height={size}>
           <Circle cx={size / 2} cy={size / 2} r={r} stroke={colors.track} strokeWidth={stroke} fill="none" />
           {Platform.OS === 'web' ? (

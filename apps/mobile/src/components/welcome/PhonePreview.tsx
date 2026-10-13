@@ -23,7 +23,7 @@ export function PhonePreview({ width = 220, caption, children }: { width?: numbe
   const innerH = SCREEN_H * scale;
   return (
     <View style={{ alignItems: 'center', gap: space.md }}>
-      <View style={[styles.frame, { width, height: innerH + 16 }]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+      <View style={[styles.frame, { width, height: innerH + 16, pointerEvents: 'none' }]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
         <View style={[styles.screen, { width: innerW, height: innerH }]}>
           <View
             style={{

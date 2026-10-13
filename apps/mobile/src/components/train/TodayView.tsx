@@ -5,6 +5,7 @@ import { Buddy } from '@/components/art/Buddy';
 import { AppText, Badge, Button, Card, ExerciseList, ExerciseRow, ExerciseThumbStrip, HeroMedia, InlineMessage, Row, StatStrip, type BadgeTone } from '@/components/ui';
 import { setsPerMuscle } from '@/lib/muscles';
 import type { Progression, WorkoutPlan } from '@/lib/types';
+import { formatLoad, loadToDisplay, loadUnit, snapLoadKg, useUnits, type Units } from '@/lib/units';
 import { formatRest } from '@/lib/workoutSession';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
@@ -34,10 +35,13 @@ export interface TodayViewProps {
   onStart: () => void;
   onOpenExercise: (exerciseId: string) => void;
   camera: { verifying: boolean; message: string };
+  /** Display units for target loads (stored in kg). Defaults to the user's setting. */
+  units?: Units;
 }
 
 /** Today's workout, workout first: the hero with the one action, what it trains, then the exercises. */
-export function TodayView({ plan, completedToday, canStart, starting, startError, onStart, onOpenExercise, camera }: TodayViewProps) {
+export function TodayView({ plan, completedToday, canStart, starting, startError, onStart, onOpenExercise, camera, units: unitsProp }: TodayViewProps) {
+  const units = useUnits(unitsProp);
   const adaptive = plan.generator.id === 'adaptive';
   const totalSets = plan.exercises.reduce((n, e) => n + e.sets, 0);
   const muscles = setsPerMuscle(plan.exercises.map((e) => ({ exerciseId: e.exerciseId, count: e.sets }))).slice(0, MAX_MUSCLES);
@@ -127,11 +131,11 @@ export function TodayView({ plan, completedToday, canStart, starting, startError
                   exerciseId={e.exerciseId}
                   index={i + 1}
                   name={e.name}
-                  detail={`${e.sets} ${e.sets === 1 ? 'set' : 'sets'} · ${reps} reps${e.targetLoadKg ? ` · ${e.targetLoadKg} kg` : ''}`}
+                  detail={`${e.sets} ${e.sets === 1 ? 'set' : 'sets'} · ${reps} reps${e.targetLoadKg ? ` · ${formatLoad(e.targetLoadKg, units, true)}` : ''}`}
                   meta={`${formatRest(e.restSeconds)} rest`}
                   note={e.note}
                   badge={PROGRESSION_BADGE[e.progression]}
-                  accessibilityLabel={`${e.name}: ${e.sets} sets of ${reps} reps${e.targetLoadKg ? ` at ${e.targetLoadKg} kilograms` : ''}`}
+                  accessibilityLabel={`${e.name}: ${e.sets} sets of ${reps} reps${e.targetLoadKg ? ` at ${loadToDisplay(snapLoadKg(e.targetLoadKg, units), units)} ${loadUnit(units) === 'lb' ? 'pounds' : 'kilograms'}` : ''}`}
                   onPress={() => onOpenExercise(e.exerciseId)}
                 />
               );

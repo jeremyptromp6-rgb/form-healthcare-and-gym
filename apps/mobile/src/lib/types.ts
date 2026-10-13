@@ -254,6 +254,10 @@ export interface PlannedMealView {
   status: 'planned' | 'eaten';
   foodLogId: string | null;
   canMarkEaten: boolean;
+  /** The recipe now clashes with the user's allergies or diet (set after the plan was made). */
+  unsafe: boolean;
+  /** Why, in plain words ("Contains eggs — on your allergy list"); null when safe. */
+  unsafeReason: string | null;
 }
 
 export interface MealPlanView {
@@ -685,7 +689,7 @@ export interface WorkoutSession {
 export interface WorkoutSummaryDetail {
   workout: { id: string; localDate: string; durationMinutes: number; painLevel: PainLevel; xp: number; flags: string[] };
   totals: { sets: number; reps: number; verifiedReps: number; volumeKg: number; perfectReps: number; averageFormScore: number | null };
-  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null }[];
+  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null; verificationStatus?: string }[];
   prs: { exerciseId: string; kind: string; value: number; status: string; previous?: number | null }[];
 }
 

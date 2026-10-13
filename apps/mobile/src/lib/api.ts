@@ -90,6 +90,7 @@ export async function request<T>(path: string, opts: { method?: string; body?: u
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? config.requestTimeoutMs);
   let res: Response;
+  let json: any = null;
   try {
     res = await fetch(`${config.apiUrl}${path}`, {
       method: opts.method ?? 'GET',
@@ -100,6 +101,15 @@ export async function request<T>(path: string, opts: { method?: string; body?: u
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: controller.signal,
     });
+    // The timeout stays armed until the body is fully read, so a stalled body can't hang the caller.
+    if (res.status !== 204) {
+      try {
+        json = await res.json();
+      } catch {
+        if (controller.signal.aborted) throw new Error('timed out');
+        json = null; // not JSON: handled below, by status
+      }
+    }
   } catch {
     throw new ApiError('network', 'network', "Can't reach FORM. Check your connection.", null, true);
   } finally {
@@ -107,7 +117,10 @@ export async function request<T>(path: string, opts: { method?: string; body?: u
   }
 
   if (res.status === 204) return undefined as T;
-  const json = await res.json().catch(() => null);
+  if (res.ok && (json === null || json === undefined)) {
+    // Every endpoint answers with JSON or 204; anything else is a broken response, not an empty success.
+    throw new ApiError('server', 'bad_response', "FORM sent back something unexpected. Please try again.", res.status, true);
+  }
   if (!res.ok) {
     const err = json?.error ?? {};
     const kind = kindForStatus(res.status);
@@ -319,6 +332,9 @@ export const api = {
   session: (token: string, id: string) => request<{ session: WorkoutSession }>(`/workouts/sessions/${id}`, { token }),
   logSet: (token: string, id: string, body: NewSet) =>
     request<{ set: SessionSet; session: WorkoutSession }>(`/workouts/sessions/${id}/sets`, { method: 'POST', body, token }),
+  /** Edits a logged set's reps and/or load (kg). The server keeps verification honest: fewer reps can only lower verified reps. */
+  updateSet: (token: string, id: string, setId: string, body: { reps?: number; loadKg?: number }) =>
+    request<{ set: SessionSet; session: WorkoutSession }>(`/workouts/sessions/${id}/sets/${setId}`, { method: 'PATCH', body, token }),
   deleteSet: (token: string, id: string, setId: string) =>
     request<{ session: WorkoutSession }>(`/workouts/sessions/${id}/sets/${setId}`, { method: 'DELETE', token }),
   sessionAction: (token: string, id: string, action: 'pause' | 'resume' | 'discard' | 'rest/skip') =>
@@ -329,7 +345,8 @@ export const api = {
     request<CompletionResult>(`/workouts/sessions/${id}/complete`, { method: 'POST', body: { painLevel }, token }),
   workoutDetail: (token: string, id: string) => request<WorkoutSummaryDetail>(`/workouts/${id}`, { token }),
   exerciseDetail: (token: string, id: string) => request<ExerciseDetail>(`/exercises/${id}`, { token }),
-  workouts: (token: string) => request<{ workouts: WorkoutSummary[] }>('/workouts?limit=10', { token }),
+  // The API has no date range, only a limit (max 100). 50 covers any training week, so "This week" totals are never undercounted.
+  workouts: (token: string) => request<{ workouts: WorkoutSummary[] }>('/workouts?limit=50', { token }),
   logWorkout: (token: string, body: NewWorkout) => request<WorkoutResult>('/workouts', { method: 'POST', body, token }),
 
   nutritionDay: (token: string, date: string, today: string) => request<NutritionDay>(`/nutrition/days/${date}?today=${today}`, { token }),

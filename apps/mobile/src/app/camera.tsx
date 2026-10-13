@@ -10,25 +10,31 @@ import { cameraScreenModel, type CameraAction, type CameraStatus, type LiveReado
 import { uuid } from '@/lib/dates';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { useActiveSession, useLogSet, useSessionAction } from '@/lib/queries';
-import { formatTarget, nextSetDefaults } from '@/lib/workoutSession';
+import { useUnits } from '@/lib/units';
+import { formatTarget, nextSetDefaults, verificationNote } from '@/lib/workoutSession';
 import { colors } from '@/theme/tokens';
 
 /**
  * Live camera for one exercise. Inside a workout it shows the current set, pauses the workout with
  * the camera and logs the set with its recorded trace — the server re-verifies reps, form and ROM
- * from that trace, and its count is the one that counts. Opened from the library it's practice
- * mode: the same live verification, nothing logged.
+ * from that trace, and its count is the one that counts. The set is logged at the load on the workout's
+ * weight field (passed as `loadKg`, in kg). Opened for practice (`practice=1`, from an exercise's page)
+ * it's the same live verification with nothing logged, even if a workout is open with that exercise.
  */
 export default function CameraScreen() {
   useScreenAwake();
-  const { exerciseId = '' } = useLocalSearchParams<{ exerciseId: string }>();
+  const params = useLocalSearchParams<{ exerciseId: string; loadKg?: string; practice?: string }>();
+  const { exerciseId = '' } = params;
+  const practice = params.practice === '1';
+  const units = useUnits();
   const exercise = EXERCISE_BY_ID.get(exerciseId);
   const [session] = useState(() => LivePoseSession.for(exerciseId));
   const active = useActiveSession();
   const workout = active.data ?? null;
   const action = useSessionAction(workout?.id ?? '');
   const logSet = useLogSet(workout?.id ?? '');
-  const inWorkout = workout?.exercises.find((e) => e.exerciseId === exerciseId) ?? null;
+  // Practice mode never touches the workout: no logging, and pausing only pauses the camera.
+  const inWorkout = practice ? null : (workout?.exercises.find((e) => e.exerciseId === exerciseId) ?? null);
 
   const [started, setStarted] = useState(false);
   const [localPaused, setLocalPaused] = useState(false);
@@ -71,10 +77,12 @@ export default function CameraScreen() {
     }
   };
   // In a workout, pausing the camera pauses the workout clock too (server-side), and vice versa.
-  const pause = () => (inWorkout ? action.mutate('pause') : setLocalPaused(true));
+  const actionFailed = (what: string) => (e: { kind: string; message: string }) =>
+    setLogMessage({ tone: 'danger', text: e.kind === 'network' ? `${what} — check your connection and try again.` : e.message });
+  const pause = () => (inWorkout ? action.mutate('pause', { onError: actionFailed("Couldn't pause the workout") }) : setLocalPaused(true));
   const resume = () => {
     setLocalPaused(false);
-    if (inWorkout && workout?.status === 'paused') action.mutate('resume');
+    if (inWorkout && workout?.status === 'paused') action.mutate('resume', { onError: actionFailed("Couldn't resume the workout") });
   };
 
   const onLogSet = () => {
@@ -83,13 +91,16 @@ export default function CameraScreen() {
     setPendingSetId(clientSetId);
     setLogMessage(null);
     const live = session.verifiedReps ?? 0;
+    // The load the workout screen was showing when the camera opened; the plan's default only if none came with it.
+    const given = params.loadKg === undefined || params.loadKg.trim() === '' ? NaN : Number(params.loadKg);
+    const loadKg = Number.isFinite(given) && given >= 0 && given <= 1000 ? given : nextSetDefaults(inWorkout).loadKg;
     logSet.mutate(
       {
         clientSetId,
         exerciseId,
         // Recorded reps start at what the camera verified; they can be edited in the workout afterwards.
         reps: live,
-        loadKg: inWorkout.loadable ? nextSetDefaults(inWorkout).loadKg : 0,
+        loadKg: inWorkout.loadable ? loadKg : 0,
         targetReps: inWorkout.targetReps?.max,
         targetLoadKg: inWorkout.targetLoadKg ?? undefined,
         restSeconds: inWorkout.restSeconds,
@@ -102,7 +113,12 @@ export default function CameraScreen() {
           setReadout(null);
           const form = set.formScore !== null ? `, form ${set.formScore}` : '';
           const differs = set.verifiedReps !== live ? " (the server's check is final)" : '';
-          setLogMessage({ tone: 'success', text: `Set saved — ${set.verifiedReps} verified rep${set.verifiedReps === 1 ? '' : 's'}${form}${differs}.` });
+          const untrusted = verificationNote(set.verificationStatus);
+          setLogMessage(
+            untrusted
+              ? { tone: 'info', text: `Set saved — ${untrusted}. Your reps are kept as unverified.` }
+              : { tone: 'success', text: `Set saved — ${set.verifiedReps} verified rep${set.verifiedReps === 1 ? '' : 's'}${form}${differs}.` },
+          );
         },
         onError: (e) =>
           setLogMessage({ tone: 'danger', text: e.kind === 'network' ? 'Not saved — no connection. Your reps are kept; try again.' : e.message }),
@@ -115,7 +131,7 @@ export default function CameraScreen() {
     <LiveCameraView
       exerciseName={exercise.name}
       setLabel={inWorkout ? `Set ${setNumber}${inWorkout.sets ? ` of ${inWorkout.sets}` : ''}` : null}
-      targetLabel={inWorkout ? formatTarget(inWorkout) : `${exercise.targetReps.min}–${exercise.targetReps.max} reps`}
+      targetLabel={inWorkout ? formatTarget(inWorkout, units) : `${exercise.targetReps.min}–${exercise.targetReps.max} reps`}
       setupText={exercise.camera?.setup ?? ''}
       model={model}
       readout={readout}

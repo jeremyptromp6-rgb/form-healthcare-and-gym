@@ -1,4 +1,4 @@
-import { localDateIn, resolveEntitlements, type BillingEvent, type SubscriptionRecord, type VerifiedTransaction } from "@form/domain";
+import { resolveEntitlements, type BillingEvent, type SubscriptionRecord, type VerifiedTransaction } from "@form/domain";
 import { transaction, type Db } from "../../db";
 import { HttpError } from "../../http/errors";
 import type { AppContext } from "../../shared/context";
@@ -96,11 +96,10 @@ export function applyEvent(ctx: AppContext, provider: string, e: BillingEvent): 
   });
 }
 
-/** Meal scans the user made today (their local day): what the Free allowance counts. */
-export function scansToday(ctx: AppContext, userId: string, timezone: string, today: string): number {
-  const since = new Date(ctx.now().getTime() - 2 * 86_400_000).toISOString();
-  const rows = ctx.db.prepare("SELECT created_at AS at FROM food_scans WHERE user_id = ? AND created_at >= ?").all(userId, since) as { at: string }[];
-  return rows.filter((r) => localDateIn(timezone, new Date(r.at)) === today).length;
+/** Meal scans the user made (or has in flight) today, from the usage ledger: what the Free allowance counts.
+ *  Discarding or pruning a scan never lowers it. `timezone` is unused: the ledger stores the user's local date. */
+export function scansToday(ctx: AppContext, userId: string, _timezone: string, today: string): number {
+  return (ctx.db.prepare("SELECT COUNT(*) AS n FROM provider_usage_events WHERE user_id = ? AND kind = 'food_scan' AND local_date = ? AND state IN ('reserved', 'used')").get(userId, today) as { n: number }).n;
 }
 
 export function coachChatsToday(db: Db, userId: string, today: string): number {

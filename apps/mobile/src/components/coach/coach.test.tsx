@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import type { CoachResponse, CoachStatus, CoachTurn } from '@/lib/types';
 import { CoachCard, CoachChatView, COACH_SUGGESTIONS, degradedNote, providerLabel } from './CoachViews';
 
@@ -69,8 +70,64 @@ describe('CoachChatView', () => {
     await fireEvent.changeText(screen.getByLabelText('Message the coach'), '  What next?  ');
     await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
     expect(onSend).toHaveBeenCalledWith('What next?');
+    // Clearing is two steps: ask, then confirm.
     await fireEvent.press(screen.getByRole('button', { name: 'Clear chat' }));
-    expect(onClear).toHaveBeenCalled();
+    expect(onClear).not.toHaveBeenCalled();
+    expect(screen.getByText('Clear this whole chat?')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Yes, clear chat' }));
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Clear this whole chat?')).toBeNull();
+  });
+
+  it('lets you back out of clearing, and shows why a clear failed', async () => {
+    const onClear = jest.fn();
+    await render(<CoachChatView turns={turns} status={status()} sending={false} error={null} onSend={jest.fn()} onAction={jest.fn()} onClear={onClear} clearError="Couldn't clear the chat." />);
+    expect(screen.getByText("Couldn't clear the chat.")).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Clear chat' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Keep chat' }));
+    expect(onClear).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Clear chat' })).toBeTruthy();
+  });
+
+  it('puts the typed message back when the send fails, and clears it when it works', async () => {
+    const onSend = jest.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await render(<CoachChatView turns={[]} status={status()} sending={false} error={null} onSend={onSend} onAction={jest.fn()} onClear={jest.fn()} />);
+    const input = screen.getByLabelText('Message the coach');
+    await fireEvent.changeText(input, 'Is my squat deep enough?');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledWith('Is my squat deep enough?');
+    expect(screen.getByLabelText('Message the coach').props.value).toBe('Is my squat deep enough?');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+    await act(async () => {});
+    expect(screen.getByLabelText('Message the coach').props.value).toBe('');
+  });
+
+  it('does not overwrite something new typed while a failed send was in flight', async () => {
+    let fail: (ok: boolean) => void = () => {};
+    const onSend = jest.fn(() => new Promise<boolean>((r) => (fail = r)));
+    await render(<CoachChatView turns={[]} status={status()} sending={false} error={null} onSend={onSend} onAction={jest.fn()} onClear={jest.fn()} />);
+    await fireEvent.changeText(screen.getByLabelText('Message the coach'), 'first');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send' }));
+    await fireEvent.changeText(screen.getByLabelText('Message the coach'), 'second');
+    await act(async () => fail(false));
+    expect(screen.getByLabelText('Message the coach').props.value).toBe('second');
+  });
+
+  it('a quick question does not throw away what is typed', async () => {
+    const onSend = jest.fn();
+    await render(<CoachChatView turns={[]} status={status()} sending={false} error={null} onSend={onSend} onAction={jest.fn()} onClear={jest.fn()} />);
+    await fireEvent.changeText(screen.getByLabelText('Message the coach'), 'half a thought');
+    await fireEvent.press(screen.getByRole('button', { name: COACH_SUGGESTIONS[1]! }));
+    expect(onSend).toHaveBeenCalledWith("How's my form?");
+    expect(screen.getByLabelText('Message the coach').props.value).toBe('half a thought');
+  });
+
+  it('keeps the quick-question chips at a 44-point touch target', async () => {
+    await render(<CoachChatView turns={[]} status={status()} sending={false} error={null} onSend={jest.fn()} onAction={jest.fn()} onClear={jest.fn()} />);
+    const chip = screen.getByRole('button', { name: COACH_SUGGESTIONS[0]! });
+    const style = StyleSheet.flatten(typeof chip.props.style === 'function' ? chip.props.style({ pressed: false }) : chip.props.style);
+    expect(style.minHeight).toBeGreaterThanOrEqual(44);
   });
 
   it('is upfront that rules are not AI, and shows progress and errors', async () => {

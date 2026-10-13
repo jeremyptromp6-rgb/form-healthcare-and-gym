@@ -26,12 +26,12 @@ function unconfigured(provider: string, missing: string[]) {
 
 /** Honest defaults: every capability reports itself as unconfigured until a real provider is wired in. */
 export function createUnconfiguredProviders(): ProviderRegistry {
-  const ai = unconfigured("AI coach", ["AI_PROVIDER_API_KEY"]);
+  const ai = unconfigured("AI coach", ["ANTHROPIC_API_KEY"]);
   const pose = unconfigured("Pose detection", ["on-device pose model"]);
-  const food = unconfigured("Food recognition", ["FOOD_RECOGNITION_PROVIDER", "ANTHROPIC_API_KEY"]);
+  const food = unconfigured("Food recognition", ["FOOD_RECOGNITION_PROVIDER", "GEMINI_API_KEY or ANTHROPIC_API_KEY"]);
   const billing = unconfigured("Billing", ["BILLING_PROVIDER"]);
-  const ads = unconfigured("Ads", ["AD_NETWORK_APP_ID"]);
-  const analytics = unconfigured("Analytics", ["ANALYTICS_WRITE_KEY"]);
+  const ads = unconfigured("Ads", ["AdMob app and unit ids (ads run in the app: ADMOB_*_APP_ID, EXPO_PUBLIC_ADMOB_INTERSTITIAL_*)"]);
+  const analytics = unconfigured("Analytics", ["an analytics provider (none is wired in yet)"]);
   const notifications = unconfigured("Notifications", ["PUSH_CREDENTIALS"]);
 
   return {

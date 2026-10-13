@@ -162,8 +162,8 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
       if (!apiKey) return fail("unconfigured", "Food recognition is not configured");
       const timeout = AbortSignal.timeout(opts.timeoutMs ?? 45_000);
       const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-      const note = (stage: string, model: string, detail: string, status?: number) => {
-        lastFailure = { at: new Date().toISOString(), stage, model, status: status ?? null, detail: scrub(detail) };
+      const note = (stage: string, model: string, detail: string, status?: number, finishReason?: string) => {
+        lastFailure = { at: new Date().toISOString(), stage, model, status: status ?? null, finishReason: finishReason ?? null, detail: scrub(detail) };
       };
       const send = (model: string, step: number) =>
         doFetch(`${GEMINI_URL}/${encodeURIComponent(model)}:generateContent`, {
@@ -226,7 +226,7 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
         return fail("unavailable", "Food recognition returned no answer. Try again.");
       }
       if (candidate.finishReason && BLOCKED_FINISH.has(candidate.finishReason)) {
-        note("blocked", usedModel, candidate.finishReason);
+        note("blocked", usedModel, candidate.finishReason, undefined, candidate.finishReason);
         return unreadable();
       }
       const text = (candidate.content?.parts ?? [])
@@ -235,7 +235,7 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
         .join("");
       const parsed = parseLenient(text);
       if (parsed === undefined) {
-        note("unreadable answer", usedModel, `${candidate.finishReason ?? "?"}: ${text.slice(0, 160)}`);
+        note("unreadable answer", usedModel, candidate.finishReason ?? "?", undefined, candidate.finishReason);
         return fail("unavailable", candidate.finishReason === "MAX_TOKENS" ? "Food recognition returned an incomplete answer. Try again." : "Food recognition returned an unreadable answer. Try again.");
       }
       // Model output is untrusted: normalised, then it must match the schema; the domain clamps the values after.
@@ -251,13 +251,18 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
   };
 }
 
-/** What the last failed recognition ran into, for operators (/status). No photo, no user, no key. */
-export type RecognitionFailureInfo = { at: string; stage: string; model: string; status: number | null; detail: string };
+/** What the last failed recognition ran into. No photo, no user, no key. `detail` is for tests and debugging only; it never leaves the process. */
+export type RecognitionFailureInfo = { at: string; stage: string; model: string; status: number | null; finishReason: string | null; detail: string };
 
-/** The food provider's last failure, when it records one (Gemini does). */
-export function lastRecognitionFailure(ctx: { providers: { food: unknown } }): RecognitionFailureInfo | null {
+/** The part of a failure that is safe to publish at /status: codes and times, never free text. */
+export type PublicRecognitionFailure = Omit<RecognitionFailureInfo, "detail">;
+
+/** The food provider's last failure for /status, when it records one (Gemini does), without `detail`. */
+export function lastRecognitionFailure(ctx: { providers: { food: unknown } }): PublicRecognitionFailure | null {
   const food = ctx.providers.food as { lastFailure?: () => RecognitionFailureInfo | null };
-  return typeof food.lastFailure === "function" ? food.lastFailure() : null;
+  const info = typeof food.lastFailure === "function" ? food.lastFailure() : null;
+  if (!info) return null;
+  return { at: info.at, stage: info.stage, model: info.model, status: info.status, finishReason: info.finishReason };
 }
 
 /**
@@ -302,7 +307,7 @@ export function parseLenient(text: string): unknown {
 /**
  * Fills what a model commonly leaves out or words differently (numbers as strings, "protein"
  * for proteinG, a missing range or empty lists) so a good answer isn't thrown away over form.
- * Items without a name, portion or nutrition are dropped; the schema and domain check the rest.
+ * Items without a name, portion or complete, self-consistent nutrition are dropped (and so are alternatives that fail the same test); the schema and domain check the rest.
  */
 export function normaliseRecognition(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
@@ -310,28 +315,44 @@ export function normaliseRecognition(raw: unknown): unknown {
   // Only fill gaps in something that is recognisably an answer; anything else fails the schema.
   if (!Array.isArray(r.items) && typeof r.containsFood !== "boolean") return raw;
   const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
+  // Nutrition the model left out or garbled is never invented as zeros: the item is dropped (null).
   const macros = (m: unknown) => {
     const o = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
-    return { kcal: num(o.kcal ?? o.calories) ?? 0, proteinG: num(o.proteinG ?? o.protein) ?? 0, carbsG: num(o.carbsG ?? o.carbohydrates ?? o.carbs) ?? 0, fatG: num(o.fatG ?? o.fat) ?? 0 };
+    const kcal = num(o.kcal ?? o.calories);
+    const proteinG = num(o.proteinG ?? o.protein);
+    const carbsG = num(o.carbsG ?? o.carbohydrates ?? o.carbs);
+    const fatG = num(o.fatG ?? o.fat);
+    return kcal === null || proteinG === null || carbsG === null || fatG === null ? null : { kcal, proteinG, carbsG, fatG };
+  };
+  // Macros (4P + 4C + 9F) that imply clearly more calories than stated mean one of the numbers is wrong.
+  // The other direction is allowed (same rule as Q-13): alcohol is 7 kcal/g and isn't in the macros, so
+  // wine and spirits state more kcal than their macros. Negatives and more than 9 kcal/g are impossible.
+  const coherent = (m: { kcal: number; proteinG: number; carbsG: number; fatG: number }) => {
+    if (m.kcal < 0 || m.proteinG < 0 || m.carbsG < 0 || m.fatG < 0 || m.kcal > 900) return false;
+    const fromMacros = 4 * m.proteinG + 4 * m.carbsG + 9 * m.fatG;
+    return !(fromMacros > m.kcal * 1.25 + 25);
   };
   const QUALITY = ["ok", "too_dark", "blurry", "too_far", "obstructed"];
   const items = (Array.isArray(r.items) ? r.items : []).flatMap((it: unknown) => {
     const i = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
     const label = typeof i.label === "string" ? i.label.trim() : typeof i.name === "string" ? i.name.trim() : "";
     const grams = num(i.servingGrams ?? i.grams);
-    if (!label || grams === null || !i.per100g) return [];
+    const per100g = macros(i.per100g);
+    if (!label || grams === null || !per100g || !coherent(per100g)) return [];
     return [
       {
         label,
-        confidence: num(i.confidence) ?? 0.5,
+        // A missing confidence is low, not a coin flip: the review screen then asks the user to check it.
+        confidence: num(i.confidence) ?? 0.3,
         alternatives: (Array.isArray(i.alternatives) ? i.alternatives : []).flatMap((a: unknown) => {
           const x = (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
-          return typeof x.label === "string" && x.label.trim() ? [{ label: x.label.trim(), confidence: num(x.confidence) ?? 0.2, per100g: macros(x.per100g) }] : [];
+          const alt = macros(x.per100g);
+          return typeof x.label === "string" && x.label.trim() && alt && coherent(alt) ? [{ label: x.label.trim(), confidence: num(x.confidence) ?? 0.2, per100g: alt }] : [];
         }),
         servingGrams: grams,
         servingLowGrams: num(i.servingLowGrams) ?? Math.round(grams * 0.7),
         servingHighGrams: num(i.servingHighGrams) ?? Math.round(grams * 1.3),
-        per100g: macros(i.per100g),
+        per100g,
         hiddenIngredients: (Array.isArray(i.hiddenIngredients) ? i.hiddenIngredients : []).filter((h: unknown): h is string => typeof h === "string"),
         composite: i.composite === true,
       },

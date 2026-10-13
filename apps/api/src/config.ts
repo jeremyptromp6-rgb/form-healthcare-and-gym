@@ -7,7 +7,9 @@ const envSchema = z.object({
   DATABASE_PATH: z.string().min(1).default("./form.db"),
   PORT: z.coerce.number().int().min(0).max(65535).default(4000),
   CORS_ORIGINS: z.string().optional(),
-  TOKEN_TTL: z.string().regex(/^\d+[smhd]$/, "e.g. 24h").default("24h"),
+  // A signed-in phone stays signed in for a month (a daily sign-out is hostile on mobile). "Sign out on
+  // all devices" and a password change revoke every token at once through token_version, whatever the TTL.
+  TOKEN_TTL: z.string().regex(/^\d+[smhd]$/, "e.g. 30d").default("30d"),
   // Per-client ceiling across all routes (auth routes have their own, much stricter limits).
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(100_000).default(300),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
@@ -37,6 +39,9 @@ const envSchema = z.object({
   // with NODE_ENV=production, so testers can see and try Pro on their phones. "live" (the default)
   // refuses it — remove APP_STAGE (or set it to live) before real users and real payments.
   APP_STAGE: z.enum(["testing", "live"]).default("live"),
+  // Reverse proxies in front of the API whose X-Forwarded-For entry is trusted (production only).
+  // Render's load balancer is one hop; raise it only if another proxy or CDN is known to sit in front.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
   BILLING_PRODUCT_MONTHLY: z.string().regex(/^[a-z0-9_.]{3,100}$/).default("form_pro_monthly"),
   BILLING_PRODUCT_ANNUAL: z.string().regex(/^[a-z0-9_.]{3,100}$/).default("form_pro_annual"),
   // Offer a free trial only when the store product has one (0 = no trial is offered).
@@ -63,6 +68,10 @@ export interface AppConfig {
   port: number;
   corsOrigins: string[];
   tokenTtl: string;
+  /** "testing" (a pre-launch test server) or "live"; shown at /status. Absent counts as live. */
+  stage?: "testing" | "live";
+  /** Trusted proxy hops for the client IP in production. Absent counts as 1. */
+  trustProxyHops?: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   rateLimitPerMinute: number;
   foodRecognition: {
@@ -137,6 +146,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: e.PORT,
     corsOrigins,
     tokenTtl: e.TOKEN_TTL,
+    stage: e.APP_STAGE,
+    trustProxyHops: e.TRUST_PROXY_HOPS,
     logLevel: e.LOG_LEVEL,
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
     foodRecognition: { provider: e.FOOD_RECOGNITION_PROVIDER, model: e.FOOD_RECOGNITION_MODEL, geminiModel: e.GEMINI_FOOD_MODEL, effort: e.FOOD_RECOGNITION_EFFORT, scansPerHour: e.FOOD_SCANS_PER_HOUR, timeoutMs: e.FOOD_RECOGNITION_TIMEOUT_MS, globalPerDay: e.FOOD_SCANS_GLOBAL_PER_DAY },

@@ -312,6 +312,6 @@ function ExerciseFilter({ exercises, selected, onSelect }: { exercises: Progress
 
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 32, justifyContent: 'center' },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 44, justifyContent: 'center' },
   chipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
 });

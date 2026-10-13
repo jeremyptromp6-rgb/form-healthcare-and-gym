@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { api, type ApiError, type FoodLogPatch, type GroceryAction, type NewFoodLog, type NewMeal, type PlanAction, type NewSet, type NewUserFood, type NewWorkout, type ScanConfirmation } from './api';
 import { useAuth } from './auth';
 import { localDateKey, setUserTimeZone } from './dates';
+import { useDebouncedValue } from './timing';
 import type { AnalyticsRange, Celebration, NotificationPreferences, CoachResponse, ProgressAnalytics, CoachTopic, CoachTurn, CompletionResult, HomeViewModel, MealType, Me, NutritionPreferences, PainLevel, ProfilePatch, UserSettings, WeightEntry, WorkoutSession, SessionSet } from './types';
 
 /**
@@ -11,6 +12,9 @@ import type { AnalyticsRange, Celebration, NotificationPreferences, CoachRespons
  * mutations invalidate exactly what they change — so logging food updates Home, Eat and
  * Progress together.
  */
+
+/** How long a search box must sit still before it asks the server (one request per pause, not per keystroke). */
+export const SEARCH_DEBOUNCE_MS = 250;
 
 export const qk = {
   me: ['me'] as const,
@@ -224,6 +228,10 @@ export function usePlanAction() {
       qc.invalidateQueries({ queryKey: ['meal-plan', 'alternatives'] });
       if (a.kind === 'eaten' || a.kind === 'uneaten') invalidateFood(qc);
     },
+    // A meal that turned unsafe since the plan was loaded (a new allergy): refetch so the screen flags it at once.
+    onError: (e) => {
+      if (e.code === 'meal_unsuitable') qc.invalidateQueries({ queryKey: qk.plan });
+    },
   });
 }
 
@@ -317,10 +325,10 @@ export function useDiscardScan() {
   return useMutation<unknown, ApiError, string>({ mutationFn: (id) => authed((t) => api.discardScan(t, id)) });
 }
 
-/** Food search; keeps the previous results on screen while the next query loads. */
+/** Food search; waits for a pause in typing, and keeps the previous results on screen while the next query loads. */
 export function useFoodSearch(q: string) {
   const { authed, token } = useAuth();
-  const query = q.trim();
+  const query = useDebouncedValue(q.trim(), SEARCH_DEBOUNCE_MS);
   return useQuery<Awaited<ReturnType<typeof api.searchFoods>>, ApiError>({
     queryKey: ['foods', 'search', query],
     queryFn: () => authed((t) => api.searchFoods(t, query)),
@@ -352,6 +360,16 @@ export function useDeleteUserFood() {
   });
 }
 
+/**
+ * Allergies, diet, goals and body stats decide which recipes, plans, groceries and workouts are
+ * safe and suitable, so a change to them must not leave any of those cached. Prefix matching
+ * covers recipe lists, recipe detail, the plan and its alternatives, the grocery list and the
+ * workout queries (today's plan and workout details).
+ */
+function invalidateSuitability(qc: ReturnType<typeof useQueryClient>) {
+  for (const queryKey of [['recipes'], ['recipe'], ['meal-plan'], qk.grocery, ['workout']]) qc.invalidateQueries({ queryKey });
+}
+
 export function usePatchProfile() {
   const { authed } = useAuth();
   const qc = useQueryClient();
@@ -365,6 +383,7 @@ export function usePatchProfile() {
       qc.invalidateQueries({ queryKey: qk.weight });
       qc.invalidateQueries({ queryKey: ['analytics'] });
       qc.invalidateQueries({ queryKey: ['home'] });
+      invalidateSuitability(qc);
     },
   });
 }
@@ -377,6 +396,7 @@ export function usePatchPreferences() {
     onSuccess: (res) => {
       qc.setQueryData(qk.me, (me: Me | undefined) => (me ? { ...me, preferences: res.preferences, onboarding: res.onboarding } : me));
       qc.invalidateQueries({ queryKey: qk.me });
+      invalidateSuitability(qc);
     },
   });
 }
@@ -468,6 +488,8 @@ export const useStartSession = () =>
   useSessionMutation<{ clientSessionId: string; source: 'plan' | 'empty' }>((t, v) => api.startSession(t, v.clientSessionId, v.source));
 export const useLogSet = (sessionId: string) =>
   useSessionMutation<NewSet, { set: SessionSet; session: WorkoutSession }>((t, body) => api.logSet(t, sessionId, body));
+export const useUpdateSet = (sessionId: string) =>
+  useSessionMutation<{ setId: string; reps?: number; loadKg?: number }, { set: SessionSet; session: WorkoutSession }>((t, { setId, ...patch }) => api.updateSet(t, sessionId, setId, patch));
 export const useDeleteSet = (sessionId: string) => useSessionMutation<string>((t, setId) => api.deleteSet(t, sessionId, setId));
 export const useSessionAction = (sessionId: string) =>
   useSessionMutation<'pause' | 'resume' | 'discard' | 'rest/skip'>((t, action) => api.sessionAction(t, sessionId, action));

@@ -6,6 +6,7 @@ import { BodyMap, type Muscle } from '@/components/art/BodyMap';
 import { EXERCISE_ART_COLORS, ExerciseArt } from '@/components/art/ExerciseArt';
 import { AppText, Badge, BreathingGlow, Button, Card, MuscleBars, Row, SectionHeader, StatStrip, TabRow, TrendChart, type TrendPoint } from '@/components/ui';
 import type { ExerciseDetail } from '@/lib/types';
+import { formatLoad, loadToDisplay, loadUnit, useUnits, type Units } from '@/lib/units';
 import { colors, gradients, radius, space } from '@/theme/tokens';
 
 const EQUIPMENT_LABEL = (key: string) => key.replace(/_/g, ' ');
@@ -25,6 +26,8 @@ export interface ExerciseDetailViewProps {
   onPractise: (exerciseId: string) => void;
   /** FORM Pro form history, rendered by the route and shown at the end of Progress. */
   formHistory?: ReactNode;
+  /** Display units for loads (stored in kg). Defaults to the user's setting. */
+  units?: Units;
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
@@ -57,7 +60,8 @@ function sessionStats(history: ExerciseDetail['history']): SessionStats[] {
 }
 
 /** Exercise detail: About (how to, camera), History (records and sessions) and Progress (trends from real sets). */
-export function ExerciseDetailView({ detail, poseAvailable, onPractise, formHistory }: ExerciseDetailViewProps) {
+export function ExerciseDetailView({ detail, poseAvailable, onPractise, formHistory, units: unitsProp }: ExerciseDetailViewProps) {
+  const units = useUnits(unitsProp);
   const [tab, setTab] = useState<Tab>('about');
   const e = detail.exercise;
   const art = EXERCISE_ART_COLORS;
@@ -79,8 +83,8 @@ export function ExerciseDetailView({ detail, poseAvailable, onPractise, formHist
       <TabRow label="Exercise sections" tabs={TABS} value={tab} onChange={setTab} />
 
       {tab === 'about' ? <AboutTab detail={detail} poseAvailable={poseAvailable} onPractise={onPractise} /> : null}
-      {tab === 'history' ? <HistoryTab detail={detail} /> : null}
-      {tab === 'progress' ? <ProgressTab detail={detail}>{formHistory}</ProgressTab> : null}
+      {tab === 'history' ? <HistoryTab detail={detail} units={units} /> : null}
+      {tab === 'progress' ? <ProgressTab detail={detail} units={units}>{formHistory}</ProgressTab> : null}
     </>
   );
 }
@@ -175,7 +179,7 @@ function AboutTab({ detail, poseAvailable, onPractise }: { detail: ExerciseDetai
   );
 }
 
-function HistoryTab({ detail }: { detail: ExerciseDetail }) {
+function HistoryTab({ detail, units }: { detail: ExerciseDetail; units: Units }) {
   const { history, records } = detail;
   return (
     <>
@@ -183,7 +187,7 @@ function HistoryTab({ detail }: { detail: ExerciseDetail }) {
       {records.length ? (
         <Row gap={space.sm} style={{ flexWrap: 'wrap' }}>
           {records.map((r) => (
-            <Badge key={r.kind} label={`${PR_LABEL[r.kind] ?? r.kind}: ${r.value}${r.kind === 'max_reps' ? ' reps' : ' kg'}`} tone="primary" icon="trophy" />
+            <Badge key={r.kind} label={`${PR_LABEL[r.kind] ?? r.kind}: ${r.kind === 'max_reps' ? `${r.value} reps` : formatLoad(r.value, units)}`} tone="primary" icon="trophy" />
           ))}
         </Row>
       ) : null}
@@ -197,7 +201,7 @@ function HistoryTab({ detail }: { detail: ExerciseDetail }) {
             <View key={h.workoutId} style={{ gap: 2 }}>
               <AppText variant="bodyStrong">{longDate(h.localDate)}</AppText>
               <AppText variant="caption" color={colors.textMuted}>
-                {h.sets.map((s) => `${s.reps}${s.loadKg > 0 ? ` × ${s.loadKg} kg` : ''}${s.verifiedReps ? ` (${s.verifiedReps}✓)` : ''}`).join(' · ')}
+                {h.sets.map((s) => `${s.reps}${s.loadKg > 0 ? ` × ${formatLoad(s.loadKg, units)}` : ''}${s.verifiedReps ? ` (${s.verifiedReps}✓)` : ''}`).join(' · ')}
               </AppText>
             </View>
           ))
@@ -207,8 +211,11 @@ function HistoryTab({ detail }: { detail: ExerciseDetail }) {
   );
 }
 
-function ProgressTab({ detail, children }: { detail: ExerciseDetail; children?: ReactNode }) {
+function ProgressTab({ detail, units, children }: { detail: ExerciseDetail; units: Units; children?: ReactNode }) {
   const sessions = sessionStats(detail.history);
+  const unit = loadUnit(units);
+  // Loads and volume in the user's units; pounds are already to 0.1, kilograms to 0.1 as before.
+  const shown = (kg: number) => round1(loadToDisplay(kg, units));
   const weighted = sessions.some((s) => s.topKg > 0);
   const point = (s: SessionStats, value: number): TrendPoint => ({ key: s.key, label: s.label, value: round1(value) });
 
@@ -229,8 +236,8 @@ function ProgressTab({ detail, children }: { detail: ExerciseDetail; children?: 
           items={
             weighted
               ? [
-                  { label: 'Top weight', value: String(round1(s.topKg)), unit: 'kg' },
-                  { label: 'Volume', value: String(round1(s.volumeKg)), unit: 'kg' },
+                  { label: 'Top weight', value: String(shown(s.topKg)), unit },
+                  { label: 'Volume', value: String(shown(s.volumeKg)), unit },
                   { label: 'Best reps', value: String(s.bestReps) },
                 ]
               : [
@@ -249,8 +256,8 @@ function ProgressTab({ detail, children }: { detail: ExerciseDetail; children?: 
       <Card style={{ gap: space.xl }}>
         {weighted ? (
           <>
-            <TrendChart title="Top weight" unit="kg" points={sessions.filter((s) => s.topKg > 0).map((s) => point(s, s.topKg))} />
-            <TrendChart title="Volume" unit="kg" points={sessions.filter((s) => s.volumeKg > 0).map((s) => point(s, s.volumeKg))} />
+            <TrendChart title="Top weight" unit={unit} points={sessions.filter((s) => s.topKg > 0).map((s) => point(s, shown(s.topKg)))} />
+            <TrendChart title="Volume" unit={unit} points={sessions.filter((s) => s.volumeKg > 0).map((s) => point(s, shown(s.volumeKg)))} />
           </>
         ) : (
           <TrendChart title="Total reps" unit="reps" points={sessions.map((s) => point(s, s.totalReps))} />

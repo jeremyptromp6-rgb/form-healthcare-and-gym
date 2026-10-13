@@ -39,15 +39,16 @@ export function questMetrics(db: Db, userId: string, from: string, to: string): 
   const profile = loadProfile(db, userId);
   const waterTarget = waterTargetMl(profile?.weightKg ?? null).targetMl;
 
+  // A workout with serious pain earns no quest progress (workouts, active days or verified reps).
   const workouts = db
     .prepare(
-      `SELECT COUNT(*) AS n, COUNT(DISTINCT local_date) AS days FROM workouts WHERE user_id = ? AND local_date BETWEEN ? AND ?`,
+      `SELECT COUNT(*) AS n, COUNT(DISTINCT local_date) AS days FROM workouts WHERE user_id = ? AND local_date BETWEEN ? AND ? AND pain_level <> 'serious'`,
     )
     .get(userId, from, to) as { n: number; days: number };
   const verified = db
     .prepare(
       `SELECT COALESCE(SUM(s.verified_reps), 0) AS reps FROM workout_sets s JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ?`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious'`,
     )
     .get(userId, from, to) as { reps: number };
   // Form Master: verified reps the server scored 85+ (no reps from a serious-pain session count).

@@ -24,6 +24,7 @@ import { assertPlausibleLocalDate, dateKey } from "../../shared/dates";
 import { assertEntryDate, userClock } from "../../shared/userClock";
 import { progressAnalytics } from "../analytics/service";
 import { clearChat } from "../coach/service";
+import { reconcilePlansWithPreferences } from "../meals/service";
 import { sanitizePhoto } from "./photo";
 import { latestWeight, loadNotifications, loadPreferences, loadProfile, loadSettings, markOnboardingComplete, saveNotifications, saveSettings, upsertWeight, weightHistory } from "./repo";
 import { applyPreferencesPatch, applyProfilePatch, syncWeightFromHistory, userState } from "./service";
@@ -137,8 +138,14 @@ export function userRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.patch("/me/preferences", async (req) => {
     const patch = preferencesPatch.parse(req.body);
-    const localDate = userClock(ctx, req.user.sub).today;
-    const { preferences, movedToAllergies } = transaction(ctx.db, () => applyPreferencesPatch(ctx.db, req.user.sub, patch, localDate, ctx.now()));
+    const clock = userClock(ctx, req.user.sub);
+    const localDate = clock.today;
+    const { preferences, movedToAllergies } = transaction(ctx.db, () => {
+      const saved = applyPreferencesPatch(ctx.db, req.user.sub, patch, localDate, ctx.now());
+      // Allergies and diet are safety rules: meal plans and the grocery list must follow the new ones straight away.
+      reconcilePlansWithPreferences(ctx, req.user.sub, clock);
+      return saved;
+    });
     return { preferences, movedToAllergies, onboarding: onboardingStatus(loadProfile(ctx.db, req.user.sub), preferences) };
   });
 

@@ -719,6 +719,8 @@ export function updateLog(ctx: AppContext, userId: string, id: string, patch: Up
     const next: LogRow = { ...row };
     if (patch.localDate !== undefined) {
       assertLoggableDate(patch.localDate, clock.today);
+      // Moving an entry onto another day adds one there, so that day's cap applies like for a new entry.
+      if (patch.localDate !== row.local_date) assertDayRoom(db, userId, patch.localDate, 1);
       next.local_date = patch.localDate;
     }
     if (patch.mealType !== undefined) next.meal_type = patch.mealType;

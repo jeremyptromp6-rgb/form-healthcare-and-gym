@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { router, type Href } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { Linking, Platform, StyleSheet, View } from 'react-native';
 import { AppText, Button, Card, Field, InlineMessage, Screen, StateView } from '@/components/ui';
 import { BARCODE_TYPES, lookupBarcode, type BarcodeLookup } from '@/lib/barcode';
 import { colors, radius, space } from '@/theme/tokens';
@@ -43,8 +43,8 @@ export default function BarcodeScreen() {
         {permission?.granted ? (
           <>
             <CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }} onBarcodeScanned={busy || problem ? undefined : onScanned} />
-            <View style={styles.aim} pointerEvents="none" />
-            <View style={styles.hint} pointerEvents="none">
+            <View style={styles.aim} />
+            <View style={styles.hint}>
               <AppText variant="label" color="#FFFFFF">
                 {busy ? 'Looking it up…' : 'Point at the barcode'}
               </AppText>
@@ -55,8 +55,9 @@ export default function BarcodeScreen() {
             kind="permission"
             title="Camera access is off"
             message="Allow camera access in Settings to scan barcodes — or type the number below."
-            actionLabel="Open Settings"
-            onAction={() => Linking.openSettings()}
+            // There is no app settings page to open in a browser; the web camera prompt is the browser's.
+            actionLabel={Platform.OS === 'web' ? undefined : 'Open Settings'}
+            onAction={Platform.OS === 'web' ? undefined : () => Linking.openSettings()}
           />
         ) : (
           <StateView kind="permission" title="Use your camera to scan" message="FORM only reads the barcode. Nothing is recorded." actionLabel="Allow camera" onAction={requestPermission} />
@@ -87,6 +88,6 @@ export default function BarcodeScreen() {
 
 const styles = StyleSheet.create({
   viewfinder: { height: 300, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: '#000', borderWidth: 1, borderColor: colors.border, justifyContent: 'center' },
-  aim: { position: 'absolute', alignSelf: 'center', width: '72%', height: 120, borderRadius: radius.md, borderWidth: 3, borderColor: colors.primary },
-  hint: { position: 'absolute', bottom: space.md, alignSelf: 'center', paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(0,0,0,0.55)' },
+  aim: { pointerEvents: 'none', position: 'absolute', alignSelf: 'center', width: '72%', height: 120, borderRadius: radius.md, borderWidth: 3, borderColor: colors.primary },
+  hint: { pointerEvents: 'none', position: 'absolute', bottom: space.md, alignSelf: 'center', paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: 'rgba(0,0,0,0.55)' },
 });

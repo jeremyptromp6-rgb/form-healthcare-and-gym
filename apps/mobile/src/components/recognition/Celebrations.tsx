@@ -97,7 +97,7 @@ function ConfettiBurst({ playKey }: { playKey: number }) {
     return () => run.stop();
   }, [playKey, t]);
   return (
-    <View style={styles.confetti} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+    <View style={[styles.confetti, { pointerEvents: 'none' }]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
       {CONFETTI.map((c, i) => {
         const rad = (c.angle * Math.PI) / 180;
         const x = Math.cos(rad) * c.reach;

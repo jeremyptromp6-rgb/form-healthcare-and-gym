@@ -20,11 +20,21 @@ export function useTimeZoneSync(): void {
   const stored = me.data?.settings.timezone;
   const auto = me.data?.settings.timezoneAuto ?? true;
   const device = deviceTimeZone();
+  const { mutate } = update; // stable across renders, unlike `update` itself
+  const refreshedAt = me.dataUpdatedAt;
 
   useEffect(() => {
     // A time zone the user chose by hand stays put, even when the device's changes.
     if (!me.data || !auto || !device || stored === device || attempted.current === device) return;
     attempted.current = device;
-    update.mutate({ timezone: device });
-  }, [me.data, auto, device, stored, update]);
+    mutate(
+      { timezone: device },
+      {
+        // A failed sync is tried again the next time /me refreshes (app focus, pull to refresh) — not in a tight loop.
+        onError: () => {
+          if (attempted.current === device) attempted.current = null;
+        },
+      },
+    );
+  }, [me.data, refreshedAt, auto, device, stored, mutate]);
 }

@@ -67,7 +67,7 @@ export function EatDayView(p: EatDayViewProps) {
           <AppText variant="heading" header style={{ flex: 1 }}>
             {dayHeadline(day)}
           </AppText>
-          <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+          <View style={{ pointerEvents: 'none' }} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
             <Buddy mood="happy" size={SUMMARY_PIP} float={false} />
           </View>
         </Row>

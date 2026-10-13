@@ -175,7 +175,28 @@ export default function ScanMeal() {
           <InlineMessage tone={step.needsConsent || step.pro ? 'info' : 'danger'}>{step.message}</InlineMessage>
           {step.pro ? <ProUpsellFor feature="FOOD_SCANNER_PREMIUM" compact /> : null}
           {step.needsConsent ? (
-            <Button label="Allow and analyse" icon="checkmark" loading={updateSettings.isPending} onPress={() => updateSettings.mutate({ foodScanConsent: true }, { onSuccess: () => analyze(step.photo) })} />
+            <Button
+              label="Allow and analyse"
+              icon="checkmark"
+              loading={updateSettings.isPending}
+              onPress={() =>
+                updateSettings.mutate(
+                  { foodScanConsent: true },
+                  {
+                    onSuccess: () => analyze(step.photo),
+                    // Keep the consent button on screen and say why nothing happened.
+                    onError: (e) =>
+                      setStep({
+                        kind: 'error',
+                        photo: step.photo,
+                        message: e.kind === 'network' ? "Couldn't save your choice. Check your connection and try again." : "Couldn't save your choice. Try again.",
+                        retry: false,
+                        needsConsent: true,
+                      }),
+                  },
+                )
+              }
+            />
           ) : null}
           {step.retry ? <Button label="Try again" icon="refresh" onPress={() => analyze(step.photo)} /> : null}
           <Button label="Retake photo" variant="secondary" icon="camera" onPress={() => retake()} />
@@ -252,8 +273,7 @@ function PhotoPreview({ photo }: { photo: Photo }) {
     <Image
       source={{ uri: photo.uri }}
       accessibilityLabel="Your meal photo"
-      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: colors.card }}
-      resizeMode="cover"
+      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: colors.card, resizeMode: 'cover' }}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { isRewardedRecord, setVerifiedEvent, workoutXp, type EvaluatedSet, type PainLevel, type XpAward } from "@form/domain";
+import { isRewardedRecord, MAX_PR_LOAD_KG, setVerifiedEvent, workoutXp, type EvaluatedSet, type PainLevel, type XpAward } from "@form/domain";
 import type { Db } from "../../db";
 import { domainEventWritten } from "../../shared/observability";
 import { awardWorkoutXp, emitDomainEvent } from "../progression/service";
@@ -13,8 +13,33 @@ export function findByClientId(db: Db, userId: string, clientWorkoutId: string) 
     .get(userId, clientWorkoutId) as { id: string; flags: string; xp: number } | undefined;
 }
 
+/**
+ * Training minutes already charged to a local day, for the daily training cap. Each workout counts as the
+ * longer of its stored duration and the time its reps take at 3 s each (see xpDurationMinutes), so many
+ * tiny claimed durations can't sneak a lot of volume under the cap. Never above 1,440 (a day).
+ */
 export function minutesTrainedOn(db: Db, userId: string, localDate: string): number {
-  return (db.prepare("SELECT COALESCE(SUM(duration_minutes), 0) AS m FROM workouts WHERE user_id = ? AND local_date = ?").get(userId, localDate) as { m: number }).m;
+  const m = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(MAX(w.duration_minutes, (COALESCE((SELECT SUM(s.reps) FROM workout_sets s WHERE s.workout_id = w.id), 0) * 3 + 59) / 60)), 0) AS m
+         FROM workouts w WHERE w.user_id = ? AND w.local_date = ?`,
+      )
+      .get(userId, localDate) as { m: number }
+  ).m;
+  return Math.min(1440, m);
+}
+
+/** Workouts on a local day that earned XP (for the per-day cap on XP-bearing workouts). */
+export function xpWorkoutsOn(db: Db, userId: string, localDate: string): number {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM workouts w WHERE w.user_id = ? AND w.local_date = ?
+           AND (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) > 0`,
+      )
+      .get(userId, localDate) as { n: number }
+  ).n;
 }
 
 /**
@@ -38,6 +63,7 @@ export function insertWorkout(
   },
 ): { prs: RecordedPr[]; award: XpAward } {
   const at = w.now.toISOString();
+  const priorXpWorkoutsToday = xpWorkoutsOn(db, w.userId, w.localDate);
   db.prepare(
     `INSERT INTO workouts (id, user_id, client_workout_id, local_date, duration_minutes, pain_level, xp_flags, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -73,8 +99,8 @@ export function insertWorkout(
       });
       if (insertEvent.run(w.userId, event.type, event.key, JSON.stringify(event), at).changes > 0) domainEventWritten(db, { userId: w.userId, type: event.type, key: event.key });
     }
-    // No PRs from a session flagged for serious pain.
-    if (w.painLevel === "serious") continue;
+    // No PRs from a session flagged for serious pain, nor from an implausibly heavy load (see MAX_PR_LOAD_KG).
+    if (w.painLevel === "serious" || s.loadKg > MAX_PR_LOAD_KG) continue;
     prs.push(...recordSetPrs(db, { userId: w.userId, workoutId: w.id, localDate: w.localDate, exerciseId: s.exerciseId, set: { loadKg: s.loadKg, verifiedReps: s.verifiedReps, formScore: s.formScore, romPercent: s.romPercent }, at: w.now }));
   }
   if (w.painLevel !== "serious") {
@@ -86,6 +112,7 @@ export function insertWorkout(
     durationMinutes: w.durationMinutes,
     priorTrainingMinutesToday: w.priorTrainingMinutesToday,
     painLevel: w.painLevel,
+    priorXpWorkoutsToday,
     // A first-ever record is a baseline; the bonus is for beating one (consistency records are recognition only).
     // One improved exercise is one PR bonus, however many of its metrics moved (heavier load also lifts the 1RM).
     personalRecords: new Set(prs.filter(isRewardedRecord).map((p) => p.exerciseId)).size,

@@ -18,7 +18,8 @@ export default function Home() {
   const addWater = useAddWater();
   const undoWater = useUndoWater();
   const [waterError, setWaterError] = useState<string | null>(null);
-  const coach = useCoachInsight('home', !!home.data && home.data.coach.mode !== 'unavailable');
+  const coachOn = !!home.data && home.data.coach.mode !== 'unavailable';
+  const coach = useCoachInsight('home', coachOn);
   useRefetchOnFocus(home.refetch);
 
   if (!home.data) {
@@ -42,7 +43,8 @@ export default function Home() {
         waterBusy={addWater.isPending || undoWater.isPending}
         waterError={waterError}
         refreshing={home.isRefetching}
-        onRefresh={home.refetch}
+        // Pull-to-refresh retries everything on the page, the coach tip included.
+        onRefresh={() => Promise.all([home.refetch(), coachOn ? coach.refetch() : null])}
         refreshFailed={home.isError}
         coach={{ response: coach.data?.insight ?? null, loading: coach.isPending && coach.fetchStatus !== 'idle', failed: coach.isError }}
         onOpenCoach={() => router.push('/coach' as Href)}

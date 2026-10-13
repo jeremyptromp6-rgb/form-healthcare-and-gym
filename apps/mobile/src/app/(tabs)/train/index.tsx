@@ -2,9 +2,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { AppText, Badge, IconTabs, StatStrip, WeekDays, Card, Divider, ErrorState, ListRow, Row, Screen, StateView } from '@/components/ui';
-import { localDateKey, uuid } from '@/lib/dates';
-import { trainingWeek } from '@/lib/week';
+import { AppText, Badge, IconTabs, Card, Divider, ErrorState, ListRow, Row, Screen, StateView } from '@/components/ui';
+import { uuid } from '@/lib/dates';
+import { WeekSummary } from '@/components/progress/WeekSummary';
 import { ExerciseLibrary } from '@/components/train/ExerciseLibrary';
 import { CameraCoachingRow, TodayView } from '@/components/train/TodayView';
 import { useFeature } from '@/lib/features';
@@ -116,7 +116,7 @@ export default function Train() {
         )
       ) : null}
 
-      {tab === 'history' && history.data ? <HistorySummary workouts={history.data.workouts} /> : null}
+      {tab === 'history' && history.data ? <WeekSummary workouts={history.data.workouts} /> : null}
       {tab === 'history' ? (
       <Card style={{ paddingVertical: space.xs }}>
         {!history.data ? (
@@ -124,7 +124,7 @@ export default function Train() {
         ) : history.data.workouts.length === 0 ? (
           <StateView kind="empty" compact title="No workouts yet" message="Your finished workouts appear here." />
         ) : (
-          history.data.workouts.map((w, i) => (
+          history.data.workouts.slice(0, 10).map((w, i) => (
             <View key={w.id}>
               {i > 0 ? <Divider /> : null}
               <ListRow
@@ -143,31 +143,6 @@ export default function Train() {
       </Card>
       ) : null}
     </Screen>
-  );
-}
-
-/** This week at a glance: the days you trained, then totals across your recent workouts. */
-function HistorySummary({ workouts }: { workouts: { localDate: string; durationMinutes: number; xp: number }[] }) {
-  const week = trainingWeek(
-    workouts.map((w) => w.localDate),
-    localDateKey(),
-  );
-  const minutes = workouts.reduce((n, w) => n + w.durationMinutes, 0);
-  const xp = workouts.reduce((n, w) => n + w.xp, 0);
-  return (
-    <Card style={{ gap: space.lg }}>
-      <AppText variant="overline" color={colors.primary}>
-        This week
-      </AppText>
-      <WeekDays trained={week.trained} todayIndex={week.todayIndex} />
-      <StatStrip
-        items={[
-          { label: 'Workouts', value: String(workouts.length) },
-          { label: 'Minutes', value: minutes.toLocaleString() },
-          { label: 'XP', value: xp.toLocaleString(), tint: colors.accent },
-        ]}
-      />
-    </Card>
   );
 }
 

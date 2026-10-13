@@ -51,6 +51,10 @@ export const XP_RULES = {
   workoutCompletionBonus: 25,
   /** Training minutes per day that can earn XP. Beyond this, extra volume earns nothing. */
   dailyTrainingMinutesCap: 120,
+  /** At most this many workouts per local day earn workout XP. Further ones are still saved, with all their data, but earn none. */
+  dailyXpWorkoutsCap: 3,
+  /** No real set is faster than this per rep, so a workout cannot have trained for less than reps × this (used for the XP duration). */
+  minSecondsPerRep: 3,
   perMealLogged: 5,
   mealsRewardedPerDay: 4,
   onTargetBonus: 20,
@@ -118,9 +122,20 @@ export interface WorkoutXpInput {
   painLevel: PainLevel;
   /** Personal records this workout beat (detected server-side from verified reps; first-ever baselines don't count). */
   personalRecords?: number;
+  /** Workouts already earning XP on this local day (for the per-day workout cap). Default 0. */
+  priorXpWorkoutsToday?: number;
 }
 
-export type XpFlag = "serious_pain_no_xp" | "daily_training_cap_reached" | "partially_capped";
+export type XpFlag = "serious_pain_no_xp" | "daily_training_cap_reached" | "daily_workout_cap_reached" | "partially_capped";
+
+/**
+ * The duration the XP rules charge a workout: the claimed or measured minutes, but never less than
+ * the time `totalReps` take at the fastest plausible pace. A tiny claimed duration therefore can't
+ * hide a big workout from the daily training cap.
+ */
+export function xpDurationMinutes(durationMinutes: number, totalReps: number): number {
+  return Math.max(durationMinutes, Math.ceil((Math.max(0, totalReps) * XP_RULES.minSecondsPerRep) / 60));
+}
 
 export interface XpAward {
   xp: number;
@@ -195,7 +210,10 @@ export function workoutXp(input: WorkoutXpInput): XpAward {
   const remaining = XP_RULES.dailyTrainingMinutesCap - input.priorTrainingMinutesToday;
   if (remaining <= 0) return zero(["daily_training_cap_reached"]);
 
-  const eligibleFraction = Math.min(1, remaining / input.durationMinutes);
+  // A workout past the per-day limit is still a workout (the caller saves it in full); it just earns no XP.
+  if ((input.priorXpWorkoutsToday ?? 0) >= XP_RULES.dailyXpWorkoutsCap) return zero(["daily_workout_cap_reached"]);
+
+  const eligibleFraction = Math.min(1, remaining / xpDurationMinutes(input.durationMinutes, verified + unverified));
   const flags: XpFlag[] = eligibleFraction < 1 ? ["partially_capped"] : [];
   const completionBonus = verified + unverified > 0 ? XP_RULES.workoutCompletionBonus : 0;
   const vXp = verifiedRepXp(verified);

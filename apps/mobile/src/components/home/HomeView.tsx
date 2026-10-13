@@ -14,6 +14,7 @@ import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
 import { accuracyLine, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
 import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress } from '@/lib/types';
+import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
@@ -21,6 +22,8 @@ export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile';
 
 export interface HomeViewProps {
   vm: HomeViewModel;
+  /** Display units for loads (stored in kg). Defaults to the user's setting. */
+  units?: Units;
   onNavigate: (route: HomeRoute) => void;
   onAddWater: (ml: number) => void;
   onUndoWater: (entryId: string) => void;
@@ -54,7 +57,7 @@ const SECTION_LABEL: Record<HomeSection, string> = {
  * clear action, three numbers that matter, then everything else, quieter. A pure view over the
  * server's Home view model — every number comes from `vm`, every action routes somewhere real.
  */
-export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute }: HomeViewProps) {
+export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute, units }: HomeViewProps) {
   const failed = (s: HomeSection) => vm.errors.includes(s);
   const date = new Date(`${vm.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -149,7 +152,7 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
       ) : null}
 
       {/* Then the longer view: the last session, goals, level and milestones. */}
-      {vm.today?.lastWorkout ? <LastSession last={vm.today.lastWorkout} /> : null}
+      {vm.today?.lastWorkout ? <LastSession last={vm.today.lastWorkout} units={units} /> : null}
 
       <View style={{ gap: space.md }}>
         <SectionHeader title="Today's goals" />
@@ -281,7 +284,8 @@ const MOOD: Record<NonNullable<HomeViewModel['today']>['suggestion']['kind'], Bu
 };
 
 /** The previous workout: the muscles it hit, its headline numbers, and what you did. */
-function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['today']>['lastWorkout']> }) {
+function LastSession({ last, units: unitsProp }: { last: NonNullable<NonNullable<HomeViewModel['today']>['lastWorkout']>; units?: Units }) {
+  const units = useUnits(unitsProp);
   const muscles = setsPerMuscle(last.exercises.map((e) => ({ exerciseId: e.exerciseId, count: e.sets })));
   const top = muscles[0]?.value ?? 1;
   const sets = last.exercises.reduce((n, e) => n + e.sets, 0);
@@ -313,7 +317,7 @@ function LastSession({ last }: { last: NonNullable<NonNullable<HomeViewModel['to
             <View key={e.exerciseId} style={styles.sessionRow}>
               <ExerciseThumb exerciseId={e.exerciseId} size={40} />
               <AppText variant="caption" color={colors.text} style={{ flex: 1 }}>
-                {`${e.name}: ${e.sets} ${e.sets === 1 ? 'set' : 'sets'}, ${e.totalReps} reps${e.bestLoadKg > 0 ? ` · top ${e.bestLoadKg} kg` : ''}${e.verifiedReps > 0 ? ` · ${e.verifiedReps} verified` : ''}`}
+                {`${e.name}: ${e.sets} ${e.sets === 1 ? 'set' : 'sets'}, ${e.totalReps} reps${e.bestLoadKg > 0 ? ` · top ${formatLoad(e.bestLoadKg, units)}` : ''}${e.verifiedReps > 0 ? ` · ${e.verifiedReps} verified` : ''}`}
               </AppText>
             </View>
           ))}

@@ -55,7 +55,7 @@ Rules:
 | AI Coach | `coach/coach.ts` (CoachContextBuilder, provider contract), `coach/response.ts` (CoachResponse, actions, validator), `coach/deterministicCoach.ts` (rules fallback) | `modules/coach` (`/coach/status`, `/coach/insight`, `/coach/messages`), `providers/aiCoach.ts` (Claude) | live: rules by default; Claude when configured |
 | analytics | `analytics/analytics.ts` (allowlist + privacy filter) | — | boundary only |
 | notifications | `notifications/notifications.ts` | — | boundary only |
-| subscriptions | `subscriptions/entitlements.ts`, `billing.ts` | `modules/subscriptions` | entitlements live; billing unconfigured |
+| subscriptions | `subscriptions/entitlements.ts`, `billing.ts` | `modules/subscriptions` | entitlements live; billing: the labelled sandbox store only (`BILLING_PROVIDER=development`; production needs `APP_STAGE=testing`); no App Store / Google Play provider yet |
 | ads | `ads/adService.ts`, `adProvider.ts`, `postWorkoutAd.ts` | `modules/ads` | post-workout ad: server eligibility + daily cap; AdMob on the phone (test ads unless configured) |
 | feature availability | `providers/features.ts` | `modules/system` (`GET /system/features`) | live |
 
@@ -776,4 +776,11 @@ the end-to-end journeys in `apps/api/test/e2e.test.ts` and the accessibility aud
 component test) → build (API server and reconcile CLI via esbuild, app web export) → production smoke
 test: the built API runs a short real journey, its logs are checked for leaks, and the built
 reconcile CLI must find that journey consistent.
-CI runs the same command (`.github/workflows/ci.yml`).
+CI runs the same command (`.github/workflows/ci.yml`, pinned to `ubuntu-24.04`).
+
+**Android test APK** (`.github/workflows/android-apk.yml`): after CI succeeds on a push to `main` (or by hand),
+the app is built with `expo prebuild` + Gradle (the `android/` folder is generated, never committed),
+the APK is verified with `apksigner`, and it is published as the `android-latest` GitHub Release. It is
+signed with the development key that prebuild generates, so it installs on a phone but is **not** a store
+build (no upload key, no EAS, no listing). `android.versionCode` is set from the workflow run number in the
+runner's copy of `app.json`; the release is updated by uploading the new APK before removing older ones.

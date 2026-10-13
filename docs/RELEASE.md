@@ -10,10 +10,10 @@ need the operator (store, legal, providers, infrastructure) or new native work. 
 
 | ID | Sev | Area | Finding | Status |
 |---|---|---|---|---|
-| Q-01 | P0 | Security / deps | `@fastify/jwt` ≤ 9.1 pulled in `fast-jwt` ≤ 6.2.3 with 2 critical advisories (incl. auth bypass with an empty HMAC secret, claim cache confusion). | **Fixed**: `@fastify/jwt` 10.2.2; `npm audit --omit=dev` on the API: 0 vulnerabilities. Forged / unsigned / wrong-secret / wrong-algorithm / tampered / expired tokens tested. |
+| Q-01 | P0 | Security / deps | `@fastify/jwt` ≤ 9.1 pulled in `fast-jwt` ≤ 6.2.3 with 2 critical advisories (incl. auth bypass with an empty HMAC secret, claim cache confusion). | **Fixed**: `@fastify/jwt` 10.2.2 with `fast-jwt` 6.3.4 (the moderate ≤ 6.3.3 advisory is fixed too); `npm audit --omit=dev` at the repo root reports 0 vulnerabilities. Forged / unsigned / wrong-secret / wrong-algorithm / tampered / expired tokens tested. |
 | Q-02 | P0 | Release | iOS/Android builds have no native pose module: camera-verified reps — the core Train promise — work only in the web app. Phones log sets honestly as unverified. | **Open** (native work: development build with an on-device pose model). |
 | Q-03 | P0 | Release / legal | Store submission needs a published privacy policy (and terms). `LEGAL_PRIVACY_URL` / `LEGAL_TERMS_URL` are unset; FORM ships no legal text. | **Open** (operator). |
-| Q-04 | P0 | Release | No store build pipeline: no EAS project, signing credentials, build numbers or store listings. | **Open** (operator). |
+| Q-04 | P0 | Release | No store build pipeline: no EAS project, signing credentials or store listings. A GitHub Actions workflow (`android-apk.yml`) does build a **test** APK after green CI: `expo prebuild` + Gradle, signed with the generated development key, versionCode = the workflow run number, published as the "android-latest" GitHub Release (pre-release). It is not a store build: the Play Store needs an upload/app-signing key and a listing. | **Open** (operator): store signing, listings; the test APK is only for trying FORM on a phone. |
 | Q-05 | P1 | Cost abuse | AI coach and meal-recognition caps were per user only; mass sign-ups could run up unbounded provider spend. | **Fixed**: service-wide daily ceilings (`COACH_GLOBAL_DAILY_AI_CALLS`, `FOOD_SCANS_GLOBAL_PER_DAY`) counted in `provider_usage` (no personal data; survives account deletion). Over the ceiling: labelled rules coaching / honest "scanning at capacity". |
 | Q-06 | P1 | Honesty | Settings advertised Pro benefits that weren't enforced. | **Fixed** (Q); superseded by Stage R: every listed Pro feature is now enforced server-side and comes from the registry. |
 | Q-07 | P1 | Privacy / bug | Phone export wrote the full health-data export into app documents and kept it forever; it was shared with `Share.share({ url })`, which Android ignores (the file never left the phone). | **Fixed**: temp file in the cache → `expo-sharing` share sheet → deleted in `finally`; leftovers purged at sign-out. |
@@ -24,7 +24,7 @@ need the operator (store, legal, providers, infrastructure) or new native work. 
 | Q-12 | P2 | AI security | System prompt didn't state that user text is data; an instruction-echo ("print your rules") could reach the user. | **Fixed**: data-not-instructions clause; answers containing instruction markers are rejected (→ labelled rules). Injection tests: leaked rules, fasting, links. |
 | Q-13 | P2 | Nutrition | Manual entries / custom foods accepted calories far below their macros (a typo corrupts day totals and XP). | **Fixed**: rejected when 4·P + 4·C + 9·F > 1.25 × kcal + 25 (more kcal than macros — alcohol, fibre — is allowed). |
 | Q-14 | P2 | Accessibility | Web: React Native Web removes focus outlines — keyboard users couldn't see focus. | **Fixed**: `:focus-visible` ring (2 px emerald). |
-| Q-15 | P2 | Security / deps | App toolchain advisories (`@expo/cli`, config plugins, `node-forge`, `xcode`/`uuid`: build-time, not shipped) and `decode-uri-component` via expo-router's `query-string` (client-side DoS on a malformed URL). npm's only "fix" is a downgrade to Expo 44. | **Accepted**, track Expo patch releases. |
+| Q-15 | P2 | Security / deps | `npm audit` in `apps/mobile` (2026-10, 67 findings: 0 critical, 50 high, 17 moderate). **Fixed without a major change**: `shell-quote` (was critical, command injection in a build tool), `source-map-js` (was high, DoS) — both dev/build-time. **Build-time or test-only, not shipped in the app**: `node-forge` (high, via `@expo/code-signing-certificates`), `@expo/cli` / Metro / config plugins, `uuid` / `xcode`, and the Jest toolchain (`braces`/`micromatch`, `sprintf-js`, `js-yaml`). **Reaches the shipped app**: `decode-uri-component` via expo-router's `query-string` (moderate; client-side DoS on a malformed link). npm's suggested "fixes" for the rest are downgrades or major jumps (Expo 44, Jest 30, React Native 0.72), so they are not applied. | **Accepted** for the remaining build-time/test-only findings; the non-major fixes are applied; track Expo patch releases. |
 | Q-16 | P2 | Anti-cheat | Pose runs on the device; the server re-verifies the uploaded angle trace (ROM, tempo, confidence, gates) but a modified client can fabricate a plausible trace. Impact is limited to the cheater's own XP (daily training-XP cap, bonus caps; no leaderboards or social). | **Accepted** while there is no social/competitive surface. |
 | Q-17 | P2 | Privacy | Request logs include the client IP (abuse investigation, rate limiting). | **Decision for the operator**: keep with a log-retention limit, or drop `remoteAddress` from the request serializer. |
 | Q-18 | P2 | Release | Push notifications aren't integrated (preferences are stored; the app says so). | **Open**, not a blocker for a release without reminders. |
@@ -70,16 +70,24 @@ need the operator (store, legal, providers, infrastructure) or new native work. 
 | AI provider | Coaching facts + chat text, only with `aiCoachConsent` | Provider's retention terms | — |
 | Meal recognition | Meal photo (EXIF stripped), only with `foodScanConsent` | Provider's retention terms | — |
 | Camera | Nothing leaves the device but joint angles of verified sets | — | — |
+| Ads (Google AdMob + UMP consent) | Device and advertising identifiers go to Google when an ad is requested; requests are non-personalised unless the user opted in (Google's UMP form asks where the user's region requires it). The SDK only initialises after an eligible post-workout ad (never at launch, during a workout or a camera session). No health, fitness, nutrition or camera data is sent; the ad request carries no keywords or content URL. | Google's retention terms | — (the user can decline personalised ads; Pro removes ads) |
 | Exports | JSON file handed to the user's chosen destination | User's | User |
 
 ## Operations runbook
 
 **Environment** (validated at boot; production refuses unsafe values): `NODE_ENV=production`,
 `JWT_SECRET` (≥ 32 chars), `CORS_ORIGINS` (explicit), `DATABASE_PATH`, `PORT`, `TOKEN_TTL`, `LOG_LEVEL`,
-`RATE_LIMIT_PER_MINUTE`; providers: `COACH_PROVIDER` / `ANTHROPIC_API_KEY` / `COACH_MODEL` /
-`COACH_DAILY_AI_CALLS` / `COACH_CHAT_PER_HOUR` / `COACH_GLOBAL_DAILY_AI_CALLS`,
-`FOOD_RECOGNITION_PROVIDER` / `FOOD_SCANS_PER_HOUR` / `FOOD_SCANS_GLOBAL_PER_DAY`; legal:
-`LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL`. App: `EXPO_PUBLIC_API_URL` (HTTPS).
+`RATE_LIMIT_PER_MINUTE`, `APP_STAGE` (`live` by default; `testing` only on a throwaway test server);
+providers: `COACH_PROVIDER` / `ANTHROPIC_API_KEY` / `COACH_MODEL` / `COACH_DAILY_AI_CALLS` /
+`COACH_CHAT_PER_HOUR` / `COACH_GLOBAL_DAILY_AI_CALLS`, `FOOD_RECOGNITION_PROVIDER` /
+`GEMINI_API_KEY` / `FOOD_SCANS_PER_HOUR` / `FOOD_SCANS_GLOBAL_PER_DAY`; billing: `BILLING_PROVIDER`,
+`BILLING_PRODUCT_MONTHLY` / `BILLING_PRODUCT_ANNUAL`, `BILLING_TRIAL_DAYS`, `BILLING_GRACE_DAYS`, and for
+the sandbox store only `BILLING_DEV_PRICE_MONTHLY` / `BILLING_DEV_PRICE_ANNUAL` /
+`BILLING_DEV_CURRENCY` / `BILLING_DEV_SECRET`; legal: `LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL`. The full
+list with defaults is `apps/api/.env.example`. App (build time): `EXPO_PUBLIC_API_URL` (HTTPS);
+ads: `EXPO_PUBLIC_ADS_MODE` (`test` | `production` | off), `EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID` /
+`EXPO_PUBLIC_ADMOB_INTERSTITIAL_IOS` (production unit ids) and `ADMOB_ANDROID_APP_ID` /
+`ADMOB_IOS_APP_ID` (production AdMob app ids; without them the build carries Google's sample ids).
 
 **Run:** `npm run build -w @form/api` → `node --enable-source-maps dist/server.js` (one process, behind
 TLS). Migrations run at boot, each in a transaction.
@@ -105,10 +113,14 @@ append-only fixes.
    existing `LivePoseSession`, verified on devices — or a product decision to ship phones without
    camera verification (the app already says it isn't available there).
 2. **Q-03** Publish a privacy policy and terms; set `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL`.
-3. **Q-04** EAS project, signing, build numbers, store listings (including the camera/photo
+3. **Q-04** EAS project (or equivalent), store signing, store listings (including the camera/photo
    permission texts already in `app.json` and the data-safety / privacy-nutrition answers from the
-   inventory above).
+   inventory above, which now includes AdMob). The GitHub test APK is development-key signed and is
+   not a store build.
 4. Production infrastructure: TLS, a persistent disk for the database, scheduled backups copied
    off-machine, scheduled reconciliation, log retention, alerting on `/health`, backup and reconcile
    exit codes.
 5. Device QA on real iOS and Android hardware (not possible in this environment).
+6. Remove `APP_STAGE=testing` and the sandbox store (`BILLING_PROVIDER=development`) before real users.
+   Set `BILLING_PROVIDER` to `none` or a real store and drop `APP_STAGE` (see `render.yaml`); the server
+   then refuses the sandbox store, and the hosted test API's throwaway data and free Pro go away.

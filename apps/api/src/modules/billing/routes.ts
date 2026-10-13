@@ -19,19 +19,26 @@ const STORE_MANAGE_URL: Record<BillingPlatform, string | null> = {
 
 const sourceOf = (ctx: AppContext) => (ctx.providers.billing.environment === "development" ? ("development" as const) : ("store" as const));
 
+/**
+ * The entitlements the app consumes: the tier and features plus the Free allowances and today's use.
+ * One shape for GET /entitlements and for every purchase response (verify, restore, simulate), so the
+ * app can store any of them as its entitlements without a second request.
+ */
+function entitlementsView(ctx: AppContext, userId: string) {
+  const e = entitlementsFor(ctx, userId);
+  const clock = userClock(ctx, userId);
+  const free = ctx.config.freeLimits;
+  return {
+    ...e,
+    // Free allowances and today's use, so the app can say "2 of 3 scans left" honestly.
+    limits: e.tier === "pro" ? null : { foodScansPerDay: free.foodScansPerDay, coachChatPerDay: free.coachChatPerDay, aiCallsPerDay: free.aiCallsPerDay, mealPlanDays: 1, analyticsRangeDays: 30 },
+    usage: { foodScansToday: scansToday(ctx, userId, clock.timezone, clock.today), coachChatsToday: coachChatsToday(ctx.db, userId, clock.today) },
+  };
+}
+
 /** Signed-in billing routes: entitlements, products, verify, restore, manage, and the development store. */
 export function billingRoutes(app: FastifyInstance, ctx: AppContext): void {
-  app.get("/entitlements", async (req) => {
-    const e = entitlementsFor(ctx, req.user.sub);
-    const clock = userClock(ctx, req.user.sub);
-    const free = ctx.config.freeLimits;
-    return {
-      ...e,
-      // Free allowances and today's use, so the app can say "2 of 3 scans left" honestly.
-      limits: e.tier === "pro" ? null : { foodScansPerDay: free.foodScansPerDay, coachChatPerDay: free.coachChatPerDay, aiCallsPerDay: free.aiCallsPerDay, mealPlanDays: 1, analyticsRangeDays: 30 },
-      usage: { foodScansToday: scansToday(ctx, req.user.sub, clock.timezone, clock.today), coachChatsToday: coachChatsToday(ctx.db, req.user.sub, clock.today) },
-    };
-  });
+  app.get("/entitlements", async (req) => entitlementsView(ctx, req.user.sub));
 
   app.get("/billing/products", async (req) => {
     const q = z.object({ platform: platform.default("web") }).strict().parse(req.query);
@@ -52,7 +59,7 @@ export function billingRoutes(app: FastifyInstance, ctx: AppContext): void {
     const result = await ctx.providers.billing.verifyPurchase(body);
     if (!result.ok) throw providerFailure(result);
     linkOrFail(ctx, req.user.sub, result.value, sourceOf(ctx));
-    return entitlementsFor(ctx, req.user.sub);
+    return entitlementsView(ctx, req.user.sub);
   });
 
   app.post("/billing/restore", async (req) => {
@@ -60,7 +67,7 @@ export function billingRoutes(app: FastifyInstance, ctx: AppContext): void {
     const result = await ctx.providers.billing.restore(body);
     if (!result.ok) throw providerFailure(result);
     const outcomes = result.value.map((t) => ({ productId: t.productId, ...applyTransaction(ctx, req.user.sub, t, sourceOf(ctx)) }));
-    return { restored: outcomes.filter((o) => o.applied).length, linkedElsewhere: outcomes.filter((o) => !o.applied && o.reason === "other_account").length, entitlements: entitlementsFor(ctx, req.user.sub) };
+    return { restored: outcomes.filter((o) => o.applied).length, linkedElsewhere: outcomes.filter((o) => !o.applied && o.reason === "other_account").length, entitlements: entitlementsView(ctx, req.user.sub) };
   });
 
   // ---- Development store (only when BILLING_PROVIDER=development; refused in production) ----------
@@ -91,7 +98,7 @@ export function billingRoutes(app: FastifyInstance, ctx: AppContext): void {
     // Delivered through the real webhook endpoint, signature checks and all.
     const res = await app.inject({ method: "POST", url: "/billing/webhooks/development", headers: signed.value.headers, payload: signed.value.body });
     if (res.statusCode !== 200) throw new HttpError(502, "notification_failed", "The store notification wasn't accepted");
-    return { notification: res.json(), entitlements: entitlementsFor(ctx, req.user.sub) };
+    return { notification: res.json(), entitlements: entitlementsView(ctx, req.user.sub) };
   });
 }
 

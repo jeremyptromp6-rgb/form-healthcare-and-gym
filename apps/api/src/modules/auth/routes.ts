@@ -40,19 +40,20 @@ export function authRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.post("/auth/login", AUTH_RATE_LIMIT, async (req) => {
     const { email, password } = credentials.extend({ password: z.string().min(1).max(128) }).parse(req.body);
-    // Per account, whatever the caller's IP: slows password guessing spread across many addresses.
-    // Applies to unknown emails too, so the throttle doesn't reveal which accounts exist.
-    if (logins.blocked(email, ctx.now())) throw new HttpError(429, "too_many_attempts", "Too many sign-in attempts for this account. Wait a few minutes and try again.");
+    // Per (account, address): one attacker can't lock a victim out from their own address. A looser
+    // per-account ceiling still slows guessing spread across many addresses. Both apply to unknown
+    // emails too, so the throttle doesn't reveal which accounts exist.
+    if (logins.blocked(email, req.ip, ctx.now())) throw new HttpError(429, "too_many_attempts", "Too many sign-in attempts for this account. Wait a few minutes and try again.");
     const user = ctx.db.prepare("SELECT id, email, password_hash, token_version FROM users WHERE email = ?").get(email) as
       | { id: string; email: string; password_hash: string; token_version: number }
       | undefined;
     // Always run a hash comparison so response timing doesn't reveal which emails exist.
     const ok = await verifyPassword(password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !ok) {
-      logins.failed(email, ctx.now());
+      logins.failed(email, req.ip, ctx.now());
       throw new HttpError(401, "invalid_credentials", "Email or password is incorrect");
     }
-    logins.succeeded(email);
+    logins.succeeded(email, req.ip);
     return { token: issueToken(app, user), user: { id: user.id, email: user.email } };
   });
 }
@@ -85,33 +86,47 @@ export function sessionRoutes(app: FastifyInstance, ctx: AppContext): void {
 export { authenticate };
 
 /**
- * Failed sign-ins per email in a sliding window (in memory: per server process). After
- * LOGIN_THROTTLE.maxFailures, the account refuses attempts until the window passes; a success clears it.
+ * Failed sign-ins in a sliding window (in memory: per server process). Two ceilings:
+ * - per (email, IP): maxFailures, so a guesser is stopped from their own address only;
+ * - per email across all addresses: maxFailuresPerAccount, a looser cap against distributed guessing.
+ * A success clears that address's count but not the account-wide one (a victim's own sign-in must not
+ * reset an attacker's tally).
  */
-export const LOGIN_THROTTLE = { maxFailures: 10, windowMs: 15 * 60_000 } as const;
+export const LOGIN_THROTTLE = { maxFailures: 10, maxFailuresPerAccount: 50, windowMs: 15 * 60_000 } as const;
 
 class LoginThrottle {
-  private readonly failures = new Map<string, number[]>();
+  private readonly pairs = new Map<string, number[]>();
+  private readonly accounts = new Map<string, number[]>();
 
-  private recent(email: string, now: Date): number[] {
+  private recent(map: Map<string, number[]>, key: string, now: Date): number[] {
     const since = now.getTime() - LOGIN_THROTTLE.windowMs;
-    const list = (this.failures.get(email) ?? []).filter((t) => t > since);
-    if (list.length) this.failures.set(email, list);
-    else this.failures.delete(email);
+    const list = (map.get(key) ?? []).filter((t) => t > since);
+    if (list.length) map.set(key, list);
+    else map.delete(key);
     return list;
   }
 
-  blocked(email: string, now: Date): boolean {
-    return this.recent(email, now).length >= LOGIN_THROTTLE.maxFailures;
+  private static pair(email: string, ip: string): string {
+    return `${email}
+${ip}`;
   }
 
-  failed(email: string, now: Date): void {
-    this.failures.set(email, [...this.recent(email, now), now.getTime()]);
-    // Bound memory under a spray of random emails: forget the oldest entries.
-    if (this.failures.size > 50_000) for (const k of [...this.failures.keys()].slice(0, 10_000)) this.failures.delete(k);
+  blocked(email: string, ip: string, now: Date): boolean {
+    return (
+      this.recent(this.pairs, LoginThrottle.pair(email, ip), now).length >= LOGIN_THROTTLE.maxFailures ||
+      this.recent(this.accounts, email, now).length >= LOGIN_THROTTLE.maxFailuresPerAccount
+    );
   }
 
-  succeeded(email: string): void {
-    this.failures.delete(email);
+  failed(email: string, ip: string, now: Date): void {
+    const key = LoginThrottle.pair(email, ip);
+    this.pairs.set(key, [...this.recent(this.pairs, key, now), now.getTime()]);
+    this.accounts.set(email, [...this.recent(this.accounts, email, now), now.getTime()]);
+    // Bound memory under a spray of random emails or addresses: forget the oldest entries.
+    for (const m of [this.pairs, this.accounts]) if (m.size > 50_000) for (const k of [...m.keys()].slice(0, 10_000)) m.delete(k);
+  }
+
+  succeeded(email: string, ip: string): void {
+    this.pairs.delete(LoginThrottle.pair(email, ip));
   }
 }

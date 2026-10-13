@@ -15,7 +15,7 @@ const PROTEIN_MET = 0.9;
 const ON_TARGET = 0.1;
 
 function training(db: Db, userId: string, from: string, to: string, plannedDays: number | null): WeekTraining {
-  const w = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT local_date) AS d, COALESCE(SUM(duration_minutes), 0) AS m FROM workouts WHERE user_id = ? AND local_date BETWEEN ? AND ?").get(userId, from, to) as { n: number; d: number; m: number };
+  const w = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT local_date) AS d, COALESCE(SUM(duration_minutes), 0) AS m FROM workouts WHERE user_id = ? AND local_date BETWEEN ? AND ? AND pain_level <> 'serious'").get(userId, from, to) as { n: number; d: number; m: number };
   const s = db
     .prepare(
       `SELECT COALESCE(SUM(ws.verified_reps), 0) AS v,
@@ -23,7 +23,7 @@ function training(db: Db, userId: string, from: string, to: string, plannedDays:
               SUM(CASE WHEN ws.form_score IS NOT NULL AND ws.verified_reps > 0 THEN ws.verified_reps END) AS fn,
               SUM(CASE WHEN ws.rom_percent IS NOT NULL AND ws.verified_reps > 0 THEN ws.rom_percent * ws.verified_reps END) AS rw,
               SUM(CASE WHEN ws.rom_percent IS NOT NULL AND ws.verified_reps > 0 THEN ws.verified_reps END) AS rn
-       FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ?`,
+       FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious'`,
     )
     .get(userId, from, to) as { v: number; fw: number | null; fn: number | null; rw: number | null; rn: number | null };
   return {
@@ -62,7 +62,8 @@ export async function weeklyReport(ctx: AppContext, userId: string, clock: UserC
     if (Math.abs(day.kcal - t.targetKcal) <= t.targetKcal * ON_TARGET) daysOnTarget++;
     if (day.kcal < t.safeFloorKcal) daysBelowSafeMinimum++;
   }
-  const earned = (db.prepare("SELECT COALESCE(SUM(xp), 0) AS n FROM xp_events WHERE user_id = ? AND local_date BETWEEN ? AND ?").get(userId, weekStart, weekEnd) as { n: number }).n;
+  // XP earned, as Progress shows it: decay and resets are a separate story (xpSources.decay), never netted into "earned".
+  const earned = (db.prepare("SELECT COALESCE(SUM(xp), 0) AS n FROM xp_events WHERE user_id = ? AND local_date BETWEEN ? AND ? AND source NOT IN ('decay', 'reset')").get(userId, weekStart, weekEnd) as { n: number }).n;
   const level = progressFromXp(activeXp(db, userId, weekEnd)).level;
   const bq = bodyQuestView(db, userId, clock.today, ctx.now());
   const snap = (ws: string) => bq.snapshots.find((s) => s.weekStart === ws) ?? null;

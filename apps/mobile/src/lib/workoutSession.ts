@@ -1,4 +1,5 @@
 import type { SessionExercise, WorkoutSession } from './types';
+import { formatLoad, snapLoadKg, type Units } from './units';
 
 /**
  * Presentation helpers for a live workout. The server owns the session; these only decide
@@ -20,6 +21,14 @@ export function formWord(score: number): string {
   return 'Form needs work';
 }
 
+/**
+ * What to tell the user when the server didn't trust a set's camera trace; null for every other status.
+ * (The set's reps still count — as unverified reps.)
+ */
+export function verificationNote(status: string | null | undefined): string | null {
+  return status === 'trace_exceeds_time' ? "Not verified — camera time didn't match the workout" : null;
+}
+
 export function exerciseDone(e: SessionExercise): boolean {
   return e.sets !== null && e.loggedSets.length >= e.sets;
 }
@@ -29,13 +38,18 @@ export function allPlannedDone(s: Pick<WorkoutSession, 'exercises'>): boolean {
   return planned.length > 0 && planned.every(exerciseDone);
 }
 
-/** Starting values for the next set: repeat the last set, else the plan, else last time, else sensible defaults. */
-export function nextSetDefaults(e: SessionExercise): { reps: number; loadKg: number } {
+/**
+ * Starting values for the next set: repeat the last set, else the plan, else last time, else sensible defaults.
+ * The load stays in kg; for imperial users a suggested load (plan or last time) is rounded to a round number of
+ * pounds, while a set they logged themselves is repeated exactly.
+ */
+export function nextSetDefaults(e: SessionExercise, units: Units = 'metric'): { reps: number; loadKg: number } {
   const last = e.loggedSets.at(-1);
   const prev = e.previous?.sets[e.loggedSets.length] ?? e.previous?.sets.at(-1);
+  const suggested = e.targetLoadKg ?? prev?.loadKg;
   return {
     reps: last?.reps ?? e.targetReps?.max ?? prev?.reps ?? 10,
-    loadKg: e.loadable ? (last?.loadKg ?? e.targetLoadKg ?? prev?.loadKg ?? 0) : 0,
+    loadKg: e.loadable ? (last?.loadKg ?? (suggested !== undefined && suggested !== null ? snapLoadKg(suggested, units) : 0)) : 0,
   };
 }
 
@@ -59,15 +73,15 @@ export function formatClock(totalSeconds: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
-export function formatTarget(e: Pick<SessionExercise, 'targetReps' | 'targetLoadKg'>): string | null {
+export function formatTarget(e: Pick<SessionExercise, 'targetReps' | 'targetLoadKg'>, units: Units = 'metric'): string | null {
   if (!e.targetReps) return null;
   const reps = e.targetReps.min === e.targetReps.max ? `${e.targetReps.min}` : `${e.targetReps.min}–${e.targetReps.max}`;
-  return `${reps} reps${e.targetLoadKg ? ` @ ${e.targetLoadKg} kg` : ''}`;
+  return `${reps} reps${e.targetLoadKg ? ` @ ${formatLoad(e.targetLoadKg, units, true)}` : ''}`;
 }
 
-export function formatPrevious(e: Pick<SessionExercise, 'previous'>): string | null {
+export function formatPrevious(e: Pick<SessionExercise, 'previous'>, units: Units = 'metric'): string | null {
   if (!e.previous || e.previous.sets.length === 0) return null;
-  return e.previous.sets.map((s) => (s.loadKg > 0 ? `${s.reps} × ${s.loadKg} kg` : `${s.reps} reps`)).join(' · ');
+  return e.previous.sets.map((s) => (s.loadKg > 0 ? `${s.reps} × ${formatLoad(s.loadKg, units)}` : `${s.reps} reps`)).join(' · ');
 }
 
 export function sessionTotals(s: Pick<WorkoutSession, 'exercises'>) {

@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Children, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Children, isValidElement, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Animated, Easing, ImageBackground, Platform, Pressable, RefreshControl, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-context';
 import { useReducedMotion } from '@/lib/a11y';
@@ -50,7 +50,7 @@ export function Screen({
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
       {/* Ambient light: drifts up a little slower than the content, for depth. */}
-      <Animated.View pointerEvents="none" style={[styles.ambient, { transform: [{ translateY: glowShift }] }]}>
+      <Animated.View style={[styles.ambient,{ transform: [{ translateY: glowShift }] }]}>
         <LinearGradient colors={gradients.ambient} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
       </Animated.View>
       <Animated.ScrollView
@@ -74,14 +74,15 @@ export function Screen({
             {right}
           </Animated.View>
         )}
+        {/* Children.toArray keys real elements, so a banner appearing above doesn't remount the page below it. */}
         {Children.toArray(children).map((child, i) => (
-          <Appear key={i} index={i}>
+          <Appear key={(isValidElement(child) ? child.key : null) ?? i} index={i}>
             {child}
           </Appear>
         ))}
       </Animated.ScrollView>
       {/* The compact bar: frosted glass and the title, once the big one has scrolled away. */}
-      <Animated.View pointerEvents="none" style={[styles.compactBar, { top: topInset, opacity: barIn }]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      <Animated.View style={[styles.compactBar,{ top: topInset, opacity: barIn }]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
         <BlurView intensity={40} tint={scheme === 'dark' ? 'dark' : 'light'} style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]} />
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.glass }]} />
         <AppText variant="bodyStrong" numberOfLines={1}>
@@ -139,7 +140,7 @@ export function BreathingGlow({ size, color = colors.accent, style }: { size: nu
   }, [v, run]);
   const scale = v.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.04] });
   return (
-    <View pointerEvents="none" style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+    <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }, style]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       {GLOW_LAYERS.map(({ k, o }) => (
         <Animated.View
           key={k}
@@ -214,7 +215,7 @@ export function HeroMedia({
   );
   if (image) {
     return (
-      <ImageBackground source={image} resizeMode="cover" style={[styles.hero, style]} imageStyle={{ borderRadius: radius.xl }} accessible={false} accessibilityLabel={accessibilityLabel}>
+      <ImageBackground source={image} style={[styles.hero, style]} imageStyle={{ borderRadius: radius.xl, resizeMode: 'cover' }} accessible={false} accessibilityLabel={accessibilityLabel}>
         {body}
       </ImageBackground>
     );
@@ -222,7 +223,7 @@ export function HeroMedia({
   return (
     <LinearGradient colors={gradients.heroMedia} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={[styles.hero, style]}>
       {art ? (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
           {art}
         </View>
       ) : null}
@@ -298,8 +299,8 @@ export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  ambient: { position: 'absolute', top: 0, left: 0, right: 0, height: 460 },
-  compactBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, alignItems: 'center', justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
+  ambient: { position: 'absolute', top: 0, left: 0, right: 0, height: 460, pointerEvents: 'none' },
+  compactBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, pointerEvents: 'none', alignItems: 'center', justifyContent: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
   scroll: { paddingHorizontal: space.lg, paddingTop: space.md, gap: space.lg, width: '100%', maxWidth: MAX_CONTENT_WIDTH, alignSelf: 'center' },
   header: { flexDirection: 'row', alignItems: 'flex-end', paddingTop: space.sm, paddingBottom: space.sm },
   card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, ...elevation.card, ...edgeLight },

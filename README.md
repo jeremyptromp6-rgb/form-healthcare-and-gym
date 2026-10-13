@@ -60,6 +60,34 @@ Weighing: there is no Bluetooth/smart-scale integration yet — weigh on any kit
 the weight. For local UI work, `EXPO_PUBLIC_SIMULATED_SCALE=1` in `apps/mobile/.env.local` enables a
 clearly labelled simulated scale (development builds only).
 
+## Android test APK
+
+`.github/workflows/android-apk.yml` builds an installable APK of the app: after CI succeeds on `main` (or
+from the Actions tab, "Run workflow"), it runs `expo prebuild` and Gradle on a GitHub runner, checks
+the APK is signed, and publishes it as the **android-latest** pre-release of this repository. To install:
+open the repository's Releases page on your phone, download `FORM-<version>-<commit>.apk`, open it, and
+allow installs from your browser if asked. It is a test build signed with a development key, not a Play
+Store release, and it talks to the hosted test API (override with the repository variable
+`EXPO_PUBLIC_API_URL`). The workflow also keeps the APK as a run artifact. `android.versionCode` comes
+from the workflow run number so each build can update the last one.
+
+### Ads configuration
+
+Free-tier users see at most one Google AdMob interstitial after a finished workout (Pro never sees
+ads). These are build-time settings of the app:
+
+- `EXPO_PUBLIC_ADS_MODE`: `test` serves Google's official test ads (labelled "Test Ad"; the APK uses
+  this), `production` serves real ads, anything else turns ads off. Development builds only ever use
+  test ads.
+- Production only: `EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID` / `EXPO_PUBLIC_ADMOB_INTERSTITIAL_IOS` (unit
+  ids) and `ADMOB_ANDROID_APP_ID` / `ADMOB_IOS_APP_ID` (AdMob app ids; `app.config.ts` swaps them into
+  the plugin). Without the app ids the build carries Google's published sample ids, so a test or
+  development build can never serve a real ad. Keep real ids in CI or store secrets, not in the repo.
+- `apps/mobile/app.json` has a **root-level** `react-native-google-mobile-ads` block
+  (`delay_app_measurement_init`) in addition to the plugin entry. Do not remove it: the library's Gradle
+  script reads that root block directly, and the Android build fails without it. JSON has no comments,
+  so this note lives here.
+
 ## Validate
 
 ```bash
@@ -72,6 +100,8 @@ Reconciliation (operations): `npm run reconcile -w @form/api` audits every user'
 against its records and exits 1 if anything is inconsistent; add `-- --repair` to apply the safe,
 append-only repairs (`node dist/reconcile.js` in production). Logs are JSON lines on stdout
 (`LOG_LEVEL`, default `info`); `RATE_LIMIT_PER_MINUTE` sets the per-client ceiling (default 300).
+Sessions last `TOKEN_TTL` (default `30d`; "sign out on all devices" revokes them at once). In production `TRUST_PROXY_HOPS`
+(default `1`, Render's load balancer) sets how many proxy hops are trusted for the client IP.
 
 FORM Pro: `BILLING_PROVIDER=development` enables the labelled sandbox store for local work (refused in
 production unless `APP_STAGE=testing` marks a throwaway test server — the hosted test API uses this; set `BILLING_DEV_SECRET` so sandbox receipts survive restarts). Product ids:
@@ -88,6 +118,13 @@ Paid providers have service-wide daily ceilings: `COACH_GLOBAL_DAILY_AI_CALLS` (
 
 Production API: `npm run build -w @form/api` then `npm start -w @form/api`.
 
+Other API environment variables (all optional; the complete list with defaults is `apps/api/.env.example`):
+`COACH_TIMEOUT_MS` (AI coach request timeout, default 20000); `ANTHROPIC_AUTH_TOKEN` (accepted instead of
+`ANTHROPIC_API_KEY`); `GOOGLE_API_KEY` (accepted instead of `GEMINI_API_KEY`); `BILLING_GRACE_DAYS` (days
+of Pro kept after a failed renewal, default 16); `BILLING_DEV_CURRENCY` (sandbox store currency, default
+`USD`); `RENDER_GIT_COMMIT` / `GIT_COMMIT` (the deployed commit, shown as `version` in `GET /status`;
+Render sets the first itself).
+
 ## Principles (enforced in code)
 
 - **Source of truth:** XP from the ProgressionEngine via the XP ledger; verified reps from the Rep
@@ -98,8 +135,11 @@ Production API: `npm run build -w @form/api` then `npm start -w @form/api`.
   day below the safe floor; targets never below `max(sex floor, BMR)`; no deficits for under-18s;
   implausible PR jumps held for review; streaks tolerate rest days; quests and Body Quest plans are
   validated against safe limits.
-- **Honesty:** all seven external providers ship unconfigured and say so. `GET /system/features`
-  tells the app which features are real; nothing fakes a rep, food match, purchase or ad.
+- **Honesty:** the API's seven provider slots (AI coach, pose, food recognition, billing, ads, analytics,
+  notifications) report themselves as unconfigured until real configuration exists, and say so; no
+  analytics, push or native-pose provider is wired in yet. Ads are shown by Google AdMob inside the app,
+  not by the API. `GET /system/features` tells the app which features are real; nothing fakes a rep,
+  food match, purchase or ad.
 - **Privacy:** data is private per user; consents default off; sign-out clears the app cache;
   "sign out everywhere" and account deletion revoke every session.
 

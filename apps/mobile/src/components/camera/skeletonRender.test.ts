@@ -581,7 +581,6 @@ describe('skeleton quality levels', () => {
     h.r.draw(h.main.ctx, frame(p), 733);
     const strokes = h.main.calls.filter((c) => c.kind === 'stroke').length;
     const fills = h.main.calls.filter((c) => c.kind === 'fill').length;
-    console.log(`heaviest frame: ${strokes} strokes, ${fills} fills`);
     expect(strokes).toBeLessThanOrEqual(60);
     expect(fills).toBeLessThanOrEqual(160);
     // Two people at quality 2 are still cheap.

@@ -516,8 +516,13 @@ export function progressAnalytics(ctx: AppContext, userId: string, clock: UserCl
   return value;
 }
 
-/** Trend words and a few numbers for the AI coach (no raw series). */
-export function analyticsForCoach(a: ProgressAnalytics) {
+/**
+ * Trend words and a few numbers for the AI coach (no raw series). Form and range-of-motion trends are
+ * Pro features, so they reach the coach only when `e` shows the user has them; without entitlements the
+ * analytics are treated as a Free user's (the safe default — the coach is a second route to the same data).
+ */
+export function analyticsForCoach(a: ProgressAnalytics, e: Pick<Entitlements, "features"> = { features: [] }) {
+  a = lockForTier(a, e);
   return {
     rangeDays: a.range.days,
     trends: {
@@ -553,8 +558,18 @@ export function lockForTier(a: ProgressAnalytics, e: Pick<Entitlements, "feature
     const f = premiumFeature(feature);
     return { feature, title: f.title, pro: f.pro };
   };
+  const formLocked = !hasFeature(e, "ADVANCED_FORM_ANALYSIS");
+  // The per-period summaries carry the form average too: a locked form section must not leak through them.
+  const summaries = formLocked
+    ? {
+        daily: a.summaries.daily?.map((p) => ({ ...p, averageForm: null })) ?? null,
+        weekly: a.summaries.weekly?.map((p) => ({ ...p, averageForm: null })) ?? null,
+        monthly: a.summaries.monthly?.map((p) => ({ ...p, averageForm: null })) ?? null,
+      }
+    : a.summaries;
   return {
     ...a,
+    summaries,
     form: hasFeature(e, "ADVANCED_FORM_ANALYSIS") ? a.form : { available: false, focus: a.form.focus, interpretation: null, locked: lock("ADVANCED_FORM_ANALYSIS"), data: { chart: emptyChart(a.form.data.chart), averageScore: null, reps: 0 } },
     rom: hasFeature(e, "ADVANCED_ROM_ANALYSIS") ? a.rom : { available: false, focus: a.rom.focus, interpretation: null, locked: lock("ADVANCED_ROM_ANALYSIS"), data: { chart: emptyChart(a.rom.data.chart), averagePercent: null, reps: 0 } },
   };

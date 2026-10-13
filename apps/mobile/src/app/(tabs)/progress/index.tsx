@@ -134,7 +134,7 @@ export default function ProgressScreen() {
                 )
               ) : (
                 <ExerciseList>
-                  {workouts.data.workouts.map((w) => (
+                  {workouts.data.workouts.slice(0, 10).map((w) => (
                     <ListRow
                       key={w.id}
                       title={new Date(`${w.localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}

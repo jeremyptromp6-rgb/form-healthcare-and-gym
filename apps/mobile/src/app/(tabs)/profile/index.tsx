@@ -31,6 +31,7 @@ export default function ProfileHub() {
   useRefetchOnFocus(refetch);
 
   if (me.isError && !me.data) return <Screen title="Profile"><ErrorState error={me.error} onRetry={refetch} /></Screen>;
+  if (me.data && catalog.isError && !catalog.data) return <Screen title="Profile"><ErrorState error={catalog.error} onRetry={catalog.refetch} /></Screen>;
   if (!me.data || !catalog.data) return <Screen title="Profile"><StateView kind="loading" /></Screen>;
 
   const m = me.data;
@@ -47,7 +48,7 @@ export default function ProfileHub() {
     <Screen title="Profile" subtitle={m.user.email} refreshing={me.isRefetching} onRefresh={refetch} right={<SettingsButton />}>
       <GradientCard colorsOverride={gradients.heroMedia} style={{ gap: space.lg }}>
         {/* A faint sunrise behind everything, clipped to the card; low enough that the words stay on calm ground. */}
-        <View style={styles.backdrop} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        <View style={styles.backdrop} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <RingsArt style={{ flex: 1 }} />
         </View>
         <Row gap={space.lg}>
@@ -212,7 +213,7 @@ export default function ProfileHub() {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.4 },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.4, pointerEvents: 'none' },
 });
 
 function SettingsButton() {

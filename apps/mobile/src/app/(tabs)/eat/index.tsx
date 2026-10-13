@@ -2,15 +2,20 @@ import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { EatDayView } from '@/components/eat/EatDayView';
 import { ErrorState, InlineMessage, Screen, StateView } from '@/components/ui';
-import { localDateKey, uuid } from '@/lib/dates';
+import { useToday } from '@/components/eat/useToday';
+import { uuid } from '@/lib/dates';
 import { dayNavigation, dayTitle } from '@/lib/eat';
 import { useFeature } from '@/lib/features';
 import { useAddWater, useNutritionDay, useRefetchOnFocus } from '@/lib/queries';
 
 /** Eat: the day's calories, macros and water against targets, meal by meal. */
 export default function Eat() {
-  const today = localDateKey();
-  const [date, setDate] = useState(today);
+  const today = useToday();
+  // null means "follow today": a screen left open past midnight moves to the new day by itself, while a
+  // day the user paged back to stays put.
+  const [chosen, setChosen] = useState<string | null>(null);
+  const date = chosen ?? today;
+  const setDate = (d: string) => setChosen(d === today ? null : d);
   const day = useNutritionDay(date, today);
   const foodScan = useFeature('food_scan');
   const planner = useFeature('meal_planner');

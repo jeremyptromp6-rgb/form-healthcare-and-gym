@@ -194,7 +194,7 @@ function AmountField({ value, unit, hint, onChange }: { value: number; unit: 'g'
 
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  chip: { minHeight: 40, justifyContent: 'center', paddingHorizontal: space.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   chipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   estimate: { padding: space.md, borderRadius: radius.md, backgroundColor: colors.wash, gap: 2 },
 });

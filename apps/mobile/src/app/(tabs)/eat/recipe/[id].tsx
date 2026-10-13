@@ -13,7 +13,8 @@ export default function RecipeScreen() {
   const { id, planId, date } = useLocalSearchParams<{ id: string; planId?: string; date?: string }>();
   const q = useRecipe(id);
   if (q.isPending) return <Screen title="Recipe"><StateView kind="loading" /></Screen>;
-  if (q.isError) return <Screen title="Recipe">{q.error.kind === 'not_found' ? <StateView kind="empty" title="Recipe not found" /> : <ErrorState error={q.error} onRetry={q.refetch} />}</Screen>;
+  // A failed background refetch keeps the recipe on screen; only a failure with nothing to show is an error.
+  if (q.isError && !q.data) return <Screen title="Recipe">{q.error.kind === 'not_found' ? <StateView kind="empty" title="Recipe not found" /> : <ErrorState error={q.error} onRetry={q.refetch} />}</Screen>;
   return <RecipeDetail recipe={q.data.recipe} planId={planId ?? null} date={date ?? null} />;
 }
 

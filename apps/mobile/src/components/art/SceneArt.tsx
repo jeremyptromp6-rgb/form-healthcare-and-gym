@@ -36,6 +36,8 @@ function mixHex(a: string, b: string, t: number): string {
 const stroke = (color: string, width: number) => ({ stroke: color, strokeWidth: width, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }) as const;
 
 /** A hidden, decorative host: scenes are drawn behind the words and say nothing. */
+/** Decorative art never takes touches (a style, not the deprecated prop, so the web build stays quiet). */
+const NO_TOUCH = { pointerEvents: 'none' } as const;
 const HIDDEN = { accessible: false, importantForAccessibility: 'no-hide-descendants', 'aria-hidden': true } as const;
 
 /** A soft round glow: sun, moon, lantern. */
@@ -293,7 +295,7 @@ export function RingsArt({ style, tone }: { style?: StyleProp<ViewStyle>; tone?:
   const sunId = useArtId('scSun');
   const hills = ringsHills(tone);
   return (
-    <View style={style} pointerEvents="none" {...HIDDEN}>
+    <View style={[style, NO_TOUCH]} {...HIDDEN}>
       <Svg width="100%" height="100%" viewBox="0 0 300 300" preserveAspectRatio="xMaxYMin slice">
         <Sky kit={kit} width={300} height={300} />
         <FadePath d="M-20 120 C26 94 70 98 116 114 C158 128 196 94 250 100 C282 104 300 110 320 106 V210 H-20 Z" color={a.scene.haze} opacity={night ? 0.55 : 0.95} />
@@ -416,7 +418,7 @@ export function ProgressArt({ style, tone }: { style?: StyleProp<ViewStyle>; ton
   const { a, night, t } = kit;
   const tints = [a.scene.hillNear, a.scene.hillMid, a.scene.hillFar, a.scene.haze] as const;
   return (
-    <View style={style} pointerEvents="none" {...HIDDEN}>
+    <View style={[style, NO_TOUCH]} {...HIDDEN}>
       <Svg width="100%" height="100%" viewBox="0 0 300 200" preserveAspectRatio="xMaxYMid slice">
         {night ? (
           <>
@@ -591,7 +593,7 @@ export function WelcomeArt({ style, tone }: { style?: StyleProp<ViewStyle>; tone
   const { a, night, x } = kit;
   const sunId = useArtId('scSun');
   return (
-    <View style={style} pointerEvents="none" {...HIDDEN}>
+    <View style={[style, NO_TOUCH]} {...HIDDEN}>
       <Svg width="100%" height="100%" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid slice">
         <Sky kit={kit} width={300} height={220} />
         {night ? (

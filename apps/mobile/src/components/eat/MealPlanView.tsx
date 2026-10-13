@@ -118,14 +118,17 @@ function MealCard({ meal: m, p }: { meal: PlannedMealView; p: MealPlanViewProps 
   const busy = p.busyMealId === m.id;
   const down = step(m.servings, -1);
   const up = step(m.servings, 1);
+  // An eaten meal is history; only a planned one that now clashes with allergies needs replacing.
+  const unsafe = !eaten && m.unsafe;
   return (
     <Card style={{ gap: space.md }}>
       <Row style={{ justifyContent: 'space-between' }}>
         <AppText variant="label" color={colors.textMuted}>
           {MEAL_LABEL[m.slot]}
         </AppText>
-        {eaten ? <Badge label="Eaten" tone="primary" icon="checkmark" /> : <Badge label="Planned" />}
+        {eaten ? <Badge label="Eaten" tone="primary" icon="checkmark" /> : m.unsafe ? <Badge label="Not safe for you" tone="warning" icon="warning" /> : <Badge label="Planned" />}
       </Row>
+      {unsafe ? <InlineMessage tone="warning">{m.unsafeReason ?? 'This meal no longer fits your allergies or diet.'}</InlineMessage> : null}
       <Pressable accessibilityRole="button" accessibilityLabel={`${m.title}. Open recipe`} onPress={() => p.onOpenRecipe(m.recipeId)} style={{ gap: 2 }}>
         <Row gap={space.md}>
           <MealArt kind={m.slot} size={34} />
@@ -157,7 +160,8 @@ function MealCard({ meal: m, p }: { meal: PlannedMealView; p: MealPlanViewProps 
             <IconButton icon="swap-horizontal" label={`Swap ${m.title}`} onPress={() => p.onSwap(m)} color={colors.text} />
             <IconButton icon="trash-outline" label={`Remove ${m.title}`} onPress={() => p.onRemove(m)} />
           </Row>
-          {m.canMarkEaten ? <Button label="Mark eaten" icon="checkmark" onPress={() => p.onMarkEaten(m)} loading={busy} /> : null}
+          {unsafe ? <Button label="Swap this meal" icon="swap-horizontal" onPress={() => p.onSwap(m)} loading={busy} /> : null}
+          {unsafe ? <Button label="Mark eaten" icon="checkmark" variant="secondary" disabled /> : m.canMarkEaten ? <Button label="Mark eaten" icon="checkmark" onPress={() => p.onMarkEaten(m)} loading={busy} /> : null}
         </>
       )}
     </Card>
@@ -165,6 +169,6 @@ function MealCard({ meal: m, p }: { meal: PlannedMealView; p: MealPlanViewProps 
 }
 
 const styles = StyleSheet.create({
-  day: { minHeight: 40, paddingHorizontal: space.lg, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.card },
+  day: { minHeight: 44, paddingHorizontal: space.lg, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.card },
   dayOn: { backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.primary },
 });

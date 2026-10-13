@@ -19,7 +19,8 @@ services:
     buildCommand: npm ci --include=dev && npm run build -w @form/api
     startCommand: npm start -w @form/api
     healthCheckPath: /health
-    # Deploy a new commit only after GitHub's CI checks pass.
+    # Deploy a new commit only after GitHub's CI checks pass. The Android APK workflow starts only
+    # after CI succeeds (workflow_run), so the slow APK build doesn't hold the API deploy back.
     autoDeployTrigger: checksPass
     # disk:
     #   name: form-data

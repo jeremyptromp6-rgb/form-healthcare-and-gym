@@ -18,6 +18,17 @@ import { skeletonPalette } from './skeletonState';
 import { hudToneColor } from './skeletonTone';
 import { colors, palettes } from '@/theme/tokens';
 
+// PoseCameraFeed logs which model it loaded (dev builds); that line is noise here, everything else still prints.
+let logSpy: jest.SpyInstance | null = null;
+beforeEach(() => {
+  const realLog = console.log.bind(console);
+  logSpy = jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].startsWith('[pose] model:')) return;
+    realLog(...args);
+  });
+});
+afterEach(() => logSpy?.mockRestore());
+
 jest.mock('expo-camera', () => {
   const { Text: MockText } = jest.requireActual('react-native');
   return {

@@ -18,6 +18,7 @@ export default function SettingsScreen() {
   const me = useMe();
   const entitlements = useEntitlements();
   const [signingOutAll, setSigningOutAll] = useState(false);
+  const [signOutAllError, setSignOutAllError] = useState(false);
 
   return (
     <Screen title="Settings" subtitle="Your private control center" refreshing={me.isRefetching} onRefresh={me.refetch}>
@@ -54,13 +55,18 @@ export default function SettingsScreen() {
             loading={signingOutAll}
             onPress={async () => {
               setSigningOutAll(true);
+              setSignOutAllError(false);
               try {
                 await signOutEverywhere();
+              } catch {
+                // Not signed out anywhere (or at least not here): say so, and stay signed in.
+                setSignOutAllError(true);
               } finally {
                 setSigningOutAll(false);
               }
             }}
           />
+          {signOutAllError ? <InlineMessage tone="danger">Couldn&apos;t sign out your other devices, so you&apos;re still signed in here. Check your connection and try again.</InlineMessage> : null}
         </>
       ) : null}
     </Screen>
