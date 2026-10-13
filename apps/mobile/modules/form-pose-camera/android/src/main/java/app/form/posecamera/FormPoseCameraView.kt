@@ -98,6 +98,12 @@ class FormPoseCameraView(
         addView(overlay, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
+    // PreviewView adds its TextureView only once CameraX asks for a surface, after React Native has
+    // laid this view out. React Native swallows that child's requestLayout, so without Android layout
+    // the TextureView stays 0x0, no preview surface is ever provided, the camera session never starts
+    // and no frame reaches the analyzer ("The camera didn't start").
+    override val shouldUseAndroidLayout: Boolean = true
+
     // Both children always fill the view. The FILL_CENTER crop is done by PreviewView and mirrored
     // by the overlay's FillCenter, so neither child needs a measure result of its own.
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

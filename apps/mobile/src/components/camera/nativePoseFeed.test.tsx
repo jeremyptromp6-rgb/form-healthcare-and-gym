@@ -5,6 +5,7 @@ import { MODEL_BUDGET_MS, POSE_CONFIDENCE } from '@/lib/pose/poseModels';
 import { config } from '@/lib/config';
 import type { LiveReadout, PoseDiag } from '@/lib/pose/status';
 import { peopleFromLm, toEngineMessage } from '@/lib/pose/nativePose';
+import { NATIVE_LIVE_FALLBACK_MS } from './NativePoseFeed';
 import { PoseCameraFeed } from './PoseCameraFeed';
 import { skeletonPalette } from './skeletonState';
 
@@ -238,6 +239,38 @@ describe('native pose feed', () => {
     await fire('onPose', { kind: 'failed', offline: true, message: 'x', fatal: false });
     expect(h.onPose).toHaveBeenCalledWith({ kind: 'failed', message: 'Camera coaching needs an internet connection the first time it loads.', retryable: true });
     expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+  });
+
+  it('a native camera that never delivers a frame hands over to the WebView engine instead of failing', async () => {
+    jest.useFakeTimers();
+    try {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS - 100));
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+      await act(async () => jest.advanceTimersByTime(200));
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(h.onEngine).toHaveBeenLastCalledWith('webview');
+      expect(h.onCamera).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'unavailable' }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a native camera that went live is never handed over by the start timer', async () => {
+    jest.useFakeTimers();
+    try {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'live', name: null });
+      await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 1000));
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('a fatal native failure hands this session to the WebView engine', async () => {

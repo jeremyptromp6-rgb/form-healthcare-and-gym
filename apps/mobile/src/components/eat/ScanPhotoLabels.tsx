@@ -1,7 +1,7 @@
 import type { ScanBox } from '@form/domain';
 import { useMemo, useState } from 'react';
 import { Image, Pressable, Text, useWindowDimensions, View, type TextStyle } from 'react-native';
-import { containFit, layoutScanLabels, type PlacedLabel } from '@/lib/scanLabels';
+import { containFit, layoutScanLabels, stemEnd, type PlacedLabel } from '@/lib/scanLabels';
 import { colors, MAX_CONTENT_WIDTH, palettes, radius, space, type } from '@/theme/tokens';
 
 /** The photo as the review needs it. `width`/`height` are the pixels of the JPEG the model saw (absent = learn them from the image itself). */
@@ -28,6 +28,8 @@ export interface PhotoLabelItem {
 const CHIP_BG = `${palettes.dark.bg}E6`;
 const CHIP_TEXT = palettes.dark.text;
 const DOT_RING = palettes.light.card;
+// Matches the layout's default dotRadius, so no chip covers the dot.
+const DOT_R = 8;
 const CHIP_H = 28;
 // 28 dp tall chips get 8 dp of slop above and below: a 44 dp target.
 const CHIP_SLOP = { top: 8, bottom: 8, left: 4, right: 4 } as const;
@@ -48,8 +50,8 @@ export function NumberBadge({ n, size = 24, decorative }: { n: number; size?: nu
 
 /**
  * The meal photo, contain-fitted at its true aspect (never cropped), with a numbered label pinned to
- * each food the model located. A label that had to move off its food keeps a dot on the food and a
- * line to the chip. The labels repeat what the list below says: they are a convenience, never the
+ * each food the model located. Each label is a pin: a dot on the food, and the chip just above it
+ * (or beside it when there is no room) joined by a short stem, so the food stays visible. The labels repeat what the list below says: they are a convenience, never the
  * only place anything is written. With no items this is just the photo.
  */
 export function ScanPhotoLabels({ photo, items, activeId, onSelect }: { photo: ScanPhoto; items: readonly PhotoLabelItem[]; activeId?: string | null; onSelect?: (id: string) => void }) {
@@ -94,7 +96,7 @@ export function ScanPhotoLabels({ photo, items, activeId, onSelect }: { photo: S
           <Leader key={`leader:${l.id}`} label={l} />
         ))}
         {placed.map((l) => (
-          <View key={`dot:${l.id}`} style={{ position: 'absolute', left: l.anchor.x - 7, top: l.anchor.y - 7, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primary, borderWidth: 2, borderColor: DOT_RING, pointerEvents: 'none' }} />
+          <View key={`dot:${l.id}`} style={{ position: 'absolute', left: l.anchor.x - DOT_R, top: l.anchor.y - DOT_R, width: 2 * DOT_R, height: 2 * DOT_R, borderRadius: DOT_R, backgroundColor: colors.primary, borderWidth: 3, borderColor: DOT_RING, pointerEvents: 'none' }} />
         ))}
         {placed.map((l) => {
           const item = byId.get(l.id)!;
@@ -136,22 +138,23 @@ export function ScanPhotoLabels({ photo, items, activeId, onSelect }: { photo: S
   );
 }
 
-/** A thin line from a moved chip back to its food: a view as long as the gap, turned to point at the dot. */
+/** The stem of the pin: a short line from the chip's edge to the dot, a view as long as the gap, turned to point at the dot. */
 function Leader({ label }: { label: PlacedLabel }) {
-  const cx = label.rect.x + label.rect.w / 2;
-  const cy = label.rect.y + label.rect.h / 2;
-  const len = Math.hypot(label.anchor.x - cx, label.anchor.y - cy);
-  const angle = Math.atan2(label.anchor.y - cy, label.anchor.x - cx);
+  const from = stemEnd(label.rect, label.anchor);
+  const len = Math.hypot(label.anchor.x - from.x, label.anchor.y - from.y);
+  const angle = Math.atan2(label.anchor.y - from.y, label.anchor.x - from.x);
   return (
     <View
       style={{
         position: 'absolute',
-        left: (cx + label.anchor.x) / 2 - len / 2,
-        top: (cy + label.anchor.y) / 2 - 1,
+        left: (from.x + label.anchor.x) / 2 - len / 2,
+        top: (from.y + label.anchor.y) / 2 - 2,
         width: len,
-        height: 2,
-        borderRadius: 1,
+        height: 4,
+        borderRadius: 2,
         backgroundColor: colors.primary,
+        borderWidth: 1,
+        borderColor: DOT_RING,
         transform: [{ rotate: `${angle}rad` }],
         pointerEvents: 'none',
       }}

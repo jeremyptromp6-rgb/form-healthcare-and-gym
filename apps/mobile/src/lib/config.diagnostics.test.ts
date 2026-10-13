@@ -11,7 +11,8 @@ function loadConfig(env: Record<string, string | undefined>) {
   try {
     let cfg!: typeof import('./config').config;
     jest.isolateModules(() => {
-      cfg = (require('./config') as typeof import('./config')).config;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- a fresh module per env needs a synchronous require
+      cfg =(require('./config') as typeof import('./config')).config;
     });
     return cfg;
   } finally {

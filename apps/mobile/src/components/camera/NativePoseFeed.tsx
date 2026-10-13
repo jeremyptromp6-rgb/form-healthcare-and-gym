@@ -9,6 +9,8 @@ import { usePoseFeedCore } from './poseFeedCore';
 
 // Session-key props: the native camera restarts when one changes, so they are constants.
 const CONFIDENCE: [number, number, number] = [POSE_CONFIDENCE.detection, POSE_CONFIDENCE.presence, POSE_CONFIDENCE.tracking];
+/** No camera frame this long after the native feed starts (permission granted) → hand over to the WebView engine. */
+export const NATIVE_LIVE_FALLBACK_MS = 8000;
 
 /**
  * Phone camera + on-device pose, run natively (Android): CameraX, MediaPipe and the body outline all
@@ -28,20 +30,42 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
     latest.current = { onPose: p.onPose, onReadout: p.onReadout, onDiag: p.onDiag, leadMs: p.leadMs, onFatal };
   });
 
-  const onCamera = useCallback((e: { nativeEvent: NativeCameraEvent }) => handle(toEngineMessage('camera', e.nativeEvent)), [handle]);
+  const handOver = useCallback(() => {
+    // No point retrying natively: the WebView engine takes over for this session and starts from "loading".
+    latest.current.onReadout(null);
+    latest.current.onPose({ kind: 'loading' });
+    latest.current.onFatal();
+  }, []);
+
+  // A native camera that never delivers a frame (a device quirk) must not end in an error screen:
+  // the WebView engine, which worked on every phone before, takes over instead.
+  const live = useRef(false);
+  useEffect(() => {
+    if (!running) return;
+    live.current = false;
+    const t = setTimeout(() => {
+      if (!live.current) handOver();
+    }, NATIVE_LIVE_FALLBACK_MS);
+    return () => clearTimeout(t);
+  }, [running, p.retryToken, handOver]);
+
+  const onCamera = useCallback(
+    (e: { nativeEvent: NativeCameraEvent }) => {
+      if (e.nativeEvent.kind === 'live') live.current = true;
+      handle(toEngineMessage('camera', e.nativeEvent));
+    },
+    [handle],
+  );
   const onPose = useCallback(
     (e: { nativeEvent: NativePoseEvent }) => {
       const ev = e.nativeEvent;
       if (ev.kind === 'failed' && ev.fatal) {
-        // No point retrying natively: the WebView engine takes over for this session and starts from "loading".
-        latest.current.onReadout(null);
-        latest.current.onPose({ kind: 'loading' });
-        latest.current.onFatal();
+        handOver();
         return;
       }
       handle(toEngineMessage('pose', ev));
     },
-    [handle],
+    [handle, handOver],
   );
   const onFrame = useCallback((e: { nativeEvent: NativeFrameEvent }) => handle(toEngineMessage('frame', e.nativeEvent)), [handle]);
   const onDiag = useCallback((e: { nativeEvent: NativeDiagEvent }) => latest.current.onDiag?.(toPoseDiag(e.nativeEvent, latest.current.leadMs)), []);
