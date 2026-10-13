@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import CameraScreen from '@/app/camera';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
 
@@ -9,6 +10,9 @@ type Opts = { onSuccess?: (r: unknown) => void; onError?: (e: { kind: string; me
 
 let mockParams: Record<string, string> = {};
 let mockSession: WorkoutSession | null = null;
+let mockDiagnostics = false;
+let mockNative = false;
+let mockFeedProps: Record<string, unknown> = {};
 const mockLogMutate = jest.fn();
 const mockActionMutate = jest.fn();
 
@@ -17,14 +21,26 @@ jest.mock('expo-router', () => ({
   useLocalSearchParams: () => mockParams,
 }));
 jest.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: jest.fn(() => Promise.resolve()), deactivateKeepAwake: jest.fn(() => Promise.resolve()) }));
+// Preview builds show the diagnostics chip; the flag is read when the screen renders, so a test can turn it on.
+jest.mock('@/lib/config', () => {
+  const actual = jest.requireActual('@/lib/config');
+  const config = { ...actual.config };
+  Object.defineProperty(config, 'diagnostics', { get: () => mockDiagnostics });
+  return { ...actual, config };
+});
+// Whether the native camera is in use decides how the video area is filled.
+jest.mock('@/lib/pose/nativePose', () => ({ nativePoseAvailable: () => mockNative }));
 // The feed stands in for the camera and pose model: once started it reports a live camera, a ready model and 5 verified reps.
 jest.mock('@/components/camera/PoseCameraFeed', () => {
   const { useEffect } = jest.requireActual('react');
   return {
-    PoseCameraFeed: ({ onCamera, onPose, onReadout }: { onCamera: (s: unknown) => void; onPose: (s: unknown) => void; onReadout: (r: unknown) => void }) => {
+    PoseCameraFeed: (props: { onCamera: (s: unknown) => void; onPose: (s: unknown) => void; onReadout: (r: unknown) => void; onDiag?: (d: unknown) => void }) => {
+      const { onCamera, onPose, onReadout, onDiag } = props;
+      mockFeedProps = props as unknown as Record<string, unknown>;
       useEffect(() => {
         onCamera({ kind: 'live' });
         onPose({ kind: 'ready', backend: 'CPU' });
+        onDiag?.({ fps: 27, inferMs: 31, ageP50: 78, ageP95: 120, backend: 'GPU', variant: 'full', rung: 'mask', engine: 'native' });
         onReadout({ framing: { issue: null, message: 'ok', trackable: true, side: 'left', missing: [] }, trackable: true, angleDeg: null, people: 1, fps: 28, latencyMs: 19, rep: { verifiedReps: 5 }, traceFull: false });
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, []);
@@ -83,6 +99,9 @@ const body = () => mockLogMutate.mock.calls[0]![0] as Record<string, unknown>;
 const logSetButton = () => screen.getByRole('button', { name: /^Log set/ });
 
 beforeEach(() => {
+  mockDiagnostics = false;
+  mockNative = false;
+  mockFeedProps = {};
   mockParams = { exerciseId: 'bicep_curl' };
   mockSession = makeSession();
   mockLogMutate.mockReset();
@@ -191,5 +210,64 @@ describe('camera screen in practice mode (?practice=1)', () => {
     mockSession = null;
     await renderCamera();
     expect(screen.getByText('Practice — nothing is logged')).toBeTruthy();
+  });
+});
+
+describe('camera screen layout and diagnostics', () => {
+  const layout = (w: number, h: number) => fireEvent(screen.getByTestId('camera-slot'), 'layout', { nativeEvent: { layout: { x: 0, y: 0, width: w, height: h } } });
+  const feedBox = () => StyleSheet.flatten(screen.getByTestId('camera-feed-box').props.style) as Record<string, unknown>;
+
+  it('names what the exercise needs in view instead of claiming a full body', async () => {
+    await renderCamera();
+    expect(screen.getByText('Arm, shoulder and hip in view')).toBeTruthy();
+    expect(screen.queryByText(/full body detected/i)).toBeNull();
+  });
+
+  it('boxes the WebView and web feeds to the video aspect so nothing is cropped', async () => {
+    await renderCamera();
+    await layout(360, 520);
+    // The default aspect in a portrait window is 3:4, so a 360 x 520 slot holds a 360 x 480 box.
+    expect(feedBox()).toMatchObject({ width: 360, height: 480, left: 0, top: 20 });
+  });
+
+  it('uses the reported video aspect once the feed knows it', async () => {
+    await renderCamera();
+    await layout(360, 520);
+    await act(async () => (mockFeedProps.onReadout as (r: unknown) => void)({ framing: { issue: null, message: 'ok', trackable: true, side: 'left', missing: [] }, trackable: true, angleDeg: null, people: 1, fps: 28, latencyMs: 19, rep: { verifiedReps: 5 }, traceFull: false, frameAspect: 4 / 3 }));
+    expect(feedBox()).toMatchObject({ width: 360, height: 270 });
+  });
+
+  it('lets the native camera fill the whole video area', async () => {
+    mockNative = true;
+    await renderCamera();
+    await layout(360, 520);
+    expect(feedBox().width).toBeUndefined();
+    expect(feedBox()).toMatchObject({ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 });
+  });
+
+  it('shows no diagnostics and gives the feed nothing extra in a main build', async () => {
+    await renderCamera();
+    expect(screen.queryByTestId('pose-diagnostics')).toBeNull();
+    expect(mockFeedProps.onDiag).toBeUndefined();
+    expect(mockFeedProps.leadMs).toBeUndefined();
+  });
+
+  it('in a preview build subscribes to the feed numbers, shows them, and passes the chosen overlay lead back', async () => {
+    mockDiagnostics = true;
+    await renderCamera();
+    const chip = within(screen.getByTestId('pose-diagnostics'));
+    expect(chip.getByText('engine native | GPU | full | outline:mask')).toBeTruthy();
+    expect(mockFeedProps.leadMs).toBe(60);
+    await fireEvent.press(chip.getByRole('button', { name: 'Overlay lead 30 milliseconds' }));
+    expect(mockFeedProps.leadMs).toBe(30);
+  });
+
+  it('keeps every control reachable: pause, end, the log button and the counters', async () => {
+    await renderCamera();
+    expect(screen.getByRole('button', { name: 'End camera' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Log set · 5 verified reps/ })).toBeTruthy();
+    expect(screen.getByLabelText('5 verified reps')).toBeTruthy();
+    expect(screen.getByLabelText(/^Range of motion/)).toBeTruthy();
   });
 });

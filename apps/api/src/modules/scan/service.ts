@@ -53,6 +53,7 @@ export function scanView(db: Db, row: ScanRow) {
     status: row.status,
     imageQuality: review.imageQuality,
     items: review.items,
+    ...(review.summary ? { summary: review.summary } : {}),
     provider: { name: row.provider, development: row.development === 1 },
     createdAt: row.created_at,
     expiresAt: row.expires_at,

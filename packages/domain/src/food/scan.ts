@@ -20,6 +20,13 @@ import { normalizeText } from "./search";
 
 export type ImageQuality = "ok" | "too_dark" | "blurry" | "too_far" | "obstructed";
 
+/**
+ * Where a food is in the photo: [ymin, xmin, ymax, xmax], integers 0–1000 relative to the whole
+ * image (0,0 is the top-left corner). Always ymin < ymax and xmin < xmax. Optional everywhere: not
+ * every recogniser can locate foods, and older stored reviews don't have it.
+ */
+export type ScanBox = [ymin: number, xmin: number, ymax: number, xmax: number];
+
 export interface RecognizedFood {
   label: string;
   /** Identity confidence 0–1 for `label`. */
@@ -35,12 +42,16 @@ export interface RecognizedFood {
   hiddenIngredients: string[];
   /** A mixed dish (curry, salad, sandwich) rather than a single food. */
   composite: boolean;
+  /** Where the food is in the photo, when the recogniser could locate it. */
+  box?: ScanBox;
 }
 
 export interface RecognitionResult {
   imageQuality: ImageQuality;
   containsFood: boolean;
   items: RecognizedFood[];
+  /** A short plain description of the meal (no nutrition numbers), when the recogniser gave one. */
+  summary?: string;
 }
 
 export interface RecognitionImage {
@@ -67,6 +78,10 @@ export const SCAN_LIMITS = {
   /** A scan must be confirmed within this long; after that it's discarded. */
   ttlMs: 24 * 60 * 60 * 1000,
   timeoutMs: 30_000,
+  summaryChars: 160,
+  /** A located food must span at least this many 1/1000ths of the image on each side, and this much area. */
+  boxMinSide: 20,
+  boxMinArea: 2500,
 } as const;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -85,6 +100,46 @@ function cleanMacros(m: Macros): Macros | null {
 }
 
 /**
+ * A location box from an untrusted provider: four finite numbers, rounded and clamped to 0–1000,
+ * with ymin < ymax and xmin < xmax and a plausible size (not a speck, not a sliver). Anything else
+ * is `undefined`; the item it belonged to is kept, just not located.
+ */
+export function sanitizeScanBox(raw: unknown): ScanBox | undefined {
+  if (!Array.isArray(raw) || raw.length !== 4) return undefined;
+  if (!raw.every((v) => typeof v === "number" && Number.isFinite(v))) return undefined;
+  const [ymin, xmin, ymax, xmax] = (raw as number[]).map((v) => clamp(Math.round(v), 0, 1000)) as ScanBox;
+  const h = ymax - ymin;
+  const w = xmax - xmin;
+  if (h < SCAN_LIMITS.boxMinSide || w < SCAN_LIMITS.boxMinSide || h * w < SCAN_LIMITS.boxMinArea) return undefined;
+  return [ymin, xmin, ymax, xmax];
+}
+
+/**
+ * The recogniser's short description of the meal, made safe to show: plain text only, no markup,
+ * no calorie or gram figures (the review screen's own numbers are the only nutrition numbers), at
+ * most `SCAN_LIMITS.summaryChars`. `undefined` when nothing usable is left.
+ */
+export function sanitizeSummary(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const QUOTES = /^["'‘’“”\s]+|["'‘’“”\s]+$/g;
+  let s = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/[`<>*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(QUOTES, "");
+  if (/kcal|calorie|\d\s*g\b/i.test(s)) return undefined;
+  const max = SCAN_LIMITS.summaryChars;
+  if (s.length > max) {
+    const head = s.slice(0, max - 1);
+    const space = head.lastIndexOf(" ");
+    s = `${(space > max / 2 ? head.slice(0, space) : head).replace(/[\s,;:.\-–—]+$/, "")}…`;
+  }
+  return s.length >= 3 ? s : undefined;
+}
+
+/**
  * Normalises whatever a provider returned into safe, bounded values: clamps confidences and
  * portions, orders the range, drops items without usable nutrition, and caps list sizes.
  * Providers (especially AI ones) are untrusted input.
@@ -98,6 +153,7 @@ export function sanitizeRecognition(r: RecognitionResult): RecognitionResult {
     const g = clamp(Number.isFinite(it.servingGrams) ? it.servingGrams : 0, 1, SCAN_LIMITS.maxServingGrams);
     const low = clamp(Math.min(it.servingLowGrams, g), 1, g);
     const high = clamp(Math.max(it.servingHighGrams, g), g, SCAN_LIMITS.maxServingGrams);
+    const box = sanitizeScanBox(it.box);
     items.push({
       label,
       confidence: clamp(Number.isFinite(it.confidence) ? it.confidence : 0, 0, 1),
@@ -111,9 +167,11 @@ export function sanitizeRecognition(r: RecognitionResult): RecognitionResult {
       per100g,
       hiddenIngredients: (it.hiddenIngredients ?? []).map((h) => h.trim().slice(0, 40)).filter(Boolean).slice(0, 6),
       composite: !!it.composite,
+      ...(box ? { box } : {}),
     });
   }
-  return { imageQuality: r.imageQuality, containsFood: r.containsFood && items.length > 0 ? true : r.containsFood, items };
+  const summary = sanitizeSummary(r.summary);
+  return { imageQuality: r.imageQuality, containsFood: r.containsFood && items.length > 0 ? true : r.containsFood, items, ...(summary ? { summary } : {}) };
 }
 
 // ---- Catalog matching ---------------------------------------------------------------------
@@ -182,12 +240,16 @@ export interface ScanReviewItem {
   serving: { amount: number; low: number; high: number; unit: "g" };
   hiddenIngredients: string[];
   composite: boolean;
+  /** Where the food is in the photo, when known. Absent in older reviews and from recognisers that don't locate. */
+  box?: ScanBox;
 }
 
 export interface ScanReview {
   status: ScanStatus;
   imageQuality: ImageQuality;
   items: ScanReviewItem[];
+  /** A short plain description of the meal, when the recogniser gave one. Absent in older reviews. */
+  summary?: string;
 }
 
 export function buildScanReview(raw: RecognitionResult, catalog: readonly FoodItem[]): ScanReview {
@@ -219,11 +281,12 @@ export function buildScanReview(raw: RecognitionResult, catalog: readonly FoodIt
       serving: { amount: it.servingGrams, low: it.servingLowGrams, high: it.servingHighGrams, unit: "g" },
       hiddenIngredients: it.hiddenIngredients,
       composite: it.composite,
+      ...(it.box ? { box: it.box } : {}),
     };
   });
   if (items.length === 0) return { status: "unknown_food", imageQuality: r.imageQuality, items };
   if (r.imageQuality !== "ok" && items.every((x) => x.band === "low")) return { status: "poor_image", imageQuality: r.imageQuality, items: [] };
-  return { status: "ok", imageQuality: r.imageQuality, items };
+  return { status: "ok", imageQuality: r.imageQuality, items, ...(r.summary ? { summary: r.summary } : {}) };
 }
 
 // ---- Nutrition estimate (shared by the review screen and the server) -----------------------
@@ -340,6 +403,7 @@ export function developmentRecognitionProvider(): FoodRecognitionProvider {
       value: {
         imageQuality: "ok",
         containsFood: true,
+        summary: "Grilled chicken with white rice and green vegetables.",
         items: [
           {
             label: "Chicken breast",
@@ -351,6 +415,7 @@ export function developmentRecognitionProvider(): FoodRecognitionProvider {
             per100g: { kcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6 },
             hiddenIngredients: ["cooking oil"],
             composite: false,
+            box: [300, 60, 700, 440],
           },
           {
             label: "White rice",
@@ -362,6 +427,7 @@ export function developmentRecognitionProvider(): FoodRecognitionProvider {
             per100g: { kcal: 130, proteinG: 2.7, carbsG: 28.2, fatG: 0.3 },
             hiddenIngredients: [],
             composite: false,
+            box: [320, 480, 720, 880],
           },
           {
             label: "Green vegetables",
@@ -376,6 +442,7 @@ export function developmentRecognitionProvider(): FoodRecognitionProvider {
             per100g: { kcal: 35, proteinG: 2.4, carbsG: 7, fatG: 0.4 },
             hiddenIngredients: [],
             composite: false,
+            box: [60, 300, 300, 700],
           },
         ],
       },

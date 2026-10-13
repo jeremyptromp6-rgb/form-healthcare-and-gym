@@ -1,8 +1,9 @@
 import { defaultMealType, MEAL_TYPES } from '@form/domain';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Platform, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, View, type ScrollView } from 'react-native';
 import { FoodPicker } from '@/components/eat/FoodPicker';
+import { ScanPhotoLabels, type ScanPhoto } from '@/components/eat/ScanPhotoLabels';
 import { ScanReviewView } from '@/components/eat/ScanReviewView';
 import { AppText, Button, Card, InlineMessage, Row, Screen, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
@@ -12,22 +13,26 @@ import { confirmItems, initialReview, scanErrorMessage, statusMessage, type Item
 import { ProUpsellFor } from '@/components/pro/ProUpsellFor';
 import { capturePhoto } from '@/lib/scanCapture';
 import type { FoodScan, MealType } from '@/lib/types';
-import { colors, radius, space } from '@/theme/tokens';
+import { colors, space } from '@/theme/tokens';
 
-type Photo = { uri: string; base64: string };
+type Photo = ScanPhoto & { base64: string };
 type Step =
   | { kind: 'start'; notice?: { text: string; settings?: boolean } }
   | { kind: 'preview'; photo: Photo }
   | { kind: 'analyzing'; photo: Photo }
   | { kind: 'status'; photo: Photo; scan: FoodScan }
   | { kind: 'error'; photo: Photo; message: string; retry: boolean; needsConsent?: boolean; pro?: boolean }
-  | { kind: 'review'; scan: FoodScan }
-  | { kind: 'picking'; scan: FoodScan; itemId: string };
+  | { kind: 'review'; scan: FoodScan; photo?: ScanPhoto }
+  | { kind: 'picking'; scan: FoodScan; itemId: string; photo?: ScanPhoto };
+
+/** What the review keeps of a photo: the picture and its size, not the upload copy. */
+const reviewPhoto = (p: Photo): ScanPhoto => ({ uri: p.uri, width: p.width, height: p.height });
 
 /**
  * Food scanner: take a photo → recognition → review the ESTIMATE → log. The photo is kept in
- * memory only for this screen; the server doesn't store it. Nothing is logged until the user
- * confirms the review, and confirming twice can never log twice.
+ * memory only for this screen (through the review, so labels can sit on the foods); the server
+ * doesn't store it, and retaking, discarding or logging drops it. Nothing is logged until the
+ * user confirms the review, and confirming twice can never log twice.
  */
 export default function ScanMeal() {
   const params = useLocalSearchParams<{ meal?: string; date?: string }>();
@@ -67,7 +72,7 @@ export default function ScanMeal() {
           if (token !== run.current) return; // cancelled meanwhile
           if (scan.status === 'ok') {
             setReview(initialReview(scan));
-            setStep({ kind: 'review', scan });
+            setStep({ kind: 'review', scan, photo: reviewPhoto(photo) });
           } else setStep({ kind: 'status', photo, scan });
         },
         onError: (e) => {
@@ -212,19 +217,35 @@ export default function ScanMeal() {
               const current = review[step.itemId]!;
               const amount = food.basis === 'g' ? current.amount : (food.servings[0]?.amount ?? 250);
               setReview({ ...review, [step.itemId]: { ...current, food, option: null, amount } });
-              setStep({ kind: 'review', scan: step.scan });
+              setStep({ kind: 'review', scan: step.scan, photo: step.photo });
             }}
           />
-          <Button label="Back to review" variant="ghost" onPress={() => setStep({ kind: 'review', scan: step.scan })} />
+          <Button label="Back to review" variant="ghost" onPress={() => setStep({ kind: 'review', scan: step.scan, photo: step.photo })} />
         </Screen>
       );
     case 'review':
-      return <Review scan={step.scan} review={review} setReview={setReview} meal={meal} setMeal={setMeal} mealName={mealName} setMealName={setMealName} date={date} onPick={(itemId) => setStep({ kind: 'picking', scan: step.scan, itemId })} onRetake={() => retake(step.scan.id)} />;
+      return (
+        <Review
+          scan={step.scan}
+          photo={step.photo}
+          review={review}
+          setReview={setReview}
+          meal={meal}
+          setMeal={setMeal}
+          mealName={mealName}
+          setMealName={setMealName}
+          date={date}
+          onPick={(itemId) => setStep({ kind: 'picking', scan: step.scan, itemId, photo: step.photo })}
+          onRetake={() => retake(step.scan.id)}
+          onLogged={() => setStep({ kind: 'review', scan: step.scan })}
+        />
+      );
   }
 }
 
 function Review(p: {
   scan: FoodScan;
+  photo?: ScanPhoto;
   review: ReviewState;
   setReview: (r: ReviewState) => void;
   meal: MealType;
@@ -234,15 +255,20 @@ function Review(p: {
   date: string;
   onPick: (itemId: string) => void;
   onRetake: () => void;
+  /** The meal was logged: the photo is dropped. */
+  onLogged: () => void;
 }) {
   const confirm = useConfirmScan(p.scan.id);
   // One key per scan: a retried or double-tapped confirmation replays instead of logging again.
   const [confirmKey] = useState(uuid);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
   return (
-    <Screen title="Scan a meal">
+    <Screen title="Scan a meal" scrollRef={scrollRef}>
       <ScanReviewView
         scan={p.scan}
+        photo={p.photo}
+        scrollRef={scrollRef}
         state={p.review}
         onChange={(itemId, patch: Partial<ItemChoice>) => p.setReview({ ...p.review, [itemId]: { ...p.review[itemId]!, ...patch } })}
         onPickFood={p.onPick}
@@ -258,7 +284,10 @@ function Review(p: {
           confirm.mutate(
             { confirmKey, localDate: p.date, mealType: p.meal, mealName: p.mealName.trim() || null, items: confirmItems(p.scan, p.review) },
             {
-              onSuccess: () => router.back(),
+              onSuccess: () => {
+                p.onLogged();
+                router.back();
+              },
               onError: (e) => setError(e.kind === 'network' ? 'Not logged — no connection. Try again; it won’t be logged twice.' : e.message),
             },
           );
@@ -268,12 +297,7 @@ function Review(p: {
   );
 }
 
+/** The whole photo at its own shape (never cropped), the way the review will show it. */
 function PhotoPreview({ photo }: { photo: Photo }) {
-  return (
-    <Image
-      source={{ uri: photo.uri }}
-      accessibilityLabel="Your meal photo"
-      style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: colors.card, resizeMode: 'cover' }}
-    />
-  );
+  return <ScanPhotoLabels photo={photo} items={[]} />;
 }

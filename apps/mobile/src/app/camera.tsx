@@ -5,8 +5,11 @@ import { Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LiveCameraView } from '@/components/camera/LiveCameraView';
 import { PoseCameraFeed } from '@/components/camera/PoseCameraFeed';
+import { PoseDiagnostics } from '@/components/camera/PoseDiagnostics';
 import { StateView } from '@/components/ui';
-import { cameraScreenModel, type CameraAction, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
+import { config } from '@/lib/config';
+import { nativePoseAvailable } from '@/lib/pose/nativePose';
+import { cameraScreenModel, type CameraAction, type CameraStatus, type LiveReadout, type PoseDiag, type PoseStatus } from '@/lib/pose/status';
 import { uuid } from '@/lib/dates';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { useActiveSession, useLogSet, useSessionAction } from '@/lib/queries';
@@ -41,6 +44,11 @@ export default function CameraScreen() {
   const [camera, setCamera] = useState<CameraStatus>({ kind: 'off' });
   const [pose, setPose] = useState<PoseStatus>({ kind: 'idle' });
   const [readout, setReadout] = useState<LiveReadout | null>(null);
+  // Preview builds only: the feed's performance numbers, and the overlay lead being tuned (ms).
+  const [diag, setDiag] = useState<PoseDiag | null>(null);
+  const [leadMs, setLeadMs] = useState(60);
+  // The engine the feed is actually running (it can fall back from native to the WebView mid-session).
+  const [engine, setEngine] = useState<'native' | 'webview' | null>(null);
   const [retryToken, setRetryToken] = useState(0);
   const [logMessage, setLogMessage] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
   // A failed save keeps its client id, so retrying can never create a second copy of the set.
@@ -126,9 +134,12 @@ export default function CameraScreen() {
     );
   };
 
+  // Main builds subscribe to nothing and pass nothing extra.
+  const feedDiagnostics = config.diagnostics ? { onDiag: setDiag, leadMs } : {};
   const setNumber = inWorkout ? inWorkout.loggedSets.length + 1 : null;
   return (
     <LiveCameraView
+      exerciseId={exerciseId}
       exerciseName={exercise.name}
       setLabel={inWorkout ? `Set ${setNumber}${inWorkout.sets ? ` of ${inWorkout.sets}` : ''}` : null}
       targetLabel={inWorkout ? formatTarget(inWorkout, units) : `${exercise.targetReps.min}–${exercise.targetReps.max} reps`}
@@ -136,11 +147,15 @@ export default function CameraScreen() {
       model={model}
       readout={readout}
       paused={paused}
+      // The native camera fills the video area; the WebView and web feeds are boxed to the video's aspect.
+      // Until the feed reports its engine, assume the one it will start with.
+      feedFit={(engine ?? (nativePoseAvailable() ? 'native' : 'webview')) === 'native' ? 'fill' : 'aspect'}
       feed={
         started ? (
-          <PoseCameraFeed active={!paused} session={session} retryToken={retryToken} onCamera={setCamera} onPose={setPose} onReadout={setReadout} />
+          <PoseCameraFeed active={!paused} session={session} retryToken={retryToken} onCamera={setCamera} onPose={setPose} onReadout={setReadout} onEngine={setEngine} {...feedDiagnostics} />
         ) : null
       }
+      diagnostics={config.diagnostics ? <PoseDiagnostics diag={diag} readout={readout} leadMs={leadMs} onLeadChange={setLeadMs} /> : undefined}
       onLogSet={inWorkout ? onLogSet : undefined}
       logging={logSet.isPending}
       logMessage={logMessage}

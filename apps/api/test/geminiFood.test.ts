@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanApiKey, GEMINI_FALLBACK_MODEL, geminiFoodRecognition, geminiResponseSchema } from "../src/providers/foodRecognition";
+import { cleanApiKey, GEMINI_FALLBACK_MODEL, geminiFoodRecognition, geminiResponseSchema, normaliseRecognition } from "../src/providers/foodRecognition";
 
 /**
  * The Gemini food-recognition provider against a stubbed transport: checks the request we send
@@ -62,6 +62,44 @@ describe("Gemini food recognition provider", () => {
     });
     expect(JSON.stringify(geminiResponseSchema())).not.toMatch(/\$schema|additionalProperties/);
     expect(provider.status()).toEqual({ state: "ready", provider: "Gemini (gemini-3.8-flash)" });
+  });
+
+  it("asks for a summary and each food's box_2d first, and says how in the prompt", async () => {
+    const schema = geminiResponseSchema() as { required: string[]; properties: Record<string, { type?: string; items?: { required: string[]; properties: Record<string, { type?: string; items?: { type?: string } }> } }> };
+    expect(schema.required).toEqual(expect.arrayContaining(["imageQuality", "containsFood", "summary", "items"]));
+    expect(schema.properties.summary).toMatchObject({ type: "string" });
+    const item = schema.properties.items!.items!;
+    expect(Object.keys(item.properties)[0]).toBe("box_2d"); // first, as a hint for Gemini's key order
+    expect(item.required).toContain("box_2d");
+    expect(item.properties.box_2d).toMatchObject({ type: "array", items: { type: "number" } });
+    expect(Object.keys(item.properties)).toEqual(expect.arrayContaining(["label", "confidence", "servingGrams", "per100g", "composite"]));
+    const { requests, provider } = stubbed(() => answer(JSON.stringify(RESULT)));
+    await provider.recognize(IMAGE);
+    const system = JSON.stringify(requests[0]!.body.systemInstruction);
+    expect(system).toContain("box_2d");
+    expect(system).toContain("[ymin, xmin, ymax, xmax]");
+    expect(system).toContain("0-1000");
+    expect(system).toContain("No calorie or nutrition numbers");
+    expect(system).toContain("Never invent food"); // the shared instructions are still there
+  });
+
+  it("the plain-JSON fallback spells out box_2d and summary", async () => {
+    let call = 0;
+    const { requests, provider } = stubbed(() => (++call <= 3 ? json(400, { error: { status: "INVALID_ARGUMENT", message: "nope" } }) : answer(JSON.stringify(RESULT))));
+    await provider.recognize(IMAGE);
+    const last = (requests[3]!.body.systemInstruction as { parts: { text: string }[] }).parts[0]!.text;
+    expect(last).toContain('"summary"');
+    expect(last).toContain('"box_2d"');
+  });
+
+  it("keeps a box and summary the model gave, and an answer without them still passes", async () => {
+    const located = { ...RESULT, summary: "A banana on a table.", items: [{ ...RESULT.items[0]!, box: [100, 200, 600, 700] }] };
+    const { provider } = stubbed(() => answer(JSON.stringify({ ...located, items: [{ box_2d: [100, 200, 600, 700], ...RESULT.items[0]! }] })));
+    expect(await provider.recognize(IMAGE)).toEqual({ ok: true, value: located });
+    const bare = stubbed(() => answer(JSON.stringify(RESULT)));
+    const r = (await bare.provider.recognize(IMAGE)) as unknown as { ok: true; value: Record<string, unknown> & { items: Record<string, unknown>[] } };
+    expect("summary" in r.value).toBe(false);
+    expect("box" in r.value.items[0]!).toBe(false);
   });
 
   it("ignores thought parts and joins the answer text", async () => {
@@ -197,5 +235,52 @@ describe("Gemini food recognition provider", () => {
     const pending = provider.recognize(IMAGE, { signal: controller.signal });
     controller.abort();
     expect(await pending).toMatchObject({ ok: false, code: "network" });
+  });
+});
+
+describe("normaliseRecognition: boxes and summary", () => {
+  const base = { label: "banana", confidence: 0.9, servingGrams: 118, per100g: { kcal: 89, proteinG: 1.1, carbsG: 22.8, fatG: 0.3 } };
+  const run = (box: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    normaliseRecognition({ containsFood: true, ...extra, items: [{ ...base, ...box }] }) as { summary?: string; items: Record<string, unknown>[] };
+
+  it("keeps a valid 0-1000 box from box_2d, box2d or box, rounded", () => {
+    expect(run({ box_2d: [100, 200, 600, 700] }).items[0]!.box).toEqual([100, 200, 600, 700]);
+    expect(run({ box2d: [100.4, 200, 600, 700.6] }).items[0]!.box).toEqual([100, 200, 600, 701]);
+    expect(run({ box: [100, 200, 600, 700] }).items[0]!.box).toEqual([100, 200, 600, 700]);
+    expect(run({ box_2d: ["100", "200", "600", " 700 "] }).items[0]!.box).toEqual([100, 200, 600, 700]); // numbers as strings
+  });
+
+  it("reads a 0-1 box as fractions and converts it", () => {
+    expect(run({ box_2d: [0.1, 0.2, 0.6, 0.7] }).items[0]!.box).toEqual([100, 200, 600, 700]);
+    expect(run({ box_2d: [0, 0.25, 1, 0.75] }).items[0]!.box).toEqual([0, 250, 1000, 750]);
+    expect(run({ box_2d: ["0.1", "0.2", "0.6", "0.7"] }).items[0]!.box).toEqual([100, 200, 600, 700]);
+    // All whole numbers inside 0-1 are NOT fractions: this is a tiny 0-1000 box and is dropped as a speck.
+    expect("box" in run({ box_2d: [0, 0, 1, 1] }).items[0]!).toBe(false);
+  });
+
+  it("drops an invalid box WITHOUT dropping the item, and never leaves an undefined key", () => {
+    for (const bad of [[], [1, 2, 3], [100, 200, 600, 700, 5], [600, 700, 100, 200], [100, 200, 110, 900], ["a", 2, 3, 4], [100, null, 600, 700], "100,200,600,700", { ymin: 1 }, 7, null]) {
+      const out = run({ box_2d: bad });
+      expect(out.items).toHaveLength(1);
+      expect(out.items[0]!.label).toBe("banana");
+      expect("box" in out.items[0]!).toBe(false);
+    }
+    expect(Object.keys(run({}).items[0]!)).not.toContain("box");
+  });
+
+  it("clamps an out-of-range box into the image", () => {
+    expect(run({ box_2d: [-30, -10, 600, 1100] }).items[0]!.box).toEqual([0, 0, 600, 1000]);
+  });
+
+  it("keeps a sanitized summary only, with no undefined key", () => {
+    expect(run({}, { summary: '  "A banana on a table."  ' }).summary).toBe("A banana on a table.");
+    for (const bad of ["About 90 kcal.", "Banana, 118g.", "", "  ", 5, null, "A high-calorie snack."]) expect("summary" in run({}, { summary: bad })).toBe(false);
+    expect("summary" in run({})).toBe(false);
+    expect(run({}, { summary: "x".repeat(400) }).summary!.length).toBeLessThanOrEqual(160);
+  });
+
+  it("does not change what makes an item usable: the kcal rules still drop items", () => {
+    const out = normaliseRecognition({ containsFood: true, items: [{ ...base, box_2d: [100, 200, 600, 700], per100g: { kcal: 950, proteinG: 0, carbsG: 0, fatG: 100 } }, { ...base, box_2d: [100, 200, 600, 700] }] }) as { items: unknown[] };
+    expect(out.items).toHaveLength(1);
   });
 });

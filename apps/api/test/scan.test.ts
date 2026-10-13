@@ -154,6 +154,70 @@ describe("scanning", () => {
   });
 });
 
+describe("where the foods are and what the meal is", () => {
+  const LOCATED: RecognitionResult = {
+    ...MEAL,
+    summary: "  Grilled chicken with rice and greens.  ",
+    items: [food({ box: [300, 60, 700, 440] }), { ...MEAL.items[1]!, box: [700, 440, 300, 60] }, MEAL.items[2]!],
+  };
+  type ViewItem = { id: string; box?: number[] };
+
+  it("returns summary and per-item boxes only when present and valid", async () => {
+    const u = await setup(returning(LOCATED));
+    const created = (await post(u.auth, "/nutrition/scans", scanBody())).json().scan;
+    expect(created.summary).toBe("Grilled chicken with rice and greens.");
+    expect(created.items.map((i: ViewItem) => [i.id, i.box])).toEqual([
+      ["i1", [300, 60, 700, 440]],
+      ["i2", undefined], // an invalid box is dropped, the item stays
+      ["i3", undefined],
+    ]);
+    expect("box" in created.items[1]).toBe(false);
+    const fetched = (await get(u.auth, `/nutrition/scans/${created.id}`)).json().scan;
+    expect(fetched.summary).toBe(created.summary);
+    expect(fetched.items[0].box).toEqual([300, 60, 700, 440]);
+
+    await app.close();
+    const plain = await setup(returning(MEAL));
+    const bare = (await post(plain.auth, "/nutrition/scans", scanBody())).json().scan;
+    expect("summary" in bare).toBe(false);
+    expect(bare.items.every((i: ViewItem) => !("box" in i))).toBe(true);
+  });
+
+  it("an old stored review without the fields still loads and can be confirmed", async () => {
+    const u = await setup(returning(LOCATED));
+    const scan = (await post(u.auth, "/nutrition/scans", scanBody())).json().scan;
+    const row = ctx.db.prepare("SELECT review FROM food_scans WHERE id = ?").get(scan.id) as { review: string };
+    const old = JSON.parse(row.review) as { summary?: string; items: { box?: number[] }[] };
+    delete old.summary;
+    for (const i of old.items) delete i.box;
+    ctx.db.prepare("UPDATE food_scans SET review = ? WHERE id = ?").run(JSON.stringify(old), scan.id);
+    const loaded = (await get(u.auth, `/nutrition/scans/${scan.id}`)).json().scan;
+    expect("summary" in loaded).toBe(false);
+    expect(loaded.items.map((i: ViewItem) => i.id)).toEqual(["i1", "i2", "i3"]);
+    expect(loaded.items.every((i: ViewItem) => !("box" in i))).toBe(true);
+    const res = await post(u.auth, `/nutrition/scans/${scan.id}/confirm`, confirmBody([{ itemId: "i1" }, { itemId: "i2" }, { itemId: "i3", optionKey: "alt1" }]));
+    expect(res.statusCode).toBe(201);
+    expect(res.json().scan.logs).toHaveLength(3);
+  });
+
+  it("the confirm route is unchanged: a box or summary can't be sent back", async () => {
+    const u = await setup(returning(LOCATED));
+    const scan = (await post(u.auth, "/nutrition/scans", scanBody())).json().scan;
+    const url = `/nutrition/scans/${scan.id}/confirm`;
+    const rest = [{ itemId: "i2" }, { itemId: "i3", optionKey: "alt1" }];
+    expect((await post(u.auth, url, confirmBody([{ itemId: "i1", box: [1, 2, 3, 4] }, ...rest]))).statusCode).toBe(400);
+    expect((await post(u.auth, url, confirmBody([{ itemId: "i1" }, ...rest], { summary: "x" }))).statusCode).toBe(400);
+  });
+
+  it("the stored review stays JSON only: boxes and the summary are numbers and text, never the photo", async () => {
+    const u = await setup(returning(LOCATED));
+    const scan = (await post(u.auth, "/nutrition/scans", scanBody())).json().scan;
+    const row = ctx.db.prepare("SELECT * FROM food_scans WHERE id = ?").get(scan.id) as Record<string, unknown>;
+    expect(JSON.stringify(row)).not.toContain(jpegB64.slice(0, 20));
+    expect(String(row.review).length).toBeLessThan(10_000);
+  });
+});
+
 describe("provider failures", () => {
   it.each([
     ["network", 502, true],
@@ -311,6 +375,13 @@ describe("authorization and development fallback", () => {
     const res = await post(u.auth, "/nutrition/scans", scanBody());
     expect(res.statusCode).toBe(201);
     expect(res.json().scan.provider).toEqual({ name: "Development sample (not real recognition)", development: true });
+    // The sample meal carries boxes and a summary so the review screen can be tried without a real recogniser.
+    expect(res.json().scan.summary).toBe("Grilled chicken with white rice and green vegetables.");
+    expect(res.json().scan.items.map((i: { box?: number[] }) => i.box)).toEqual([
+      [300, 60, 700, 440],
+      [320, 480, 720, 880],
+      [60, 300, 300, 700],
+    ]);
     const features = (await get(u.auth, "/system/features")).json().features;
     expect(features.food_scan).toEqual({ available: true });
   });

@@ -58,6 +58,23 @@ export function adsSettings(env: { mode?: string; android?: string; ios?: string
   return { mode: 'off', interstitial: none };
 }
 
+/**
+ * Which pipeline built this app: CI sets EXPO_PUBLIC_BUILD_CHANNEL=preview on preview/** branches.
+ * Anything else (including unset) is the main channel.
+ */
+export function resolveBuildChannel(raw: string | undefined): string {
+  const value = raw?.trim();
+  return value ? value : 'main';
+}
+
+/** Kill switch for the native Android pose camera: on unless EXPO_PUBLIC_POSE_NATIVE is 0/false/off. */
+export function nativePoseEnabled(raw: string | undefined): boolean {
+  const value = raw?.trim().toLowerCase();
+  return !(value === '0' || value === 'false' || value === 'off');
+}
+
+const buildChannel = resolveBuildChannel(process.env.EXPO_PUBLIC_BUILD_CHANNEL);
+
 const api = apiSettings(process.env.EXPO_PUBLIC_API_URL, typeof __DEV__ === 'undefined' ? true : __DEV__);
 if (api.apiProblem && typeof __DEV__ !== 'undefined' && __DEV__) console.warn(`[config] ${api.apiProblem}`);
 
@@ -76,6 +93,12 @@ export const config = {
    * EXPO_PUBLIC_POSE_LITE_MODEL_URL. A self-hosted full model with no lite override means no fallback.
    */
   poseLiteModelUrl: (process.env.EXPO_PUBLIC_POSE_LITE_MODEL_URL ?? (process.env.EXPO_PUBLIC_POSE_MODEL_URL ? null : POSE_MODEL_URLS.lite)) as string | null,
+  /** 'preview' for builds from preview/** branches, 'main' otherwise. */
+  buildChannel,
+  /** Camera diagnostics chip and feed stats: preview builds only, never shown in main builds. */
+  diagnostics: buildChannel === 'preview',
+  /** Use the native Android pose camera when the module is present. EXPO_PUBLIC_POSE_NATIVE=0 turns it off. */
+  nativePose: nativePoseEnabled(process.env.EXPO_PUBLIC_POSE_NATIVE),
   /** Development only: a simulated kitchen scale (never real readings). No real scale integration exists yet. */
   simulatedScale: (typeof __DEV__ === 'undefined' ? true : __DEV__) && process.env.EXPO_PUBLIC_SIMULATED_SCALE === '1',
   ads: adsSettings(

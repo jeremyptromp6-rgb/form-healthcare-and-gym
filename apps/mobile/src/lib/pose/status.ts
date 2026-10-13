@@ -38,6 +38,27 @@ export interface LiveReadout {
   rep: LiveRepState | null;
   /** The set's trace hit its size cap: counting stops until the set is logged. */
   traceFull: boolean;
+  /** The user faces the camera although the exercise is measured side-on (from the stance detector). */
+  stance?: 'front-on' | null;
+  /** Width / height of the video the feed analyses, once known; lets the screen size the feed box. */
+  frameAspect?: number;
+}
+
+/** Preview-build diagnostics: how the live feed is performing (never shown in main builds). */
+export interface PoseDiag {
+  fps: number;
+  inferMs: number | null;
+  /** Result age at draw time (not photon-to-pixel latency). */
+  ageP50: number | null;
+  ageP95: number | null;
+  backend: 'GPU' | 'CPU' | null;
+  variant: 'full' | 'lite' | null;
+  rung: 'mask' | 'capsule' | 'joints' | 'webview' | null;
+  engine: 'native' | 'webview' | 'web';
+  region?: string;
+  view?: string;
+  mirrorX?: boolean;
+  leadMs?: number;
 }
 
 export type CameraAction = 'start' | 'retry' | 'settings';
@@ -50,6 +71,8 @@ export interface CameraScreenModel {
 }
 
 const MANUAL = 'You can still log your sets manually.';
+
+const STANCE_HINT = 'Turn side-on — stand so the camera sees your side, not your front.';
 
 const UNAVAILABLE: Record<Extract<CameraStatus, { kind: 'unavailable' }>['reason'], { title: string; message: string; retry: boolean }> = {
   no_camera: { title: 'No camera found', message: `Connect a camera or use a device with one. ${MANUAL}`, retry: true },
@@ -116,9 +139,10 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
   if (camera.kind === 'interrupted') return { overlay: null, feedback: { message: 'Waiting for the camera to come back…', tone: 'adjust' } };
   if (pose.kind !== 'ready') return { overlay: null, feedback: { message: loadingMessage(pose), tone: 'info' } };
   if (!readout) return { overlay: null, feedback: { message: 'Looking for you…', tone: 'info' } };
-  // Priority: can't see you properly > the latest rep cue > where you are in the movement.
+  // Priority: can't see you properly > set is full > facing the camera > the latest rep cue > where you are in the movement.
   if (!readout.framing.trackable) return { overlay: null, feedback: { message: readout.framing.message, tone: 'adjust' } };
   if (readout.traceFull) return { overlay: null, feedback: { message: 'This set is as long as one set can be — log it to keep counting.', tone: 'adjust' } };
+  if (readout.stance === 'front-on') return { overlay: null, feedback: { message: STANCE_HINT, tone: 'adjust' } };
   const cue = readout.rep?.feedback;
   if (cue) return { overlay: null, feedback: { headline: cue.headline, message: cue.message, tone: cue.tone === 'good' ? 'ready' : 'adjust' } };
   if (readout.rep?.phase === 'unknown') return { overlay: null, feedback: { message: readout.rep.phaseLabel, tone: 'info' } };
@@ -149,4 +173,24 @@ export function cameraErrorStatus(error: unknown): CameraStatus {
 /** The joint the exercise's analyzer measures, for the live readout label. */
 export function jointLabel(joint: 'knee' | 'elbow' | null | undefined): string {
   return joint === 'elbow' ? 'Elbow' : 'Knee';
+}
+
+/**
+ * What the exercise needs the camera to see, for the tracking pill. Names the body parts the
+ * framing check requires instead of claiming "full body" (a curl only needs the upper body).
+ */
+export function trackingLabel(exerciseId: string): string {
+  switch (exerciseId) {
+    case 'push_up':
+      return 'Shoulder to ankle in view';
+    case 'bicep_curl':
+      return 'Arm, shoulder and hip in view';
+    case 'squat':
+    case 'bodyweight_squat':
+    case 'goblet_squat':
+    case 'lunge':
+      return 'Shoulder, hip, knee and ankle in view';
+    default:
+      return 'Your body in view';
+  }
 }

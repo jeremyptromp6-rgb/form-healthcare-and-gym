@@ -318,6 +318,8 @@ export interface FoodScan {
   status: ScanStatus;
   imageQuality: ImageQuality;
   items: ScanReviewItem[];
+  /** A short plain description of the meal, when the recogniser gave one. Absent for older scans. */
+  summary?: string;
   provider: { name: string; development: boolean };
   createdAt: string;
   expiresAt: string;

@@ -1,8 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Children, isValidElement, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Animated, Easing, ImageBackground, Platform, Pressable, RefreshControl, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
+import { Children, isValidElement, useContext, useEffect, useState, type ReactNode, type Ref } from 'react';
+import { Animated, Easing, ImageBackground, Platform, Pressable, RefreshControl, StyleSheet, View, type ImageSourcePropType, type ScrollView, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaInsetsContext, SafeAreaView } from 'react-native-safe-area-context';
 import { useReducedMotion } from '@/lib/a11y';
 import { useActiveLoop } from '@/lib/useActiveLoop';
@@ -29,6 +29,7 @@ export function Screen({
   children,
   refreshing,
   onRefresh,
+  scrollRef,
 }: {
   title: string;
   subtitle?: string;
@@ -37,6 +38,8 @@ export function Screen({
   children: ReactNode;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** Lets a screen scroll itself (e.g. to a card the user tapped). */
+  scrollRef?: Ref<ScrollView>;
 }) {
   // Read directly so a screen rendered outside a provider (tests, previews) still works.
   const insets = useContext(SafeAreaInsetsContext);
@@ -54,6 +57,7 @@ export function Screen({
         <LinearGradient colors={gradients.ambient} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={StyleSheet.absoluteFill} />
       </Animated.View>
       <Animated.ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.scroll, { paddingBottom: space.xxl + space.lg + bottomInset }]}
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}

@@ -66,7 +66,26 @@ export function confirmItems(scan: Pick<FoodScan, 'items'>, state: ReviewState) 
   });
 }
 
-export const CONFIDENCE_LABEL = { high: 'Likely', medium: 'Probably', low: 'Not sure' } as const;
+/** The number shown on an item's card and on its label in the photo: its 1-based place in the scan (0 if it isn't in it). */
+export function itemNumber(scan: Pick<FoodScan, 'items'>, itemId: string): number {
+  return scan.items.findIndex((i) => i.id === itemId) + 1;
+}
+
+/**
+ * How an item's calories split between protein, carbs and fat (4/4/9 kcal per gram), as fractions
+ * that add up to 1; all zero when there is nothing to split. A bar of these is a rough picture of
+ * the meal's make-up, not a measurement.
+ */
+export function macroShares(m: { proteinG: number; carbsG: number; fatG: number }): { protein: number; carbs: number; fat: number } {
+  const part = (g: number, kcalPerG: number) => (Number.isFinite(g) && g > 0 ? g * kcalPerG : 0);
+  const protein = part(m.proteinG, 4);
+  const carbs = part(m.carbsG, 4);
+  const fat = part(m.fatG, 9);
+  const total = protein + carbs + fat;
+  return total > 0 ? { protein: protein / total, carbs: carbs / total, fat: fat / total } : { protein: 0, carbs: 0, fat: 0 };
+}
+
+export const CONFIDENCE_LABEL ={ high: 'Likely', medium: 'Probably', low: 'Not sure' } as const;
 export const ACCURACY_LABEL = {
   reference: 'Nutrition: reference values',
   approximate: 'Nutrition: approximate',

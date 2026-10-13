@@ -16,10 +16,16 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main]
+  # A push to a preview/** branch builds a preview APK straight away (it does not wait for CI) and
+  # publishes it as the separate "android-preview" release, never touching "android-latest".
+  push:
+    branches: ['preview/**']
   workflow_dispatch:
 
+# One build at a time per branch. For main this is always "android-apk-main" (workflow_run reports the
+# branch in head_branch; a manual run on main has ref_name main), so main behaves as before.
 concurrency:
-  group: android-apk
+  group: android-apk-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 # Read-only by default; only the publish job below gets write access.
@@ -29,9 +35,11 @@ permissions:
 jobs:
   apk:
     # workflow_run also fires for pull requests whose branch happens to be called "main" (including
-    # from forks): only a push to main, after green CI, may build.
+    # from forks): only a push to main, after green CI, may build. A push to a preview/** branch (the
+    # only push trigger above) builds directly.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -44,6 +52,14 @@ jobs:
       # production ads. A store build sets EXPO_PUBLIC_ADS_MODE=production plus the AdMob ids as
       # secrets (ADMOB_ANDROID_APP_ID, EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID).
       EXPO_PUBLIC_ADS_MODE: ${{ vars.EXPO_PUBLIC_ADS_MODE || 'test' }}
+      # A preview/** branch build: runs the Kotlin unit tests and turns on the in-app diagnostics. For
+      # workflow_run, ref_name is the default branch, so main builds get "false" / "main".
+      IS_PREVIEW: ${{ startsWith(github.ref_name, 'preview/') }}
+      EXPO_PUBLIC_BUILD_CHANNEL: ${{ startsWith(github.ref_name, 'preview/') && 'preview' || 'main' }}
+      # Which GitHub Release this build is published to. Only a post-CI main build (workflow_run) or
+      # a run on main replaces "android-latest"; a run on any other branch uses "android-preview".
+      # The publish job recomputes the same expression.
+      RELEASE_TAG: ${{ (github.event_name == 'workflow_run' || github.ref_name == 'main') && 'android-latest' || 'android-preview' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -106,6 +122,18 @@ jobs:
           tail -3 android/gradle.properties
           grep jvmargs android/gradle.properties
 
+      # Preview builds only (main is unchanged): run the camera module's Kotlin unit tests on the JVM,
+      # before the slow release build. The output is appended to the same log the failure reporter
+      # below reads. The project listing is informational: it shows the module's real Gradle name if
+      # autolinking ever names it differently from :form-pose-camera.
+      - name: Run the Kotlin unit tests (camera module)
+        if: env.IS_PREVIEW == 'true'
+        working-directory: apps/mobile/android
+        run: |
+          set -o pipefail
+          ./gradlew -q projects --no-daemon 2>&1 | grep -i pose || true
+          ./gradlew :form-pose-camera:testDebugUnitTest --no-daemon --stacktrace -PreactNativeArchitectures=arm64-v8a 2>&1 | tee -a "$RUNNER_TEMP/gradle.log"
+
       - name: Build the release APK
         working-directory: apps/mobile/android
         run: |
@@ -122,7 +150,7 @@ jobs:
           [ -f "$LOG" ] || exit 0
           report() { body=$(cat); body="${body//'%'/'%25'}"; body="${body//$'\n'/'%0A'}"; echo "::error title=$1::${body:0:4000}"; }
           grep -A 25 "What went wrong" "$LOG" | head -80 | report "Gradle: what went wrong"
-          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED|OutOfMemory|Java heap space|GC overhead|defined multiple times|Duplicate class|Caused by" "$LOG" | head -40 | report "Gradle: error lines"
+          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED|OutOfMemory|Java heap space|GC overhead|defined multiple times|Duplicate class|Caused by|FAILED|AssertionError|Test.*>.*FAILED" "$LOG" | head -40 | report "Gradle: error lines"
           # The 60 lines before the failure, without the ads library's banner noise: shows a failing
           # tool's own output (e.g. a node script's error).
           grep -n "FAILURE: Build" "$LOG" | head -1 | cut -d: -f1 | { read -r n; [ -n "$n" ] && head -n "$n" "$LOG" | grep -vE '^\*+$|^$|react-native-google-mobile-ads' | tail -60; } | report "Gradle: before the failure"
@@ -135,7 +163,11 @@ jobs:
           "$APKSIGNER" verify --print-certs "$APK"
           VERSION=$(node -p "require('./apps/mobile/app.json').expo.version")
           mkdir -p out
-          cp "$APK" "out/FORM-${VERSION}-${BUILD_SHA::7}.apk"
+          if [ "$RELEASE_TAG" = "android-preview" ]; then
+            cp "$APK" "out/FORM-preview-${VERSION}-${BUILD_SHA::7}.apk"
+          else
+            cp "$APK" "out/FORM-${VERSION}-${BUILD_SHA::7}.apk"
+          fi
           ls -la out
 
       - uses: actions/upload-artifact@v6
@@ -155,6 +187,10 @@ jobs:
       BUILD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      # The same release decision as in the apk job (kept as the same expression, not passed through
+      # job outputs): android-latest only for a post-CI main build or a run on main.
+      RELEASE_TAG: ${{ (github.event_name == 'workflow_run' || github.ref_name == 'main') && 'android-latest' || 'android-preview' }}
+      BUILD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -162,29 +198,35 @@ jobs:
           path: out
 
       # Atomic update: the release is created only if missing and the new APK is uploaded (replacing
-      # a same-named one) BEFORE the older APKs are removed, so the download link never 404s.
-      - name: Publish as the "android-latest" release
+      # a same-named one) BEFORE the older APKs are removed, so the download link never 404s. The
+      # cleanup only touches FORM-*.apk assets of THIS release (android-latest or android-preview).
+      - name: Publish as the "android-latest" or "android-preview" release
         run: |
           set -eu
           APK=$(ls out/FORM-*.apk | head -1)
           NAME=$(basename "$APK")
-          TITLE="FORM for Android — latest build"
-          NOTES="Built from ${BUILD_SHA::7}. On your Android phone: download the .apk below, open it, and allow installing from your browser if asked. This is a test build signed with a development key, not a Play Store release."
+          if [ "$RELEASE_TAG" = "android-preview" ]; then
+            TITLE="FORM for Android — preview build"
+            NOTES="Preview build from branch ${BUILD_BRANCH} / commit ${BUILD_SHA::7}. It is for testing the in-progress camera and food-scan work and is not the main build. On your Android phone: download the .apk below, open it, and allow installing from your browser if asked. This is a test build signed with a development key, not a Play Store release."
+          else
+            TITLE="FORM for Android — latest build"
+            NOTES="Built from ${BUILD_SHA::7}. On your Android phone: download the .apk below, open it, and allow installing from your browser if asked. This is a test build signed with a development key, not a Play Store release."
+          fi
 
-          gh release view android-latest >/dev/null 2>&1 || \
-            gh release create android-latest --target "$BUILD_SHA" --prerelease --title "$TITLE" --notes "$NOTES"
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --prerelease --title "$TITLE" --notes "$NOTES"
 
-          gh release upload android-latest "$APK" --clobber
-          gh release edit android-latest --prerelease --title "$TITLE" --notes "$NOTES"
+          gh release upload "$RELEASE_TAG" "$APK" --clobber
+          gh release edit "$RELEASE_TAG" --prerelease --title "$TITLE" --notes "$NOTES"
 
           # Point the tag at the built commit (best effort; the release and its assets are already updated).
-          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/android-latest" -f sha="$BUILD_SHA" -F force=true >/dev/null \
-            || echo "::warning::could not move the android-latest tag to ${BUILD_SHA::7}"
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$BUILD_SHA" -F force=true >/dev/null \
+            || echo "::warning::could not move the $RELEASE_TAG tag to ${BUILD_SHA::7}"
 
           # Only now remove the older FORM-*.apk assets.
-          gh release view android-latest --json assets --jq '.assets[].name' | while read -r asset; do
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while read -r asset; do
             case "$asset" in
-              FORM-*.apk) [ "$asset" = "$NAME" ] || gh release delete-asset android-latest "$asset" --yes </dev/null ;;
+              FORM-*.apk) [ "$asset" = "$NAME" ] || gh release delete-asset "$RELEASE_TAG" "$asset" --yes </dev/null ;;
             esac
           done
-          gh release view android-latest --json assets --jq '.assets[] | "\(.name) \(.size)"'
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[] | "\(.name) \(.size)"'

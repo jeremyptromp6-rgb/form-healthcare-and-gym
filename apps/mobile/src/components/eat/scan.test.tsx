@@ -3,10 +3,25 @@ import { fireEvent, render, screen } from '@testing-library/react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator } from 'expo-image-manipulator';
 import { useState } from 'react';
+import ScanMeal from '@/app/(tabs)/eat/scan';
 import { confirmItems, initialReview, itemEstimate, qualityNote, reviewSummary, scanErrorMessage, statusMessage, type ReviewState } from '@/lib/scan';
 import { capturePhoto } from '@/lib/scanCapture';
 import type { FoodScan } from '@/lib/types';
-import { ScanReviewView } from './ScanReviewView';
+import { ScanReviewView, type ScanReviewViewProps } from './ScanReviewView';
+
+const mockCreateScan = jest.fn();
+const mockDiscard = jest.fn();
+const mockBack = jest.fn();
+jest.mock('expo-router', () => ({ router: { push: jest.fn(), replace: jest.fn(), back: () => mockBack() }, useLocalSearchParams: () => ({ meal: 'lunch', date: '2026-10-12' }) }));
+jest.mock('@/lib/features', () => ({ useFeature: () => ({ loading: false, unknown: false, available: true, checking: false, recheck: jest.fn() }) }));
+jest.mock('@/components/eat/FoodPicker', () => ({ FoodPicker: () => null }));
+jest.mock('@/components/pro/ProUpsellFor', () => ({ ProUpsellFor: () => null }));
+jest.mock('@/lib/queries', () => ({
+  useConfirmScan: () => ({ mutate: jest.fn(), isPending: false }),
+  useCreateScan: () => ({ mutate: (...a: unknown[]) => mockCreateScan(...a), isPending: false }),
+  useDiscardScan: () => ({ mutate: (...a: unknown[]) => mockDiscard(...a) }),
+  useUpdateSettings: () => ({ mutate: jest.fn(), isPending: false }),
+}));
 
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: jest.fn(),
@@ -101,7 +116,7 @@ describe('scan review logic', () => {
   });
 });
 
-function Harness({ scan, onConfirm, onPickFood }: { scan: FoodScan; onConfirm: jest.Mock; onPickFood?: jest.Mock }) {
+function Harness({ scan, onConfirm, onPickFood, photo, scrollRef }: { scan: FoodScan; onConfirm: jest.Mock; onPickFood?: jest.Mock; photo?: ScanReviewViewProps['photo']; scrollRef?: ScanReviewViewProps['scrollRef'] }) {
   const [state, setState] = useState(initialReview(scan));
   const [meal, setMeal] = useState<'lunch' | 'dinner' | 'breakfast' | 'snack'>('lunch');
   const [name, setName] = useState('');
@@ -117,6 +132,8 @@ function Harness({ scan, onConfirm, onPickFood }: { scan: FoodScan; onConfirm: j
       onMealName={setName}
       onConfirm={() => onConfirm(state)}
       onRetake={jest.fn()}
+      photo={photo}
+      scrollRef={scrollRef}
     />
   );
 }
@@ -159,6 +176,142 @@ describe('ScanReviewView', () => {
   it('a development fallback says so, loudly', async () => {
     await render(<Harness scan={scanOf({ provider: { name: 'Development sample (not real recognition)', development: true } })} onConfirm={jest.fn()} />);
     expect(screen.getByText(/DEVELOPMENT SAMPLE — this isn’t real food recognition/)).toBeTruthy();
+  });
+});
+
+// Two foods the model located (chicken, rice) and one it could not (greens), plus its one-line summary.
+const BOXED: RecognitionResult = {
+  imageQuality: 'ok',
+  containsFood: true,
+  summary: 'Grilled chicken with rice and greens.',
+  items: [
+    { ...RESULT.items[0]!, box: [300, 60, 700, 440] },
+    { ...RESULT.items[0]!, label: 'White rice', confidence: 0.9, hiddenIngredients: [], per100g: { kcal: 130, proteinG: 2.7, carbsG: 28, fatG: 0.3 }, box: [320, 480, 720, 880] },
+    RESULT.items[1]!,
+  ],
+};
+const PHOTO = { uri: 'file://meal.jpg', width: 1000, height: 750 };
+const boxedScan = (over: Partial<FoodScan> = {}) => scanOf({ summary: BOXED.summary, ...over }, BOXED);
+const chips = () => screen.queryAllByRole('button', { name: /Show details/ });
+
+describe('ScanReviewView: the photo and its labels', () => {
+  it('puts one numbered label on the photo for each located food', async () => {
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.getByLabelText('Your meal photo')).toBeTruthy();
+    expect(chips()).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Item 1: Grilled chicken breast. Show details.' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Item 2: White rice. Show details.' })).toBeTruthy();
+    // The third food was not located: no chip, and its card says so.
+    expect(screen.getAllByText('Not located in the photo')).toHaveLength(1);
+  });
+
+  it('tapping a label highlights its card, and moves the highlight to the next one tapped', async () => {
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.queryByTestId('item-highlight-i2')).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Item 2: White rice. Show details.' }));
+    expect(screen.getByTestId('item-highlight-i2')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Item 1: Grilled chicken breast. Show details.' }));
+    expect(screen.getByTestId('item-highlight-i1')).toBeTruthy();
+    expect(screen.queryByTestId('item-highlight-i2')).toBeNull();
+  });
+
+  it('copes with a screen that can scroll (and one that cannot)', async () => {
+    const scrollRef = { current: { scrollTo: jest.fn(), getInnerViewRef: () => ({}) } } as never;
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} scrollRef={scrollRef} />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Item 1: Grilled chicken breast. Show details.' }));
+    expect(screen.getByTestId('item-highlight-i1')).toBeTruthy();
+  });
+
+  it('removing a food takes its label off the photo; undo brings it back', async () => {
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Remove Grilled chicken breast' }));
+    expect(chips()).toHaveLength(1);
+    await fireEvent.press(screen.getByRole('button', { name: 'Undo' }));
+    expect(chips()).toHaveLength(2);
+  });
+
+  it('a food we are unsure of reads as a question on the photo', async () => {
+    const unsure: RecognitionResult = { ...BOXED, items: [{ ...RESULT.items[1]!, box: [100, 100, 500, 500] }] };
+    await render(<Harness scan={scanOf({}, unsure)} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.getByRole('button', { name: 'Item 1: Greens (not sure). Show details.' })).toBeTruthy();
+    expect(screen.getByText('Greens?')).toBeTruthy();
+  });
+
+  it('shows the AI summary in a card at the top, only when there is one', async () => {
+    const view = await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.getByText('In your photo')).toBeTruthy();
+    expect(screen.getByText('Grilled chicken with rice and greens.')).toBeTruthy();
+    await view.unmount();
+    await render(<Harness scan={scanOf()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.queryByText('In your photo')).toBeNull();
+  });
+
+  it('numbers each card like its label, and splits calories in a bar that screen readers skip', async () => {
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.getByLabelText('Item 3')).toBeTruthy();
+    // The bar is a picture of the numbers written beside it, so it is hidden from accessibility.
+    expect(screen.queryByTestId('macro-bar-i1')).toBeNull();
+    const bar = screen.getByTestId('macro-bar-i1', { includeHiddenElements: true });
+    expect(bar.props.accessibilityElementsHidden).toBe(true);
+    expect(bar.props.importantForAccessibility).toBe('no-hide-descendants');
+    expect(screen.getAllByText(/P .* g · .*C .* g · .*F .* g/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Mostly protein — about \d+% of its calories/)).toBeTruthy();
+    // The estimate is announced with its macros in words.
+    expect(screen.getAllByLabelText(/grams protein, .* grams carbs, .* grams fat/).length).toBeGreaterThan(0);
+  });
+
+  it('with no photo there is no photo section and no "not located" note', async () => {
+    await render(<Harness scan={boxedScan()} onConfirm={jest.fn()} />);
+    expect(screen.queryByLabelText('Your meal photo')).toBeNull();
+    expect(chips()).toHaveLength(0);
+    expect(screen.queryByText('Not located in the photo')).toBeNull();
+  });
+
+  it('when nothing was located it says so once, instead of a note on every card', async () => {
+    await render(<Harness scan={scanOf()} onConfirm={jest.fn()} photo={PHOTO} />);
+    expect(screen.getByLabelText('Your meal photo')).toBeTruthy();
+    expect(chips()).toHaveLength(0);
+    expect(screen.queryByText('Not located in the photo')).toBeNull();
+    expect(screen.getByText(/couldn’t place labels on this photo/)).toBeTruthy();
+  });
+});
+
+describe('the scan screen keeps the photo through the review', () => {
+  const picker = ImagePicker as jest.Mocked<typeof ImagePicker>;
+  const manip = ImageManipulator as jest.Mocked<typeof ImageManipulator>;
+
+  async function reachReview() {
+    picker.requestCameraPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true } as never);
+    picker.launchCameraAsync.mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///photo.jpg', width: 4000, height: 3000 }] } as never);
+    const saveAsync = jest.fn().mockResolvedValue({ base64: 'QUJD', width: 1280, height: 960 });
+    const ctx = { resize: jest.fn(), renderAsync: jest.fn().mockResolvedValue({ saveAsync }) };
+    ctx.resize.mockReturnValue(ctx);
+    manip.manipulate.mockReturnValue(ctx as never);
+    mockCreateScan.mockImplementation((_body: unknown, opts: { onSuccess: (r: { scan: FoodScan }) => void }) => opts.onSuccess({ scan: boxedScan() }));
+    await render(<ScanMeal />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Take photo' }));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Use photo' }));
+    await screen.findByText('Review your meal');
+  }
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('shows the photo with its labels in the review, and keeps it when picking another food', async () => {
+    await reachReview();
+    expect(screen.getByLabelText('Your meal photo')).toBeTruthy();
+    expect(chips()).toHaveLength(2);
+    await fireEvent.press(screen.getAllByRole('radio', { name: 'Other food' })[0]!);
+    await fireEvent.press(await screen.findByRole('button', { name: 'Back to review' }));
+    expect(screen.getByLabelText('Your meal photo')).toBeTruthy();
+    expect(chips()).toHaveLength(2);
+  });
+
+  it('drops the photo when the user retakes', async () => {
+    await reachReview();
+    await fireEvent.press(screen.getByRole('button', { name: 'Retake photo' }));
+    expect(mockDiscard).toHaveBeenCalledWith('s1');
+    expect(screen.queryByLabelText('Your meal photo')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Take photo' })).toBeTruthy();
   });
 });
 

@@ -5,13 +5,14 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { useCameraPermissions } from 'expo-camera';
 import { useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { Dimensions, StyleSheet, Text } from 'react-native';
 import { config } from '@/lib/config';
 import { createPoseProvider, NATIVE_POSE_UNAVAILABLE } from '@/lib/pose/mediapipe';
 import { cameraErrorStatus, cameraScreenModel, loadingMessage, type CameraStatus, type LiveReadout, type PoseStatus } from '@/lib/pose/status';
 import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
+import { diagnosticsLines, PoseDiagnostics } from './PoseDiagnostics';
 import { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
 import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
 import { skeletonPalette } from './skeletonState';
@@ -165,8 +166,12 @@ describe('cameraScreenModel', () => {
   });
 });
 
+/** What the pill says for a squat: the joints the framing check requires, not "full body". */
+const SQUAT_TRACKING = 'Shoulder, hip, knee and ankle in view';
+
 function props(over: Partial<LiveCameraViewProps> = {}): LiveCameraViewProps {
   return {
+    exerciseId: 'bodyweight_squat',
     exerciseName: 'Bodyweight Squat',
     setLabel: 'Set 2 of 3',
     targetLabel: '10–15 reps',
@@ -188,7 +193,7 @@ describe('LiveCameraView', () => {
     await render(<LiveCameraView {...props()} />);
     expect(screen.getByText('Bodyweight Squat')).toBeTruthy();
     expect(screen.getByText('Set 2 of 3 · 10–15 reps')).toBeTruthy();
-    expect(screen.getByText('Full body detected')).toBeTruthy();
+    expect(screen.getByText(SQUAT_TRACKING)).toBeTruthy();
     expect(screen.queryByText('92°')).toBeNull(); // joint angles stay behind the scenes
     expect(screen.queryByText(/fps|ms\b|angle|confidence/i)).toBeNull();
     expect(screen.getByLabelText(/^Verified reps: 0/)).toBeTruthy();
@@ -240,7 +245,7 @@ describe('LiveCameraView', () => {
     await render(<LiveCameraView {...props({ readout: r, model: cameraScreenModel(LIVE, READY, r, false) })} />);
     expect(screen.getByRole('alert')).toBeTruthy();
     expect(screen.getByText('Move farther away so your full body is visible.')).toBeTruthy();
-    expect(screen.queryByText('Full body detected')).toBeNull();
+    expect(screen.queryByText(SQUAT_TRACKING)).toBeNull();
     expect(screen.getByText('Not counting yet')).toBeTruthy();
   });
 
@@ -268,7 +273,7 @@ describe('LiveCameraView', () => {
     expect(p.onEnd).toHaveBeenCalled();
     await rerender(<LiveCameraView {...p} paused model={cameraScreenModel(LIVE, READY, p.readout, true)} />);
     expect(screen.getByText(/The camera is off while paused/)).toBeTruthy();
-    expect(screen.queryByText('Full body detected')).toBeNull(); // nothing stale while paused
+    expect(screen.queryByText(SQUAT_TRACKING)).toBeNull(); // nothing stale while paused
     await fireEvent.press(screen.getAllByRole('button', { name: 'Resume' })[0]!);
     expect(p.onResume).toHaveBeenCalled();
   });
@@ -276,6 +281,100 @@ describe('LiveCameraView', () => {
   it('practice mode says nothing is logged', async () => {
     await render(<LiveCameraView {...props({ setLabel: null })} />);
     expect(screen.getByText('Practice — nothing is logged')).toBeTruthy();
+  });
+
+  it('the tracking pill names what this exercise needs in view, never "full body"', async () => {
+    const { rerender } = await render(<LiveCameraView {...props()} />);
+    expect(screen.getByText('Shoulder, hip, knee and ankle in view')).toBeTruthy();
+    await rerender(<LiveCameraView {...props({ exerciseId: 'bicep_curl' })} />);
+    expect(screen.getByText('Arm, shoulder and hip in view')).toBeTruthy();
+    await rerender(<LiveCameraView {...props({ exerciseId: 'push_up' })} />);
+    expect(screen.getByText('Shoulder to ankle in view')).toBeTruthy();
+    expect(screen.queryByText(/full body/i)).toBeNull();
+  });
+
+  it('keeps every control and readout on the screen together, with the video as the only slot', async () => {
+    const r = readout(null, 172, repState([88]));
+    await render(<LiveCameraView {...props({ readout: r, model: cameraScreenModel(LIVE, READY, r, false), onLogSet: jest.fn() })} />);
+    expect(screen.getByLabelText('Camera preview')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'End camera' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByText('Bodyweight Squat')).toBeTruthy();
+    expect(screen.getByText('Set 2 of 3 · 10–15 reps')).toBeTruthy();
+    expect(screen.getByText('Private · not recorded')).toBeTruthy();
+    expect(screen.getByLabelText('1 verified rep')).toBeTruthy();
+    expect(screen.getByText(SQUAT_TRACKING)).toBeTruthy();
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getByLabelText(/^Verified reps: 1/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Form: /)).toBeTruthy();
+    expect(screen.getByLabelText(/^Range of motion: /)).toBeTruthy();
+    expect(screen.getByText(/1 verified rep · 1 perfect · average range \d+%/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Log set · 1 verified rep' })).toBeTruthy();
+  });
+
+  it('shows the same words on a roomy screen and a tight one (nothing is dropped when it compacts)', async () => {
+    const words = ['Verified reps', 'Form', 'Range of motion', 'Not counting yet', 'After your first rep', 'Private · not recorded', SQUAT_TRACKING];
+    const seen = async (height: number, fontScale: number) => {
+      Dimensions.set({ window: { width: 360, height, scale: 3, fontScale }, screen: { width: 360, height, scale: 3, fontScale } });
+      await render(<LiveCameraView {...props({ onLogSet: jest.fn() })} />);
+      const found = words.filter((w) => screen.queryByText(w));
+      await screen.unmount();
+      return found;
+    };
+    try {
+      const roomy = await seen(844, 1);
+      expect(roomy).toEqual(words);
+      expect(await seen(568, 1)).toEqual(words);
+      expect(await seen(800, 1.5)).toEqual(words);
+    } finally {
+      Dimensions.set({ window: { width: 750, height: 1334, scale: 2, fontScale: 2 }, screen: { width: 750, height: 1334, scale: 2, fontScale: 2 } });
+    }
+  });
+
+  it('shows the diagnostics chip only when it is handed one (main builds hand none)', async () => {
+    const { rerender } = await render(<LiveCameraView {...props()} />);
+    expect(screen.queryByTestId('pose-diagnostics')).toBeNull();
+    const diag = { fps: 27, inferMs: 31, ageP50: 78, ageP95: 120, backend: 'GPU' as const, variant: 'full' as const, rung: 'mask' as const, engine: 'native' as const, leadMs: 60 };
+    await rerender(<LiveCameraView {...props({ diagnostics: <PoseDiagnostics diag={diag} readout={null} /> })} />);
+    expect(screen.getByTestId('pose-diagnostics')).toBeTruthy();
+    expect(screen.getByText('engine native | GPU | full | outline:mask')).toBeTruthy();
+    expect(screen.getByText('fps 27 | infer 31 ms | age p50 78 / p95 120 ms')).toBeTruthy();
+  });
+
+  it('the paused and start states keep the top controls above the state card', async () => {
+    const onEnd = jest.fn();
+    await render(<LiveCameraView {...props({ model: cameraScreenModel({ kind: 'off' }, { kind: 'idle' }, null, false), readout: null, onEnd })} />);
+    await fireEvent.press(screen.getByRole('button', { name: 'End camera' }));
+    expect(onEnd).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+  });
+});
+
+describe('PoseDiagnostics', () => {
+  const native = { fps: 27, inferMs: 31, ageP50: 78, ageP95: 120, backend: 'GPU' as const, variant: 'full' as const, rung: 'mask' as const, engine: 'native' as const, region: '288×640', view: '360×560', mirrorX: true, leadMs: 60 };
+
+  it('prints the native feed the way a screenshot needs it', () => {
+    expect(diagnosticsLines(native, null)).toEqual([
+      'engine native | GPU | full | outline:mask',
+      'fps 27 | infer 31 ms | age p50 78 / p95 120 ms',
+      'region 288×640 | view 360×560 | mirror on | lead 60',
+    ]);
+  });
+
+  it('prints the WebView and web feeds with the readout’s latency, and a blank chip before anything arrives', () => {
+    const web = { fps: 24, inferMs: null, ageP50: null, ageP95: null, backend: 'CPU' as const, variant: null, rung: 'webview' as const, engine: 'webview' as const };
+    expect(diagnosticsLines(web, readout(null))).toEqual(['engine webview | CPU | – | outline:webview', 'fps 24 | latency 19 ms']);
+    expect(diagnosticsLines(null, null)).toEqual(['engine –', 'fps – | latency – ms']);
+    expect(diagnosticsLines(null, readout(null))).toEqual(['engine –', 'fps 28 | latency 19 ms']);
+  });
+
+  it('offers the lead stepper on the native feed only, and reports the choice', async () => {
+    const onLeadChange = jest.fn();
+    const { rerender } = await render(<PoseDiagnostics diag={native} readout={null} leadMs={60} onLeadChange={onLeadChange} />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Overlay lead 90 milliseconds' }));
+    expect(onLeadChange).toHaveBeenCalledWith(90);
+    await rerender(<PoseDiagnostics diag={{ ...native, engine: 'webview' }} readout={null} leadMs={60} onLeadChange={onLeadChange} />);
+    expect(screen.queryByRole('button', { name: /Overlay lead/ })).toBeNull();
   });
 });
 
@@ -611,7 +710,7 @@ describe('skeleton state wiring', () => {
     const r = readout(null, 172, repState([88]));
     await render(<LiveCameraView {...props({ readout: r, model: cameraScreenModel(LIVE, READY, r, false) })} />);
     expect(screen.getByText('Private · not recorded')).toBeTruthy();
-    expect(screen.getByText('Full body detected')).toBeTruthy();
+    expect(screen.getByText(SQUAT_TRACKING)).toBeTruthy();
     expect(screen.getByLabelText('1 verified rep')).toBeTruthy();
     expect(screen.getByRole('alert')).toBeTruthy();
   });

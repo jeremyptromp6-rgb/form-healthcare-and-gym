@@ -11,9 +11,17 @@ import { discardTemp } from './privateFiles';
 
 export const SCAN_MAX_EDGE = 1280;
 
+/**
+ * `width` and `height` are the pixel size of the encoded JPEG, which is exactly what is sent to the
+ * recognition model (upright: the manipulator bakes the orientation in and the JPEG carries no EXIF).
+ * Boxes the model returns are relative to these dimensions. Absent means unknown; the UI then falls
+ * back to the dimensions the image reports when it loads.
+ */
 export type CaptureResult =
-  | { ok: true; image: { uri: string; base64: string } }
+  | { ok: true; image: { uri: string; base64: string; width?: number; height?: number } }
   | { ok: false; reason: 'cancelled' | 'permission_denied' | 'permission_blocked' | 'failed' };
+
+const pixels = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.round(n) : 0);
 
 export async function capturePhoto(source: 'camera' | 'library'): Promise<CaptureResult> {
   try {
@@ -36,7 +44,10 @@ export async function capturePhoto(source: 'camera' | 'library'): Promise<Captur
     discardTemp(saved.uri);
     if (!saved.base64) return { ok: false, reason: 'failed' };
     const base64 = saved.base64.replace(/^data:image\/\w+;base64,/, '');
-    return { ok: true, image: { uri: `data:image/jpeg;base64,${base64}`, base64 } };
+    // The size of the bitmap that was encoded (never the picker's asset size, which can ignore orientation).
+    const width = pixels(saved.width ?? rendered.width);
+    const height = pixels(saved.height ?? rendered.height);
+    return { ok: true, image: { uri: `data:image/jpeg;base64,${base64}`, base64, ...(width && height ? { width, height } : {}) } };
   } catch {
     return { ok: false, reason: 'failed' };
   }

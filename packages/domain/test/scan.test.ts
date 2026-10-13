@@ -9,11 +9,14 @@ import {
   matchCatalogFood,
   resolveScanSelections,
   sanitizeRecognition,
+  sanitizeScanBox,
+  sanitizeSummary,
   ScanSelectionError,
   VERIFIED_FOODS,
   verifiedFood,
   type RecognitionResult,
   type RecognizedFood,
+  type ScanReview,
 } from "../src";
 
 const item = (over: Partial<RecognizedFood> = {}): RecognizedFood => ({
@@ -49,6 +52,84 @@ describe("sanitizing provider output (untrusted input)", () => {
     const many = sanitizeRecognition(result(Array.from({ length: 20 }, (_, i) => item({ label: `Food ${i}`, alternatives: Array.from({ length: 9 }, (_, j) => ({ label: `Alt ${j}`, confidence: 0.1, per100g: { kcal: 50, proteinG: 1, carbsG: 10, fatG: 0 } })) }))));
     expect(many.items).toHaveLength(8);
     expect(many.items[0]!.alternatives).toHaveLength(3);
+  });
+});
+
+describe("food location boxes and the meal summary", () => {
+  it("sanitizeScanBox keeps a valid box, rounds and clamps, and drops everything unusable", () => {
+    expect(sanitizeScanBox([300, 60, 700, 440])).toEqual([300, 60, 700, 440]);
+    expect(sanitizeScanBox([300.4, 59.6, 699.5, 440.2])).toEqual([300, 60, 700, 440]);
+    expect(sanitizeScanBox([-50, -10, 500, 1200])).toEqual([0, 0, 500, 1000]); // out of range is clamped
+    expect(sanitizeScanBox([700, 440, 300, 60])).toBeUndefined(); // swapped corners
+    expect(sanitizeScanBox([300, 60, 300, 440])).toBeUndefined(); // no height
+    expect(sanitizeScanBox([100, 100, 110, 900])).toBeUndefined(); // a sliver
+    expect(sanitizeScanBox([100, 100, 130, 130])).toBeUndefined(); // 30x30 = 900 is a speck
+    expect(sanitizeScanBox([100, 100, 150, 150])).toEqual([100, 100, 150, 150]); // 50x50 = 2500 is the smallest
+    expect(sanitizeScanBox([100, 100, 700])).toBeUndefined(); // wrong length
+    expect(sanitizeScanBox([100, 100, 700, 700, 5])).toBeUndefined();
+    expect(sanitizeScanBox([])).toBeUndefined();
+    expect(sanitizeScanBox([100, "100", 700, 700])).toBeUndefined(); // not numbers
+    expect(sanitizeScanBox([100, Number.NaN, 700, 700])).toBeUndefined();
+    expect(sanitizeScanBox([100, 100, Number.POSITIVE_INFINITY, 700])).toBeUndefined();
+    expect(sanitizeScanBox(null)).toBeUndefined();
+    expect(sanitizeScanBox("300,60,700,440")).toBeUndefined();
+    expect(sanitizeScanBox({ 0: 1, length: 4 })).toBeUndefined();
+  });
+
+  it("sanitizeSummary strips markup, collapses whitespace and quotes, and caps the length", () => {
+    expect(sanitizeSummary('  "Grilled chicken with **rice**"  ')).toBe("Grilled chicken with rice");
+    expect(sanitizeSummary("Rice\n\tand <beans> `on` a plate\u0007")).toBe("Rice and beans on a plate");
+    const long = "Grilled chicken with rice and steamed broccoli, ".repeat(10);
+    const cut = sanitizeSummary(long)!;
+    expect(cut.length).toBeLessThanOrEqual(160);
+    expect(cut.endsWith("…")).toBe(true);
+    expect(cut).not.toMatch(/[\s,]…$/);
+    expect(cut.slice(0, -1)).toMatch(/(broccoli|rice|and|with|chicken|steamed|Grilled)$/); // cut at a word boundary
+    expect(sanitizeSummary("Rice and beans.")).toBe("Rice and beans."); // no ellipsis when nothing was cut
+  });
+
+  it("sanitizeSummary refuses calorie and gram figures, non-strings and near-empty text", () => {
+    expect(sanitizeSummary("About 600 kcal of chicken and rice.")).toBeUndefined();
+    expect(sanitizeSummary("A chicken dish, high in calories.")).toBeUndefined();
+    expect(sanitizeSummary("A bowl with 150g of rice.")).toBeUndefined();
+    expect(sanitizeSummary("A bowl with 150 g of rice.")).toBeUndefined();
+    expect(sanitizeSummary("Two grilled chicken pieces with rice.")).toBe("Two grilled chicken pieces with rice."); // "g" inside words is fine
+    expect(sanitizeSummary(42)).toBeUndefined();
+    expect(sanitizeSummary(undefined)).toBeUndefined();
+    expect(sanitizeSummary("  **  ")).toBeUndefined();
+    expect(sanitizeSummary("ab")).toBeUndefined();
+  });
+
+  it("sanitizeRecognition keeps a valid box and summary, and drops invalid ones WITHOUT dropping the item", () => {
+    const r = sanitizeRecognition(
+      result([item({ label: "Rice", box: [300.2, 60, 700, 440] }), item({ label: "Chicken", box: [700, 440, 300, 60] }), item({ label: "Greens" })], { summary: "  Rice, chicken and greens.  " }),
+    );
+    expect(r.items.map((i) => i.label)).toEqual(["Rice", "Chicken", "Greens"]);
+    expect(r.items[0]!.box).toEqual([300, 60, 700, 440]);
+    expect("box" in r.items[1]!).toBe(false); // no undefined-valued key
+    expect("box" in r.items[2]!).toBe(false);
+    expect(r.summary).toBe("Rice, chicken and greens.");
+    const bad = sanitizeRecognition(result([item()], { summary: "600 kcal" }));
+    expect("summary" in bad).toBe(false);
+    expect("summary" in sanitizeRecognition(result([item()]))).toBe(false);
+  });
+
+  it("buildScanReview passes the box and summary through", () => {
+    const review = buildScanReview(result([item({ label: "Banana", box: [100, 100, 500, 500] }), item({ label: "Apple" })], { summary: "A banana and an apple." }), VERIFIED_FOODS);
+    expect(review.status).toBe("ok");
+    expect(review.summary).toBe("A banana and an apple.");
+    expect(review.items[0]!.box).toEqual([100, 100, 500, 500]);
+    expect("box" in review.items[1]!).toBe(false);
+    const plain = buildScanReview(result([item()]), VERIFIED_FOODS);
+    expect("summary" in plain).toBe(false);
+    expect("box" in plain.items[0]!).toBe(false);
+  });
+
+  it("an old stored review without the fields still loads and resolves", () => {
+    const old = JSON.parse(JSON.stringify(buildScanReview(result([item({ label: "Banana" })]), VERIFIED_FOODS))) as ScanReview;
+    expect(old.summary).toBeUndefined();
+    expect(old.items[0]!.box).toBeUndefined();
+    expect(resolveScanSelections(old, [{ itemId: "i1" }])).toHaveLength(1);
   });
 });
 
@@ -188,5 +269,18 @@ describe("development fallback", () => {
     const b = await dev.recognize({ mimeType: "image/png", data: new Uint8Array([9, 9, 9, 9]) });
     expect(a).toEqual(b); // same sample whatever the image
     expect(buildScanReview((a as { ok: true; value: RecognitionResult }).value, VERIFIED_FOODS).items).toHaveLength(3);
+  });
+
+  it("returns plausible boxes and a summary so the review UI can be tried", async () => {
+    const r = await developmentRecognitionProvider().recognize({ mimeType: "image/jpeg", data: new Uint8Array([1]) });
+    const value = (r as { ok: true; value: RecognitionResult }).value;
+    const review = buildScanReview(value, VERIFIED_FOODS);
+    expect(review.summary).toBe("Grilled chicken with white rice and green vegetables.");
+    expect(review.items.map((i) => i.box)).toEqual([
+      [300, 60, 700, 440],
+      [320, 480, 720, 880],
+      [60, 300, 300, 700],
+    ]);
+    for (const i of review.items) expect(sanitizeScanBox(i.box)).toEqual(i.box);
   });
 });

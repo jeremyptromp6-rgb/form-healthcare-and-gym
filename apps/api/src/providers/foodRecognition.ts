@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { developmentRecognitionProvider, fail, type FoodRecognitionProvider, type ProviderRegistry, type RecognitionResult } from "@form/domain";
+import { developmentRecognitionProvider, fail, sanitizeScanBox, sanitizeSummary, type FoodRecognitionProvider, type ProviderRegistry, type RecognitionResult } from "@form/domain";
 import * as z from "zod/v4";
 import type { AppConfig } from "../config";
 
@@ -25,22 +25,38 @@ export function foodRecognitionFromConfig(config: AppConfig): Partial<ProviderRe
 // No numeric bounds in the schema (structured outputs keep schemas simple); the domain clamps
 // and validates everything afterwards — model output is untrusted input.
 const macros = z.object({ kcal: z.number(), proteinG: z.number(), carbsG: z.number(), fatG: z.number() });
+const quality = z.enum(["ok", "too_dark", "blurry", "too_far", "obstructed"]);
+const itemShape = {
+  label: z.string(),
+  confidence: z.number(),
+  alternatives: z.array(z.object({ label: z.string(), confidence: z.number(), per100g: macros })),
+  servingGrams: z.number(),
+  servingLowGrams: z.number(),
+  servingHighGrams: z.number(),
+  per100g: macros,
+  hiddenIngredients: z.array(z.string()),
+  composite: z.boolean(),
+};
+// Claude's schema: unchanged (it has no location or summary).
 const RecognitionSchema = z.object({
-  imageQuality: z.enum(["ok", "too_dark", "blurry", "too_far", "obstructed"]),
+  imageQuality: quality,
   containsFood: z.boolean(),
-  items: z.array(
-    z.object({
-      label: z.string(),
-      confidence: z.number(),
-      alternatives: z.array(z.object({ label: z.string(), confidence: z.number(), per100g: macros })),
-      servingGrams: z.number(),
-      servingLowGrams: z.number(),
-      servingHighGrams: z.number(),
-      per100g: macros,
-      hiddenIngredients: z.array(z.string()),
-      composite: z.boolean(),
-    }),
-  ),
+  items: z.array(z.object(itemShape)),
+});
+// What Gemini is asked for: the same, plus a one-line summary and each food's box_2d first in the item
+// (an empty array when it can't locate the food). Sent as the response schema only.
+const GeminiRequestSchema = z.object({
+  imageQuality: quality,
+  containsFood: z.boolean(),
+  summary: z.string(),
+  items: z.array(z.object({ box_2d: z.array(z.number()), ...itemShape })),
+});
+// What a Gemini reply is checked against: the fields are optional here, so an answer without them is never rejected for it.
+const GeminiParseSchema = z.object({
+  imageQuality: quality,
+  containsFood: z.boolean(),
+  summary: z.string().optional(),
+  items: z.array(z.object({ ...itemShape, box: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional() })),
 });
 
 const SYSTEM = `You identify foods in a single meal photo for a nutrition-logging app. Your output is shown to the user as an ESTIMATE they review before anything is logged, so be honest about uncertainty rather than precise-sounding.
@@ -60,6 +76,12 @@ For each item:
 - composite: true for a mixed dish.
 
 Never invent food that isn't visible. If you can't tell what something is, still list it with low confidence and alternatives.`;
+
+// Gemini only: where each food is, and a one-line description of the meal.
+const GEMINI_LOCATION = `Also give each item's location and describe the meal:
+- box_2d: the tight bounding box of THIS food in the photo as [ymin, xmin, ymax, xmax], four integers normalized to 0-1000 relative to the whole image (0,0 is the top-left corner). Box the food itself, never the plate, bowl, table or utensils. For a mixed dish, box the whole dish. If you cannot locate it, return an empty array [].
+- summary (top level): one or two short plain sentences, at most 160 characters, naming the meal as a person would, e.g. "Grilled chicken with rice and steamed broccoli." Mention only food you can see. No calorie or nutrition numbers, no health claims, no opinions.`;
+const GEMINI_SYSTEM = `${SYSTEM}\n\n${GEMINI_LOCATION}`;
 
 export function anthropicFoodRecognition(opts: { model: string; effort: AppConfig["foodRecognition"]["effort"]; timeoutMs?: number; client?: Anthropic }): FoodRecognitionProvider {
   const hasCredentials = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
@@ -110,7 +132,7 @@ export function anthropicFoodRecognition(opts: { model: string; effort: AppConfi
   };
 }
 
-/** The recognition schema as plain JSON Schema for Gemini (without $schema / additionalProperties). */
+/** The Gemini request schema as plain JSON Schema (without $schema / additionalProperties). */
 export function geminiResponseSchema(): unknown {
   const strip = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(strip);
@@ -121,7 +143,7 @@ export function geminiResponseSchema(): unknown {
     }
     return v;
   };
-  return strip(z.toJSONSchema(RecognitionSchema));
+  return strip(z.toJSONSchema(GeminiRequestSchema));
 }
 
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -134,7 +156,7 @@ type GeminiResponse = {
 
 /**
  * Google Gemini vision (REST generateContent). Same system prompt, structured output and
- * downstream checks as Claude: the reply must parse against RecognitionSchema or it's treated as
+ * downstream checks as Claude: the reply must parse against GeminiParseSchema or it's treated as
  * unavailable. The key travels in a header, never in the URL.
  */
 /** A stable model tried when the configured one is unknown to the API or out of free-tier quota. */
@@ -171,7 +193,7 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
           headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
           signal: combined,
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: step === OUTPUT_STEPS.length - 1 ? `${SYSTEM}\n\n${JSON_SHAPE}` : SYSTEM }] },
+            systemInstruction: { parts: [{ text: step === OUTPUT_STEPS.length - 1 ? `${GEMINI_SYSTEM}\n\n${JSON_SHAPE}` : GEMINI_SYSTEM }] },
             contents: [
               {
                 role: "user",
@@ -239,7 +261,7 @@ export function geminiFoodRecognition(opts: { model: string; fallbackModel?: str
         return fail("unavailable", candidate.finishReason === "MAX_TOKENS" ? "Food recognition returned an incomplete answer. Try again." : "Food recognition returned an unreadable answer. Try again.");
       }
       // Model output is untrusted: normalised, then it must match the schema; the domain clamps the values after.
-      const checked = RecognitionSchema.safeParse(normaliseRecognition(parsed));
+      const checked = GeminiParseSchema.safeParse(normaliseRecognition(parsed));
       if (!checked.success) {
         note("unexpected answer", usedModel, checked.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
         return fail("unavailable", "Food recognition returned an unexpected answer. Try again.");
@@ -278,7 +300,7 @@ const OUTPUT_STEPS: ((schema: unknown) => Record<string, unknown>)[] = [
 ];
 
 const JSON_SHAPE = `Reply with one JSON object exactly like:
-{"imageQuality":"ok"|"too_dark"|"blurry"|"too_far"|"obstructed","containsFood":true,"items":[{"label":"white rice","confidence":0.8,"alternatives":[{"label":"jasmine rice","confidence":0.1,"per100g":{"kcal":130,"proteinG":2.7,"carbsG":28,"fatG":0.3}}],"servingGrams":150,"servingLowGrams":110,"servingHighGrams":190,"per100g":{"kcal":130,"proteinG":2.7,"carbsG":28,"fatG":0.3},"hiddenIngredients":[],"composite":false}]}`;
+{"imageQuality":"ok"|"too_dark"|"blurry"|"too_far"|"obstructed","containsFood":true,"summary":"White rice on a plate.","items":[{"box_2d":[320,480,720,880],"label":"white rice","confidence":0.8,"alternatives":[{"label":"jasmine rice","confidence":0.1,"per100g":{"kcal":130,"proteinG":2.7,"carbsG":28,"fatG":0.3}}],"servingGrams":150,"servingLowGrams":110,"servingHighGrams":190,"per100g":{"kcal":130,"proteinG":2.7,"carbsG":28,"fatG":0.3},"hiddenIngredients":[],"composite":false}]}`;
 
 const scrub = (s: string) => s.replace(/AIza[0-9A-Za-z_-]{10,}/g, "[key]").replace(/\s+/g, " ").slice(0, 300);
 
@@ -332,6 +354,15 @@ export function normaliseRecognition(raw: unknown): unknown {
     const fromMacros = 4 * m.proteinG + 4 * m.carbsG + 9 * m.fatG;
     return !(fromMacros > m.kcal * 1.25 + 25);
   };
+  // Gemini answers box_2d in 0-1000 as asked, but sometimes 0-1: all four in [0, 1] and at least one fractional is read as 0-1.
+  // An unusable box leaves the item in place without one; it never drops the item.
+  const boxOf = (v: unknown) => {
+    if (!Array.isArray(v) || v.length !== 4) return undefined;
+    const n = v.map(num);
+    if (n.some((x) => x === null)) return undefined;
+    const b = n as number[];
+    return sanitizeScanBox(b.every((x) => x >= 0 && x <= 1) && b.some((x) => !Number.isInteger(x)) ? b.map((x) => x * 1000) : b);
+  };
   const QUALITY = ["ok", "too_dark", "blurry", "too_far", "obstructed"];
   const items = (Array.isArray(r.items) ? r.items : []).flatMap((it: unknown) => {
     const i = (it && typeof it === "object" ? it : {}) as Record<string, unknown>;
@@ -339,6 +370,7 @@ export function normaliseRecognition(raw: unknown): unknown {
     const grams = num(i.servingGrams ?? i.grams);
     const per100g = macros(i.per100g);
     if (!label || grams === null || !per100g || !coherent(per100g)) return [];
+    const box = boxOf(i.box_2d ?? i.box2d ?? i.box);
     return [
       {
         label,
@@ -355,12 +387,15 @@ export function normaliseRecognition(raw: unknown): unknown {
         per100g,
         hiddenIngredients: (Array.isArray(i.hiddenIngredients) ? i.hiddenIngredients : []).filter((h: unknown): h is string => typeof h === "string"),
         composite: i.composite === true,
+        ...(box ? { box } : {}),
       },
     ];
   });
+  const summary = sanitizeSummary(r.summary);
   return {
     imageQuality: typeof r.imageQuality === "string" && QUALITY.includes(r.imageQuality) ? r.imageQuality : "ok",
     containsFood: typeof r.containsFood === "boolean" ? r.containsFood : items.length > 0,
+    ...(summary ? { summary } : {}),
     items,
   };
 }
