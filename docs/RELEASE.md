@@ -94,7 +94,7 @@ TLS). Migrations run at boot, each in a transaction.
 
 **Health:** `GET /health` → `{ ok, schemaVersion }`, 503 if the database can't answer.
 
-**Backups:** schedule `node dist/backup.js --dir $BACKUP_DIR --keep 14` (e.g. hourly) and copy
+**Backups:** on the free plan see “Backups (Litestream + Cloudflare R2)” below. Elsewhere, schedule `node dist/backup.js --dir $BACKUP_DIR --keep 14` (e.g. hourly) and copy
 `BACKUP_DIR` off the machine. Exit 1 = no verified backup — alert on it.
 **Restore:** stop the API → copy a backup over `DATABASE_PATH` → delete `DATABASE_PATH-wal` and `-shm`
 → start the API (migrations bring an older backup forward) → run `node dist/reconcile.js`.
@@ -106,6 +106,69 @@ append-only fixes.
 `unhandled error` (with stack, keyed by the `requestId` the user sees), `client error` (app crash),
 `global daily AI budget reached`, `global daily recognition budget reached`,
 `coach answer rejected by validation`, `account deletion failed and was rolled back`.
+
+## Backups (Litestream + Cloudflare R2)
+
+The free Render plan has no disk: the database is wiped on every sleep, restart and deploy. Litestream
+fixes that: it streams every database change to a **private Cloudflare R2 bucket**, and on each start
+`apps/api/scripts/start.mjs` restores the database from it before the server runs. Data survives sleeps,
+restarts and deploys; up to ~1 second of the latest writes can be lost in a crash. No laptop is involved.
+
+**One-time setup (free; R2's free tier covers this by a wide margin):**
+1. Create a free Cloudflare account → **R2 Object Storage** (a payment method may be requested; the free
+   tier is not charged).
+2. **Create bucket**, e.g. `form-backups`. Leave public access **off** (no public bucket URL, no custom domain).
+3. R2 → **Manage R2 API Tokens** → create a token with **Object Read & Write**, scoped to **that one bucket
+   only** (not "all buckets", not Admin). Copy the **Account ID** (R2 overview page), **Access Key ID** and
+   **Secret Access Key** (shown once).
+4. Render → `form-api` → **Environment** → set `R2_ACCOUNT_ID`, `LITESTREAM_BUCKET` (the bucket name),
+   `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` → save (the service redeploys). Never paste
+   these into chat, git or screenshots. If one leaks, delete the token in Cloudflare and make a new one.
+
+All four must be set. With only some set the server refuses to start (a clear message in the Render log);
+with none set it runs without backups.
+
+**Verify:** `GET /status` shows `"backup": "on"`; the R2 bucket shows a `form/` folder with files within
+seconds of any activity. Then redeploy once and confirm your account and data are still there.
+
+**Restore drill** (do it once before launch): the server restores automatically on every start, so the
+drill is "Render → Manual Deploy → Clear build cache & deploy" (or Restart) and check data persists. To
+restore to a laptop or an earlier moment (needs the `litestream` v0.5.17 binary and the four values in your
+shell, not in git): `litestream restore -config apps/api/litestream.yml -o restored.db -timestamp <RFC3339 time> <DATABASE_PATH>`.
+If the restore fails the server exits and keeps the previous deploy running (Render shows the deploy
+failed); it never starts with an empty database.
+
+**Retention and privacy (Play Store data-safety form):** data is encrypted in transit (TLS) and R2
+encrypts objects at rest. Backups are kept 7 days (`snapshot.retention: 168h` in `apps/api/litestream.yml`),
+so a deleted account disappears from backups within 7 days; say so in the privacy policy. Deletion
+requests are honoured in the live database immediately and in backups within 7 days.
+
+**Deploys overlap (free plan limit):** Render starts the new instance (it restores from R2 and passes its
+health check), switches traffic to it, and only about 60 seconds later sends SIGTERM to the old one
+(https://render.com/docs/deploys, "Zero-downtime deploys"; only a service with a persistent disk skips
+this). Litestream v0.5.17 has no lock or lease for the `replicate` command (its `s3/leaser.go` is a library
+interface, not wired to the CLI or config), and its docs warn that two processes replicating to the same path
+can leave a replica that cannot be restored. In practice the old instance is idle during its last minute, so
+the replica is written by the new one; the exposure is writes the old instance accepts in the few seconds
+between the new instance's restore and the traffic switch. Those writes are not in the new database and are
+lost, and in a rare collision the next start could refuse to restore (the server then never starts empty;
+recover with `litestream restore` as in the Litestream docs, "Multiple applications replicating into
+location can corrupt"). A wait before restoring cannot help, because the old instance is stopped only after
+the new one is healthy. So: **deploy at quiet times** (not while people are logging workouts).
+`maxShutdownDelaySeconds: 60` in `render.yaml` lets the old instance finish its final sync. **For the Play
+Store launch, move to Render Starter with a persistent disk** (`DATABASE_PATH=/var/data/form.db`, see
+`render.yaml`): no overlap, the database lives on the disk, and Litestream stays as the off-machine backup (it
+restores only when the database file is missing).
+
+Other limits: backups protect against restarts and deploys, not against losing the Cloudflare account. To
+upgrade Litestream, edit `VERSION`/`SHA256` in `apps/api/scripts/install-litestream.sh` (checksum from the
+release's `checksums.txt`).
+
+**Keeping the server awake:** `.github/workflows/keep-awake.yml` calls `/health` every ~10 minutes so the
+free server doesn't sleep. It runs only from the default branch (`main`), GitHub pauses scheduled
+workflows after 60 days without repository activity (re-enable in the Actions tab), and an always-awake
+service uses ~744 of Render's 750 free hours a month, so only this one service can stay awake. Check it in
+Actions → "Keep API awake" (Run workflow to test).
 
 ## Release blockers (to reach READY)
 

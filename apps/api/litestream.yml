@@ -1,0 +1,27 @@
+# Litestream (v0.5.x) replicates the SQLite database to a private Cloudflare R2 bucket, continuously.
+# scripts/start.mjs restores from it before the server starts, then runs the server under
+# `litestream replicate`. Values come from environment variables (set in Render, never in git):
+#   DATABASE_PATH             the database file (shared with the server)
+#   R2_ACCOUNT_ID             Cloudflare account id (builds the R2 endpoint)
+#   LITESTREAM_BUCKET         the R2 bucket name
+#   LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY   an R2 API token scoped to that one bucket
+#
+# Up to about one second of writes can be lost in a crash (sync-interval). Backups are kept for
+# 7 days: an account deleted in FORM disappears from the backups within a week.
+
+# One full snapshot a day; a snapshot, and the changes after it, are deleted once older than 7 days.
+snapshot:
+  interval: 24h
+  retention: 168h
+
+dbs:
+  - path: ${DATABASE_PATH}
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: form
+      endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+      region: auto
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+      sync-interval: 1s

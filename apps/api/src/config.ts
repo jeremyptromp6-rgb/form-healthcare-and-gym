@@ -59,6 +59,8 @@ const envSchema = z.object({
   // Published legal documents. Unset means the app shows none — FORM never invents legal text.
   LEGAL_TERMS_URL: z.string().url().startsWith("https://").optional(),
   LEGAL_PRIVACY_URL: z.string().url().startsWith("https://").optional(),
+  // Set by scripts/start.mjs (not by hand) when the database is being replicated to R2 by Litestream.
+  FORM_BACKUP: z.enum(["litestream", "off"]).default("off"),
 });
 
 export interface AppConfig {
@@ -72,6 +74,8 @@ export interface AppConfig {
   stage?: "testing" | "live";
   /** Trusted proxy hops for the client IP in production. Absent counts as 1. */
   trustProxyHops?: number;
+  /** "litestream" when scripts/start.mjs runs the server under Litestream; shown at /status as backup on/off. Absent counts as off. */
+  backup?: "litestream" | "off";
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   rateLimitPerMinute: number;
   foodRecognition: {
@@ -148,6 +152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     tokenTtl: e.TOKEN_TTL,
     stage: e.APP_STAGE,
     trustProxyHops: e.TRUST_PROXY_HOPS,
+    backup: e.FORM_BACKUP,
     logLevel: e.LOG_LEVEL,
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
     foodRecognition: { provider: e.FOOD_RECOGNITION_PROVIDER, model: e.FOOD_RECOGNITION_MODEL, geminiModel: e.GEMINI_FOOD_MODEL, effort: e.FOOD_RECOGNITION_EFFORT, scansPerHour: e.FOOD_SCANS_PER_HOUR, timeoutMs: e.FOOD_RECOGNITION_TIMEOUT_MS, globalPerDay: e.FOOD_SCANS_GLOBAL_PER_DAY },

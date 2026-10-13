@@ -2,13 +2,20 @@
 # In Render: New → Blueprint → pick this repository. Render reads this file, creates the service
 # and generates a JWT secret.
 #
-# TESTING SETUP (free plan): the server sleeps after ~15 minutes without requests (the next
-# request wakes it in about a minute), and free services have no disk — every account, workout
-# and food log is wiped whenever it restarts or redeploys. Fine for trying FORM out; not for
-# real use.
+# FREE PLAN WITH BACKUPS: free services have no disk, so the database is continuously copied to a
+# private Cloudflare R2 bucket by Litestream and restored from it on every start. Data therefore
+# survives sleeps, restarts and deploys; at most about one second of the latest writes can be lost
+# in a crash. Backups are kept for 7 days. Set it up once (docs/RELEASE.md → Backups): paste the four
+# R2 values below into the Render dashboard → Environment. Until all four are set the server
+# refuses to start with a half-configured backup, and with none set it runs WITHOUT backups
+# (/status then shows backup: "off"; data is wiped on restart).
+# The free server also sleeps after ~15 minutes without requests; .github/workflows/keep-awake.yml
+# pings it to prevent that.
+# Deploys overlap the old and new instance for about a minute (docs/RELEASE.md, Backups): deploy at quiet
+# times. A Render Starter service with a disk has no overlap.
 #
-# To keep data (Starter): change `plan` to 0.5c-512mb, uncomment the `disk` block, and set
-# DATABASE_PATH to /var/data/form.db. Render then shows the monthly price before applying.
+# To use a Render disk instead (Starter): change `plan` to 0.5c-512mb, uncomment the `disk` block, and
+# set DATABASE_PATH to /var/data/form.db. Render then shows the monthly price before applying.
 services:
   - type: web
     name: form-api
@@ -16,9 +23,14 @@ services:
     plan: free
     region: oregon
     # devDependencies (esbuild, TypeScript) are needed to build, even with NODE_ENV=production.
-    buildCommand: npm ci --include=dev && npm run build -w @form/api
-    startCommand: npm start -w @form/api
+    buildCommand: npm ci --include=dev && npm run build -w @form/api && sh apps/api/scripts/install-litestream.sh
+    # Restores the database from R2, then runs the server under Litestream (apps/api/scripts/start.mjs).
+    startCommand: node apps/api/scripts/start.mjs
     healthCheckPath: /health
+    # Render stops the old instance with SIGTERM ~60 s after the new one is live; Litestream then does a final
+    # sync (up to 30 s), which the default 30 s shutdown delay could cut short. Both instances exist during
+    # that minute (no switch avoids it on the free plan); see docs/RELEASE.md, Backups.
+    maxShutdownDelaySeconds: 60
     # Deploy a new commit only after GitHub's CI checks pass. The Android APK workflow starts only
     # after CI succeeds (workflow_run), so the slow APK build doesn't hold the API deploy back.
     autoDeployTrigger: checksPass
@@ -34,9 +46,19 @@ services:
       # Signs session tokens: a random 256-bit value Render generates once and keeps.
       - key: JWT_SECRET
         generateValue: true
-      # Free plan: the service's own (temporary) filesystem. Starter: /var/data/form.db on the disk.
+      # Free plan: the service's own (temporary) filesystem, restored from R2 on start. Starter: /var/data/form.db on the disk.
       - key: DATABASE_PATH
         value: ./form.db
+      # Backups: Cloudflare R2 (private bucket) via Litestream. Values are pasted in the Render dashboard,
+      # never committed. The token must be scoped to that one bucket (Object Read & Write).
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: LITESTREAM_BUCKET
+        sync: false
+      - key: LITESTREAM_ACCESS_KEY_ID
+        sync: false
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        sync: false
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
         value: https://form-api-e68m.onrender.com

@@ -139,6 +139,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       version: (process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? "").slice(0, 7) || null,
       // "testing" is a throwaway pre-launch server (sandbox store allowed); anything else is live.
       stage: ctx.config.stage ?? "live",
+      // Whether the database is continuously replicated off the server (a yes/no only, no details).
+      backup: ctx.config.backup === "litestream" ? "on" : "off",
       features: { foodScan: features.food_scan.available, aiCoach: features.ai_coach.available, cameraVerification: features.camera_verification.available },
       foodRecognition: food ? { state: food.state, provider: food.provider, lastFailure: lastRecognitionFailure(ctx) } : null,
     };

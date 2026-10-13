@@ -13,5 +13,8 @@ coverage/
 backups/
 form-github.zip
 
+# Litestream binary installed by apps/api/scripts/install-litestream.sh
+apps/api/bin/
+
 # Local dev test-account passwords (see docs/RELEASE.md Q-24)
 apps/api/seed.example.json

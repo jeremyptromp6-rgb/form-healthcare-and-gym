@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "esbuild src/server.ts src/reconcile.ts src/backup.ts --bundle --platform=node --format=esm --target=node22 --sourcemap --outdir=dist --external:fastify --external:@fastify/* --external:zod",
-    "start": "node --enable-source-maps dist/server.js",
+    "start": "node scripts/start.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "reconcile": "tsx src/reconcile.ts",
