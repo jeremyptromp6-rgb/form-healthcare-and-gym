@@ -81,7 +81,7 @@ export function WorkoutSummaryView({
   const units = useUnits(unitsProp);
   const volume = formatVolume(summary.totals.volumeKg, units);
   const { workout, totals } = summary;
-  const muscles = setsPerMuscle(summary.sets);
+  const muscles = setsPerMuscle(summary.sets.filter((s) => !s.warmup)); // warm-ups don't count
   const byExercise = new Map<string, WorkoutSummaryDetail['sets']>();
   for (const s of summary.sets) byExercise.set(s.name, [...(byExercise.get(s.name) ?? []), s]);
   // A beaten record is a PR worth celebrating; a first value is a baseline to beat next time.
@@ -196,11 +196,14 @@ export function WorkoutSummaryView({
                 {name}
               </AppText>
             </Row>
-            {sets.map((s, i) => (
+            {sets.map((s, i) => {
+              // Warm-ups are listed but not numbered: the working sets count 1, 2, 3.
+              const label = s.warmup ? 'Warm-up' : `Set ${sets.slice(0, i).filter((x) => !x.warmup).length + 1}`;
+              return (
               <Row key={i} gap={space.sm} style={{ paddingVertical: 6, paddingHorizontal: space.sm, borderRadius: 10, backgroundColor: colors.successSoft }}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.success} />
               <AppText variant="caption" color={colors.text} style={{ flex: 1 }}>
-                Set {i + 1}: {s.reps} reps{s.loadKg > 0 ? ` × ${formatLoad(s.loadKg, units)}` : ''}
+                {label}: {s.reps} reps{s.loadKg > 0 ? ` × ${formatLoad(s.loadKg, units)}` : ''}
                 {s.targetReps ? ` · target ${s.targetReps}` : ''}
                 {s.verifiedReps > 0 ? ` · ${s.verifiedReps} verified` : ''}
                 {s.verifiedReps === 0 && verificationNote(s.verificationStatus) ? ` · ${verificationNote(s.verificationStatus)}` : ''}
@@ -208,10 +211,25 @@ export function WorkoutSummaryView({
                 {s.romPercent !== null ? ` · ROM ${s.romPercent}%` : ''}
               </AppText>
               </Row>
-            ))}
+              );
+            })}
           </View>
         ))}
       </Card>
+
+      {workout.notes ? (
+        <Card style={{ gap: space.xs }}>
+          <Row gap={space.sm}>
+            <Ionicons name="create-outline" size={18} color={colors.primary} />
+            <AppText variant="bodyStrong" header>
+              Workout notes
+            </AppText>
+          </Row>
+          <AppText variant="body" color={colors.textMuted}>
+            {workout.notes}
+          </AppText>
+        </Card>
+      ) : null}
 
       {coachNote ? <CoachCard response={coachNote} title="Coach on this session" onAction={onCoachAction} /> : null}
 

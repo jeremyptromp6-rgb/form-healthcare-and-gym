@@ -110,13 +110,13 @@ export function achievementMetrics(db: Db, userId: string, today: string): Achie
   const w = db
     .prepare(
       `SELECT COUNT(DISTINCT w.id) AS workouts, COALESCE(SUM(s.verified_reps), 0) AS reps
-       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id WHERE w.user_id = ? AND w.pain_level <> 'serious'`,
+       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id AND s.warmup = 0 WHERE w.user_id = ? AND w.pain_level <> 'serious'`,
     )
     .get(userId) as { workouts: number; reps: number };
   const goodForm = db
     .prepare(
       `SELECT COUNT(*) AS n FROM verified_reps r JOIN workout_sets s ON s.id = r.set_id JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.pain_level <> 'serious' AND r.form_score >= ?`,
+       WHERE w.user_id = ? AND w.pain_level <> 'serious' AND s.warmup = 0 AND r.form_score >= ?`,
     )
     .get(userId, XP_RULES.goodFormScore) as { n: number };
   // A beaten record (the first value for a metric is a baseline). Consistency records don't count.
@@ -172,7 +172,7 @@ function bodyQuestInput(db: Db, userId: string, today: string): BodyQuestInput {
     .prepare(
       `SELECT w.id, w.local_date AS localDate, w.duration_minutes AS durationMinutes, w.pain_level AS painLevel,
               s.exercise_id AS exerciseId, s.reps, s.verified_reps AS verifiedReps, s.load_kg AS loadKg
-       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id WHERE w.user_id = ? AND w.local_date <= ? ORDER BY w.local_date, s.id`,
+       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id AND s.warmup = 0 WHERE w.user_id = ? AND w.local_date <= ? ORDER BY w.local_date, s.id`,
     )
     .all(userId, today) as { id: string; localDate: string; durationMinutes: number; painLevel: string; exerciseId: string | null; reps: number; verifiedReps: number; loadKg: number }[];
   const byWorkout = new Map<string, BodyQuestInput["workouts"][number]>();
@@ -185,7 +185,7 @@ function bodyQuestInput(db: Db, userId: string, today: string): BodyQuestInput {
     .prepare(
       `SELECT w.local_date AS localDate, w.pain_level AS painLevel, r.form_score AS formScore, r.rom_percent AS romPercent
        FROM verified_reps r JOIN workout_sets s ON s.id = r.set_id JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ?`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND s.warmup = 0`,
     )
     .all(userId, from, today) as BodyQuestInput["verifiedReps"][number][];
   let proteinDays: BodyQuestInput["proteinDays"] = null;

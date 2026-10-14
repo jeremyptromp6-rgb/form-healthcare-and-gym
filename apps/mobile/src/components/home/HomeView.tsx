@@ -18,7 +18,7 @@ import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
-export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak';
+export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak' | 'rank';
 
 export interface HomeViewProps {
   vm: HomeViewModel;
@@ -161,7 +161,7 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
 
       <View style={{ gap: space.md }}>
         <SectionHeader title="Your level" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
-        {vm.progression ? <Level p={vm.progression} /> : <SectionError name="progression" />}
+        {vm.progression ? <Level p={vm.progression} onOpenRank={() => onNavigate('rank')} /> : <SectionError name="progression" />}
       </View>
 
       {vm.errors.includes('recognition') ? (
@@ -503,7 +503,7 @@ function Quests({ daily, weekly }: { daily: QuestProgress[]; weekly: QuestProgre
   );
 }
 
-function Level({ p }: { p: NonNullable<HomeViewModel['progression']> }) {
+function Level({ p, onOpenRank }: { p: NonNullable<HomeViewModel['progression']>; onOpenRank: () => void }) {
   return (
     <Card style={{ gap: space.sm }}>
       <Row gap={space.md}>
@@ -529,6 +529,7 @@ function Level({ p }: { p: NonNullable<HomeViewModel['progression']> }) {
           Includes {p.provisionalXp} XP from today&apos;s food, confirmed when the day ends.
         </AppText>
       ) : null}
+      <SectionAction label="Your rank and standing" onPress={onOpenRank} />
       {p.totalXp > 0 && p.trainWithinDays !== null && p.trainWithinDays <= 2 ? (
         <InlineMessage tone="warning" icon="alert-circle-outline" flat>
           {p.trainWithinDays === 1 ? `Train today to keep Level ${p.level}.` : `Train within 2 days to keep Level ${p.level}.`}

@@ -52,6 +52,7 @@ const mockUpdateMutate = jest.fn();
 const mockPush = jest.fn();
 const mockActionMutate = jest.fn();
 const mockRestMutate = jest.fn();
+const mockNotesMutate = jest.fn();
 const mockCompleteMutate = jest.fn();
 const mockReplace = jest.fn();
 
@@ -69,6 +70,7 @@ jest.mock('@/lib/queries', () => ({
   useUpdateSet: () => ({ mutate: mockUpdateMutate, isPending: false }),
   useSessionAction: () => ({ mutate: mockActionMutate, isPending: false }),
   useStartRest: () => ({ mutate: mockRestMutate }),
+  useSessionNotes: () => ({ mutate: mockNotesMutate, isPending: false }),
   useCompleteSession: () => ({ mutate: mockCompleteMutate, isPending: false }),
   useCoachInsight: () => ({ data: undefined }),
   useCelebrations: () => ({ data: { celebrations: [] } }),
@@ -116,6 +118,36 @@ describe('WorkoutScreen logging', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Increase Reps' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' }));
     expect(logBody(1)).toMatchObject({ exerciseId: 'bicep_curl', reps: 13, loadKg: 12 });
+  });
+
+  it('logs a set marked as a warm-up with warmup: true, and a normal set without the field', async () => {
+    succeed();
+    await render(<WorkoutScreen />);
+    await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
+    expect(screen.getByRole('button', { name: 'Log warm-up set' })).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Log warm-up set' }));
+    expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 12, loadKg: 12, warmup: true });
+    // The fixture session doesn't advance, so the draft is still a warm-up: switch it off. A working set carries no warmup field.
+    await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' }));
+    expect(logBody(1)).not.toHaveProperty('warmup');
+  });
+
+  it('saves the workout notes when the field loses focus, and reports a failure under it', async () => {
+    mockNotesMutate.mockImplementation((_n: unknown, opts: { onSuccess?: () => void }) => opts.onSuccess?.());
+    await render(<WorkoutScreen />);
+    const field = screen.getByLabelText('Workout notes');
+    await fireEvent.changeText(field, '  Felt strong  ');
+    await fireEvent(field, 'blur');
+    expect(mockNotesMutate).toHaveBeenCalledWith('Felt strong', expect.any(Object));
+    // Unchanged text is not saved again.
+    await fireEvent(field, 'blur');
+    expect(mockNotesMutate).toHaveBeenCalledTimes(1);
+    mockNotesMutate.mockImplementation((_n: unknown, opts: { onError?: (e: { kind: string; message: string }) => void }) => opts.onError?.({ kind: 'network', message: 'offline' }));
+    await fireEvent.changeText(field, '');
+    await fireEvent(field, 'blur');
+    expect(mockNotesMutate).toHaveBeenLastCalledWith(null, expect.any(Object));
+    expect(screen.getByText("Couldn't save the notes — check your connection and try again.")).toBeTruthy();
   });
 
   it("logs another exercise from its row with that exercise's own data, then focuses it", async () => {

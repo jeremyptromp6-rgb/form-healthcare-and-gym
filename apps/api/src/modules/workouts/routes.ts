@@ -19,6 +19,7 @@ const setSchema = z
     exerciseId: z.string().regex(/^[a-z0-9_]{1,40}$/),
     reps: z.number().int().min(0).max(200),
     loadKg: z.number().min(0).max(1000).default(0),
+    warmup: z.boolean().optional(),
     trace: traceSchema.optional(),
   })
   .strict();

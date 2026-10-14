@@ -40,6 +40,8 @@ export const qk = {
   alternatives: (mealId: string) => ['meal-plan', 'alternatives', mealId] as const,
   grocery: ['grocery'] as const,
   xpEvents: ['xp-events'] as const,
+  xpHistory: ['xp-events', 'history'] as const,
+  standing: ['standing'] as const,
   achievements: ['achievements'] as const,
   streaks: ['streaks'] as const,
   muscleRanks: (today: string) => ['muscle-ranks', today] as const,
@@ -110,6 +112,10 @@ export const useAchievements = () => useAuthedQuery(qk.achievements, api.achieve
 export const useStreaks = () => useAuthedQuery(qk.streaks, api.streaks);
 /** Muscle ranks. An older server answers 404: no retries, the screen shows a friendly empty state. */
 export const useMuscleRanks = (today = localDateKey()) => useAuthedQuery(qk.muscleRanks(today), (t) => api.muscleRanks(t, today), { retry: 0 });
+/** "Top X% of FORM users". An older server answers 404: no retries, the screen shows a friendly note. */
+export const useStanding = () => useAuthedQuery(qk.standing, api.standing, { retry: 0, staleTime: 60_000 });
+/** Up to the 100 newest XP ledger entries — enough to draw the recent rank-over-time line. */
+export const useXpHistory = () => useAuthedQuery(qk.xpHistory, (t) => api.xpEvents(t, 100));
 export const useBodyQuest = () => useAuthedQuery(qk.bodyQuest, api.bodyQuest);
 export const useCelebrations = () => useAuthedQuery(qk.celebrations, api.celebrations);
 
@@ -492,7 +498,8 @@ export const useStartSession = () =>
 export const useLogSet = (sessionId: string) =>
   useSessionMutation<NewSet, { set: SessionSet; session: WorkoutSession }>((t, body) => api.logSet(t, sessionId, body));
 export const useUpdateSet = (sessionId: string) =>
-  useSessionMutation<{ setId: string; reps?: number; loadKg?: number }, { set: SessionSet; session: WorkoutSession }>((t, { setId, ...patch }) => api.updateSet(t, sessionId, setId, patch));
+  useSessionMutation<{ setId: string; reps?: number; loadKg?: number; warmup?: boolean }, { set: SessionSet; session: WorkoutSession }>((t, { setId, ...patch }) => api.updateSet(t, sessionId, setId, patch));
+export const useSessionNotes = (sessionId: string) => useSessionMutation<string | null>((t, notes) => api.setSessionNotes(t, sessionId, notes));
 export const useDeleteSet = (sessionId: string) => useSessionMutation<string>((t, setId) => api.deleteSet(t, sessionId, setId));
 export const useSessionAction = (sessionId: string) =>
   useSessionMutation<'pause' | 'resume' | 'discard' | 'rest/skip'>((t, action) => api.sessionAction(t, sessionId, action));

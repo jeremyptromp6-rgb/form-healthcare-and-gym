@@ -20,7 +20,7 @@ export function muscleRanks(ctx: AppContext, userId: string, clock: UserClock): 
     .prepare(
       `SELECT s.exercise_id AS exerciseId, s.verified_reps AS verifiedReps
        FROM workout_sets s JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND s.verified_reps > 0 AND w.pain_level <> 'serious'`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND s.warmup = 0 AND s.verified_reps > 0 AND w.pain_level <> 'serious'`,
     )
     .all(userId, from, clock.today) as unknown as RankSet[];
   return { windowDays: RANK_WINDOW_DAYS, from, to: clock.today, ranks: computeMuscleRanks(rows) };

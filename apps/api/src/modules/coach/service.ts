@@ -104,7 +104,7 @@ function trainingInput(db: Db, userId: string, today: string): Pick<CoachContext
       `SELECT w.id, w.local_date AS localDate, w.duration_minutes AS durationMinutes, w.pain_level AS painLevel,
               (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) AS xp,
               s.id AS setId, s.exercise_id AS exerciseId, s.reps, s.verified_reps AS verifiedReps, s.load_kg AS loadKg
-       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id
+       FROM workouts w LEFT JOIN workout_sets s ON s.workout_id = w.id AND s.warmup = 0
        WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? ORDER BY w.local_date DESC, w.created_at DESC, s.id`,
     )
     .all(userId, from, today) as { id: string; localDate: string; durationMinutes: number; painLevel: "none" | "mild" | "serious"; xp: number; setId: number | null; exerciseId: string | null; reps: number; verifiedReps: number; loadKg: number }[];
@@ -112,7 +112,7 @@ function trainingInput(db: Db, userId: string, today: string): Pick<CoachContext
     .prepare(
       `SELECT s.workout_id AS workoutId, s.exercise_id AS exerciseId, r.form_score AS formScore, r.rom_percent AS romPercent, r.issues
        FROM verified_reps r JOIN workout_sets s ON s.id = r.set_id JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious'`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious' AND s.warmup = 0`,
     )
     .all(userId, from, today) as { workoutId: string; exerciseId: string; formScore: number | null; romPercent: number; issues: string }[];
   const nameOf = (id: string) => EXERCISE_BY_ID.get(id)?.name ?? id;

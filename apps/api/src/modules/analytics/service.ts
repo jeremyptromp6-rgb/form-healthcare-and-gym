@@ -184,7 +184,7 @@ function load(db: Db, userId: string, r: DateRange, tz: string) {
     .prepare(
       `SELECT w.local_date AS date, s.exercise_id AS exerciseId, s.load_kg AS loadKg, s.verified_reps AS verifiedReps, s.form_score AS formScore, s.rom_percent AS romPercent
        FROM workout_sets s JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND s.verified_reps > 0 AND w.pain_level <> 'serious'`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND s.warmup = 0 AND s.verified_reps > 0 AND w.pain_level <> 'serious'`,
     )
     .all(userId, r.from, r.to) as unknown as SetRow[];
   const weights = db

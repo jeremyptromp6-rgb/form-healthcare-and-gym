@@ -22,7 +22,7 @@ export function minutesTrainedOn(db: Db, userId: string, localDate: string): num
   const m = (
     db
       .prepare(
-        `SELECT COALESCE(SUM(MAX(w.duration_minutes, (COALESCE((SELECT SUM(s.reps) FROM workout_sets s WHERE s.workout_id = w.id), 0) * 3 + 59) / 60)), 0) AS m
+        `SELECT COALESCE(SUM(MAX(w.duration_minutes, (COALESCE((SELECT SUM(s.reps) FROM workout_sets s WHERE s.workout_id = w.id AND s.warmup = 0), 0) * 3 + 59) / 60)), 0) AS m
          FROM workouts w WHERE w.user_id = ? AND w.local_date = ?`,
       )
       .get(userId, localDate) as { m: number }
@@ -56,6 +56,7 @@ export function insertWorkout(
     localDate: string;
     durationMinutes: number;
     painLevel: PainLevel;
+    notes?: string | null;
     sets: (EvaluatedSet & { targetReps?: number | null })[];
     /** Training already done today (for the daily cap). */
     priorTrainingMinutesToday: number;
@@ -65,13 +66,13 @@ export function insertWorkout(
   const at = w.now.toISOString();
   const priorXpWorkoutsToday = xpWorkoutsOn(db, w.userId, w.localDate);
   db.prepare(
-    `INSERT INTO workouts (id, user_id, client_workout_id, local_date, duration_minutes, pain_level, xp_flags, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(w.id, w.userId, w.clientWorkoutId, w.localDate, w.durationMinutes, w.painLevel, "[]", at);
+    `INSERT INTO workouts (id, user_id, client_workout_id, local_date, duration_minutes, pain_level, xp_flags, created_at, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(w.id, w.userId, w.clientWorkoutId, w.localDate, w.durationMinutes, w.painLevel, "[]", at, w.notes ?? null);
 
   const insertSet = db.prepare(
-    `INSERT INTO workout_sets (workout_id, set_index, exercise_id, reps, verified_reps, verification_status, rom_percent, load_kg, target_reps, form_score, analysis)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workout_sets (workout_id, set_index, exercise_id, reps, verified_reps, verification_status, rom_percent, load_kg, target_reps, form_score, analysis, warmup)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertRep = db.prepare(
     `INSERT INTO verified_reps (set_id, rep_index, duration_ms, min_angle_deg, rom_percent, start_ms, end_ms, peak_angle_deg, form_score, issues)
@@ -82,9 +83,16 @@ export function insertWorkout(
   // Idempotent on (user, type, key); consumed by later progression stages.
   const insertEvent = db.prepare("INSERT OR IGNORE INTO domain_events (user_id, type, key, payload, created_at) VALUES (?, ?, ?, ?, ?)");
 
+  const working = w.sets.filter((s) => !s.warmup);
   const prs: RecordedPr[] = [];
   for (const s of w.sets) {
-    const setId = insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, s.verifiedReps, s.verificationStatus, s.romPercent, s.loadKg, s.targetReps ?? null, s.formScore, s.analysis ? JSON.stringify(s.analysis) : null).lastInsertRowid;
+    // A warm-up set is kept on the record but earns nothing: stored with no verification, no rep rows, no
+    // domain event, no PRs, and every reader of verified work also filters warmup = 0.
+    if (s.warmup) {
+      insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, 0, "not_tracked", null, s.loadKg, s.targetReps ?? null, null, null, 1);
+      continue;
+    }
+    const setId = insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, s.verifiedReps, s.verificationStatus, s.romPercent, s.loadKg, s.targetReps ?? null, s.formScore, s.analysis ? JSON.stringify(s.analysis) : null, 0).lastInsertRowid;
     for (const r of s.verifiedRepDetails) {
       insertRep.run(setId, r.index, r.durationMs, r.minAngleDeg, r.romPercent, r.startMs ?? null, r.endMs ?? null, r.peakAngleDeg ?? null, r.formScore ?? null, JSON.stringify(r.issues ?? []));
     }
@@ -104,11 +112,11 @@ export function insertWorkout(
     prs.push(...recordSetPrs(db, { userId: w.userId, workoutId: w.id, localDate: w.localDate, exerciseId: s.exerciseId, set: { loadKg: s.loadKg, verifiedReps: s.verifiedReps, formScore: s.formScore, romPercent: s.romPercent }, at: w.now }));
   }
   if (w.painLevel !== "serious") {
-    prs.push(...recordWorkoutPrs(db, { userId: w.userId, workoutId: w.id, localDate: w.localDate, verifiedReps: w.sets.reduce((a, s) => a + s.verifiedReps, 0), at: w.now }));
+    prs.push(...recordWorkoutPrs(db, { userId: w.userId, workoutId: w.id, localDate: w.localDate, verifiedReps: working.reduce((a, s) => a + s.verifiedReps, 0), at: w.now }));
   }
 
   const award = workoutXp({
-    sets: w.sets.map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
+    sets: working.map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
     durationMinutes: w.durationMinutes,
     priorTrainingMinutesToday: w.priorTrainingMinutesToday,
     painLevel: w.painLevel,
@@ -123,7 +131,7 @@ export function insertWorkout(
     localDate: w.localDate,
     durationMinutes: w.durationMinutes,
     painLevel: w.painLevel,
-    sets: w.sets.length,
+    sets: working.length,
     reps: award.breakdown.verifiedReps + award.breakdown.unverifiedReps,
     verifiedReps: award.breakdown.verifiedReps,
     personalRecords: prs.map((p) => ({ exerciseId: p.exerciseId, kind: p.kind, value: p.value, status: p.status })),
@@ -136,7 +144,7 @@ export function listWorkouts(db: Db, userId: string, limit: number) {
   return db
     .prepare(
       `SELECT w.id, w.local_date AS localDate, w.duration_minutes AS durationMinutes, w.pain_level AS painLevel,
-              (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) AS xp, w.created_at AS createdAt
+              (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) AS xp, w.created_at AS createdAt, w.notes
        FROM workouts w
        WHERE w.user_id = ? ORDER BY w.created_at DESC LIMIT ?`,
     )

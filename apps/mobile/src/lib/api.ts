@@ -36,6 +36,7 @@ import type {
   AnalyticsRange,
   ProgressAnalytics,
   MuscleRanks,
+  Standing,
   CoachResponse,
   CoachStatus,
   CoachTopic,
@@ -267,6 +268,8 @@ export interface NewSet {
   targetReps?: number;
   targetLoadKg?: number;
   restSeconds?: number;
+  /** A warm-up set: recorded, but earns and counts nothing. */
+  warmup?: boolean;
   /** Camera trace (angles + form features); the server verifies reps, form and ROM from it. */
   trace?: RepTrace;
 }
@@ -337,8 +340,11 @@ export const api = {
   logSet: (token: string, id: string, body: NewSet) =>
     request<{ set: SessionSet; session: WorkoutSession }>(`/workouts/sessions/${id}/sets`, { method: 'POST', body, token }),
   /** Edits a logged set's reps and/or load (kg). The server keeps verification honest: fewer reps can only lower verified reps. */
-  updateSet: (token: string, id: string, setId: string, body: { reps?: number; loadKg?: number }) =>
+  updateSet: (token: string, id: string, setId: string, body: { reps?: number; loadKg?: number; warmup?: boolean }) =>
     request<{ set: SessionSet; session: WorkoutSession }>(`/workouts/sessions/${id}/sets/${setId}`, { method: 'PATCH', body, token }),
+  /** Saves the workout notes (null clears them); the server trims and sanitizes, at most 500 characters. */
+  setSessionNotes: (token: string, id: string, notes: string | null) =>
+    request<{ session: WorkoutSession }>(`/workouts/sessions/${id}`, { method: 'PATCH', body: { notes }, token }),
   deleteSet: (token: string, id: string, setId: string) =>
     request<{ session: WorkoutSession }>(`/workouts/sessions/${id}/sets/${setId}`, { method: 'DELETE', token }),
   sessionAction: (token: string, id: string, action: 'pause' | 'resume' | 'discard' | 'rest/skip') =>
@@ -383,6 +389,7 @@ export const api = {
   bodyQuest: (token: string) => request<{ bodyQuest: BodyQuest; insights: BodyQuestInsights | null; insightsLocked: boolean }>('/body-quest', { token }),
   celebrations: (token: string) => request<{ celebrations: Celebration[] }>('/celebrations', { token }),
   markCelebrationsSeen: (token: string, ids: number[]) => request<{ marked: number }>('/celebrations/seen', { token, method: 'POST', body: { ids } }),
+  standing: (token: string) => request<Standing>('/progress/standing', { token }),
   xpEvents: (token: string, limit = 30) => request<{ events: XpLedgerEntry[] }>(`/xp/events?limit=${limit}`, { token }),
   groceryAction: (token: string, a: GroceryAction) => request<{ list: GroceryListView }>(groceryPath(a), { method: groceryMethod(a), token, ...(groceryBody(a) ? { body: groceryBody(a) } : {}) }),
   updateFood: (token: string, id: string, patch: FoodLogPatch) => request<{ log: FoodLog }>(`/nutrition/logs/${id}`, { method: 'PATCH', body: patch, token }),

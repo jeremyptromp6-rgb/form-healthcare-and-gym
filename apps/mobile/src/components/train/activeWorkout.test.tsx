@@ -373,3 +373,73 @@ describe('ActiveWorkoutView completion animation', () => {
     timing.mockRestore();
   });
 });
+
+describe('ActiveWorkoutView warm-ups, previous and notes', () => {
+  const warm = (reps: number, loadKg: number, id: string) => logged(reps, loadKg, id, { warmup: true });
+
+  it('counts only working sets: warm-ups show W, working sets are numbered 1, 2 and PREVIOUS lines up with them', async () => {
+    const s = session({ exercises: [ex({ loggedSets: [warm(10, 5, 'w'), logged(12, 12, 'a')] })] });
+    await renderView(s);
+    expect(screen.getByText('W')).toBeTruthy();
+    expect(screen.getByLabelText('Set 1 (warm-up) done')).toBeTruthy();
+    expect(screen.getByLabelText('Set 1 done')).toBeTruthy();
+    // Working set 1 lines up with last time's first set (12 × 10), not with the warm-up.
+    expect(screen.getAllByText('12 × 10').length).toBeGreaterThan(0);
+    // Planned sets are working sets: 3 planned + 1 warm-up gives 4 rows (one is the active one).
+    expect(screen.getByRole('button', { name: 'Complete set 2' })).toBeTruthy();
+    expect(screen.getByText('Set 2 of 3 · 8–12 reps @ 12 kg')).toBeTruthy();
+  });
+
+  it('keeps all planned working sets visible when the next set is a warm-up', async () => {
+    await renderView(session({ exercises: [ex()] }), { draft: { reps: 10, loadKg: 5, warmup: true } });
+    expect(screen.getByText('Warm-up set')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Complete warm-up set' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Log warm-up set' })).toBeTruthy();
+    // 3 planned working sets still follow the warm-up row.
+    expect(screen.getAllByText('8–12')).toHaveLength(3);
+  });
+
+  it('marks the next set as a warm-up and carries the flag into the logged draft', async () => {
+    const props = await renderView(session({ exercises: [ex()] }));
+    await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
+    expect(props.onChangeDraft).toHaveBeenCalledWith({ reps: 12, loadKg: 12, warmup: true });
+  });
+
+  it('logs a warm-up with the flag from the row check', async () => {
+    const props = await renderView(session({ exercises: [ex()] }), { draft: { reps: 10, loadKg: 5, warmup: true } });
+    await fireEvent.press(screen.getByRole('button', { name: 'Complete warm-up set' }));
+    expect(props.onLogSet).toHaveBeenCalledWith({ reps: 10, loadKg: 5, warmup: true });
+  });
+
+  it('fills reps and weight from last time in one change when the previous value is tapped', async () => {
+    const props = await renderView(session({ exercises: [ex()] }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Use previous: 12 × 10' }));
+    expect(props.onChangeDraft).toHaveBeenCalledTimes(1);
+    expect(props.onChangeDraft).toHaveBeenCalledWith({ reps: 12, loadKg: 10 });
+  });
+
+  it('sends a warm-up change when a logged set is edited', async () => {
+    const onEditSet = jest.fn();
+    await renderView(session({ exercises: [ex({ loggedSets: [logged(12, 12, 'a')] })] }), { onEditSet });
+    await fireEvent.press(screen.getByRole('button', { name: /^Edit set 1/ }));
+    await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 1' }));
+    expect(onEditSet).toHaveBeenCalledWith('a', { warmup: true }, expect.any(Function));
+  });
+
+  it('offers workout notes only when it can save them, and saves them on blur', async () => {
+    await renderView(session());
+    expect(screen.queryByLabelText('Workout notes')).toBeNull();
+  });
+
+  it('shows the saved notes and saves an edit', async () => {
+    const onSaveNotes = jest.fn((_n: string | null, done: (e?: string | null) => void) => done());
+    await renderView(session({ notes: 'Felt strong' }), { onSaveNotes });
+    const field = screen.getByLabelText('Workout notes');
+    expect(field.props.value).toBe('Felt strong');
+    expect(field.props.maxLength).toBe(500);
+    await fireEvent.changeText(field, 'Felt strong, easy top set');
+    await fireEvent(field, 'blur');
+    expect(onSaveNotes).toHaveBeenCalledWith('Felt strong, easy top set', expect.any(Function));
+  });
+});

@@ -32,7 +32,7 @@ export function exerciseHistory(db: Db, userId: string, before: string): Record<
       `SELECT ws.exercise_id AS exerciseId, w.id AS workoutId, w.local_date AS localDate, w.pain_level AS painLevel, ws.reps, ws.load_kg AS loadKg,
               ws.verified_reps AS verifiedReps, ws.form_score AS formScore, ws.rom_percent AS rom
        FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id
-       WHERE w.user_id = ? AND w.local_date < ?
+       WHERE w.user_id = ? AND w.local_date < ? AND ws.warmup = 0
        ORDER BY w.local_date DESC, w.created_at DESC, ws.set_index ASC
        LIMIT 4000`,
     )
@@ -83,7 +83,7 @@ export function previousPerformance(db: Db, userId: string, opts: { excludeWorko
       `SELECT ws.exercise_id AS exerciseId, w.id AS workoutId, w.local_date AS localDate, w.pain_level AS painLevel,
               ws.reps, ws.load_kg AS loadKg, ws.rom_percent AS rom
        FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id
-       WHERE w.user_id = ? AND w.id != ?
+       WHERE w.user_id = ? AND w.id != ? AND ws.warmup = 0
        ORDER BY w.local_date DESC, w.created_at DESC, ws.set_index ASC
        LIMIT 3000`,
     )

@@ -11,6 +11,7 @@ export default function ProgressStack() {
       <Stack.Screen name="index" options={{ headerShown: false, title: 'Progress' }} />
       <Stack.Screen name="body-quest" options={{ title: 'Body Quest' }} />
       <Stack.Screen name="achievements" options={{ title: 'Achievements' }} />
+      <Stack.Screen name="rank" options={{ title: 'Your rank' }} />
       <Stack.Screen name="streak" options={{ title: 'Streak & Season' }} />
       <Stack.Screen name="analytics" options={{ title: 'Trends' }} />
       <Stack.Screen name="muscles" options={{ title: 'Muscle ranks' }} />

@@ -7,9 +7,12 @@ import { formatLoad, snapLoadKg, type Units } from './units';
  */
 
 /** The exercise to show: the first planned one with sets left, else the last one. -1 when empty. */
+/** Sets that count: warm-up sets are logged and shown but never fill a planned set. */
+export const workingSets = (e: Pick<SessionExercise, 'loggedSets'>) => e.loggedSets.filter((x) => !x.warmup);
+
 export function currentExerciseIndex(s: Pick<WorkoutSession, 'exercises'>): number {
   if (s.exercises.length === 0) return -1;
-  const i = s.exercises.findIndex((e) => e.sets !== null && e.loggedSets.length < e.sets);
+  const i = s.exercises.findIndex((e) => e.sets !== null && workingSets(e).length < e.sets);
   return i === -1 ? s.exercises.length - 1 : i;
 }
 
@@ -30,7 +33,7 @@ export function verificationNote(status: string | null | undefined): string | nu
 }
 
 export function exerciseDone(e: SessionExercise): boolean {
-  return e.sets !== null && e.loggedSets.length >= e.sets;
+  return e.sets !== null && workingSets(e).length >= e.sets;
 }
 
 export function allPlannedDone(s: Pick<WorkoutSession, 'exercises'>): boolean {
@@ -44,8 +47,9 @@ export function allPlannedDone(s: Pick<WorkoutSession, 'exercises'>): boolean {
  * pounds, while a set they logged themselves is repeated exactly.
  */
 export function nextSetDefaults(e: SessionExercise, units: Units = 'metric'): { reps: number; loadKg: number } {
-  const last = e.loggedSets.at(-1);
-  const prev = e.previous?.sets[e.loggedSets.length] ?? e.previous?.sets.at(-1);
+  const working = workingSets(e);
+  const last = working.at(-1);
+  const prev = e.previous?.sets[working.length] ?? e.previous?.sets.at(-1);
   const suggested = e.targetLoadKg ?? prev?.loadKg;
   return {
     reps: last?.reps ?? e.targetReps?.max ?? prev?.reps ?? 10,
@@ -85,7 +89,7 @@ export function formatPrevious(e: Pick<SessionExercise, 'previous'>, units: Unit
 }
 
 export function sessionTotals(s: Pick<WorkoutSession, 'exercises'>) {
-  const sets = s.exercises.flatMap((e) => e.loggedSets);
+  const sets = s.exercises.flatMap(workingSets);
   return {
     sets: sets.length,
     reps: sets.reduce((a, x) => a + x.reps, 0),

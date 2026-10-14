@@ -194,7 +194,7 @@ describe("completion", () => {
     expect(res.statusCode).toBe(201);
     const done = res.json();
     expect(done.duplicate).toBe(false);
-    expect(done.totals).toEqual({ sets: 2, reps: 15, verifiedReps: 5, volumeKg: 120, perfectReps: 5, averageFormScore: 100 });
+    expect(done.totals).toEqual({ sets: 2, warmupSets: 0, reps: 15, verifiedReps: 5, volumeKg: 120, perfectReps: 5, averageFormScore: 100 });
     // 5 verified + 10 recorded reps + completion, plus form and range bonuses on the verified reps.
     expect(done.workout.xp).toBe(Math.floor(5 * 2 + 10 * 0.5 + 25 + 5 * 0.5 + 5 * 0.25));
     expect(done.progress.streak.current).toBe(1);

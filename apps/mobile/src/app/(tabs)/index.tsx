@@ -1,16 +1,18 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { HomeView, type HomeRoute } from '@/components/home/HomeView';
+import { ProWelcomeHost } from '@/components/pro/ProWelcome';
 import { ErrorState, Screen, StateView } from '@/components/ui';
 import { uuid } from '@/lib/dates';
 import { useAddWater, useCoachInsight, useHome, useRefetchOnFocus, useUndoWater } from '@/lib/queries';
 
-const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak'> = {
+const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak' | '/progress/rank'> = {
   train: '/train',
   eat: '/eat',
   progress: '/progress',
   profile: '/profile',
   streak: '/progress/streak',
+  rank: '/progress/rank',
 };
 
 /** Home container: fetches the view model, wires actions and navigation. Rendering lives in HomeView. */
@@ -32,7 +34,8 @@ export default function Home() {
   }
 
   return (
-    <HomeView
+    <>
+      <HomeView
         vm={home.data}
         onNavigate={(r) => router.navigate(ROUTES[r] as Href)}
         onAddWater={(ml) => {
@@ -51,5 +54,8 @@ export default function Home() {
         onOpenCoach={() => router.push('/coach' as Href)}
         onOpenRoute={(route) => router.push(route as Href)}
       />
+      {/* The one-time FORM Pro welcome, once Home is up and nothing else (a celebration, a workout) has the floor. */}
+      <ProWelcomeHost />
+    </>
   );
 }

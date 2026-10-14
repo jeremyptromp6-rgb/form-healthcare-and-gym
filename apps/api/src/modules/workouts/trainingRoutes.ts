@@ -21,12 +21,15 @@ import {
   ownSession,
   pauseSession,
   resumeSession,
+  sanitizeNotes,
   sessionView,
+  setNotes,
   startRest,
   startSession,
 } from "./sessions";
 
 const id = z.object({ id: z.string().uuid() });
+const NOTES_MAX = 500;
 const restSeconds = z.number().int().min(SESSION_LIMITS.restSeconds.min).max(SESSION_LIMITS.restSeconds.max);
 
 // No verifiedReps, romPercent or formScore fields: .strict() rejects them. Only the engine sets those,
@@ -41,6 +44,7 @@ const setBody = z
     targetLoadKg: z.number().min(0).max(1000).optional(),
     trace: traceSchema.optional(),
     restSeconds: restSeconds.optional(),
+    warmup: z.boolean().default(false),
   })
   .strict();
 
@@ -101,9 +105,17 @@ export function trainingRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.patch("/workouts/sessions/:id/sets/:setId", async (req) => {
     const { id: sessionId, setId } = z.object({ id: z.string().uuid(), setId: z.string().uuid() }).parse(req.params);
-    const patch = z.object({ reps: z.number().int().min(0).max(200), loadKg: z.number().min(0).max(1000) }).partial().strict().parse(req.body);
+    const patch = z.object({ reps: z.number().int().min(0).max(200), loadKg: z.number().min(0).max(1000), warmup: z.boolean() }).partial().strict().parse(req.body);
     const set = editSet(ctx, req.user.sub, sessionId, setId, patch);
     return { set, session: sessionView(ctx, ownSession(ctx.db, req.user.sub, sessionId)) };
+  });
+
+  // Workout notes: free text kept with the session and copied to the workout on completion.
+  app.patch("/workouts/sessions/:id", async (req) => {
+    const { id: sessionId } = id.parse(req.params);
+    const { notes } = z.object({ notes: z.string().max(2000).transform(sanitizeNotes).pipe(z.string().max(NOTES_MAX)).nullable() }).strict().parse(req.body);
+    setNotes(ctx, req.user.sub, sessionId, notes);
+    return { session: sessionView(ctx, ownSession(ctx.db, req.user.sub, sessionId)) };
   });
 
   app.delete("/workouts/sessions/:id/sets/:setId", async (req) => {
@@ -159,7 +171,7 @@ export function trainingRoutes(app: FastifyInstance, ctx: AppContext): void {
       .prepare(
         `SELECT w.id AS workoutId, w.local_date AS localDate, ws.load_kg AS loadKg, r.form_score AS formScore, r.rom_percent AS romPercent, r.issues
          FROM verified_reps r JOIN workout_sets ws ON ws.id = r.set_id JOIN workouts w ON w.id = ws.workout_id
-         WHERE w.user_id = ? AND ws.exercise_id = ? AND w.local_date >= ? AND w.pain_level <> 'serious'
+         WHERE w.user_id = ? AND ws.exercise_id = ? AND w.local_date >= ? AND w.pain_level <> 'serious' AND ws.warmup = 0
          ORDER BY w.local_date`,
       )
       .all(req.user.sub, exerciseId, from) as { workoutId: string; localDate: string; loadKg: number; formScore: number | null; romPercent: number | null; issues: string | null }[];
@@ -184,7 +196,7 @@ export function trainingRoutes(app: FastifyInstance, ctx: AppContext): void {
       .prepare(
         `SELECT w.id AS workoutId, w.local_date AS localDate, ws.reps, ws.verified_reps AS verifiedReps, ws.load_kg AS loadKg, ws.rom_percent AS romPercent
          FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id
-         WHERE w.user_id = ? AND ws.exercise_id = ? ORDER BY w.local_date DESC, w.created_at DESC, ws.set_index LIMIT 60`,
+         WHERE w.user_id = ? AND ws.exercise_id = ? AND ws.warmup = 0 ORDER BY w.local_date DESC, w.created_at DESC, ws.set_index LIMIT 60`,
       )
       .all(req.user.sub, exerciseId) as { workoutId: string; localDate: string; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null }[];
     const sessions: { workoutId: string; localDate: string; sets: { reps: number; verifiedReps: number; loadKg: number; romPercent: number | null }[] }[] = [];

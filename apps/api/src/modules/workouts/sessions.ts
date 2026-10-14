@@ -43,6 +43,7 @@ export interface SessionRow {
   completed_at: string | null;
   workout_id: string | null;
   pain_level: PainLevel | null;
+  notes: string | null;
   updated_at: string;
 }
 
@@ -61,6 +62,7 @@ interface SetRow {
   form_score: number | null;
   verified_rep_details: string;
   analysis: string | null;
+  warmup: number;
   created_at: string;
 }
 
@@ -122,6 +124,7 @@ const setView = (r: SetRow) => ({
   romPercent: r.rom_percent,
   formScore: r.form_score,
   quality: r.analysis ? (JSON.parse(r.analysis) as SetAnalysisRecord).quality : null,
+  warmup: r.warmup === 1,
   createdAt: r.created_at,
 });
 
@@ -159,6 +162,7 @@ export function sessionView(ctx: AppContext, s: SessionRow) {
     rest: s.rest_ends_at ? { endsAt: s.rest_ends_at, seconds: s.rest_seconds, remainingSeconds: restRemainingSeconds(new Date(s.rest_ends_at), now) } : null,
     workoutId: s.workout_id,
     completedAt: s.completed_at,
+    notes: s.notes,
     exercises: unique.map((id) => {
       const plan = planned.find((p) => p.exerciseId === id) ?? null;
       const prev = previous[id];
@@ -201,7 +205,7 @@ export function logSet(
   ctx: AppContext,
   userId: string,
   sessionId: string,
-  body: { clientSetId: string; exerciseId: string; reps: number; loadKg: number; targetReps?: number; targetLoadKg?: number; trace?: RepTrace; restSeconds?: number },
+  body: { clientSetId: string; exerciseId: string; reps: number; loadKg: number; targetReps?: number; targetLoadKg?: number; trace?: RepTrace; restSeconds?: number; warmup?: boolean },
 ) {
   const { db } = ctx;
   return transaction(db, () => {
@@ -224,8 +228,8 @@ export function logSet(
     const id = randomUUID();
     db.prepare(
       `INSERT INTO session_sets (id, session_id, client_set_id, exercise_id, set_index, target_reps, target_load_kg, reps, load_kg, verified_reps,
-         verification_status, rom_percent, form_score, verified_rep_details, analysis, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         verification_status, rom_percent, form_score, verified_rep_details, analysis, warmup, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       sessionId,
@@ -242,6 +246,7 @@ export function logSet(
       evaluated.formScore,
       JSON.stringify(evaluated.verifiedRepDetails),
       evaluated.analysis ? JSON.stringify(evaluated.analysis) : null,
+      body.warmup ? 1 : 0,
       now.toISOString(),
       now.toISOString(),
     );
@@ -250,7 +255,7 @@ export function logSet(
   });
 }
 
-export function editSet(ctx: AppContext, userId: string, sessionId: string, setId: string, patch: { reps?: number; loadKg?: number }) {
+export function editSet(ctx: AppContext, userId: string, sessionId: string, setId: string, patch: { reps?: number; loadKg?: number; warmup?: boolean }) {
   const { db } = ctx;
   return transaction(db, () => {
     act(ctx, ownSession(db, userId, sessionId), "edit");
@@ -266,7 +271,7 @@ export function editSet(ctx: AppContext, userId: string, sessionId: string, setI
       analysis = { ...analysis, quality: { ...quality, attemptedReps: analysis.quality.attemptedReps } };
     }
     db.prepare(
-      "UPDATE session_sets SET reps = ?, load_kg = ?, verified_reps = ?, verified_rep_details = ?, rom_percent = ?, form_score = ?, analysis = ?, updated_at = ? WHERE id = ?",
+      "UPDATE session_sets SET reps = ?, load_kg = ?, verified_reps = ?, verified_rep_details = ?, rom_percent = ?, form_score = ?, analysis = ?, warmup = ?, updated_at = ? WHERE id = ?",
     ).run(
       reps,
       patch.loadKg ?? row.load_kg,
@@ -275,6 +280,7 @@ export function editSet(ctx: AppContext, userId: string, sessionId: string, setI
       analysis ? analysis.quality.averageRomPercent : row.rom_percent,
       analysis ? analysis.quality.averageFormScore : row.form_score,
       analysis ? JSON.stringify(analysis) : null,
+      patch.warmup === undefined ? row.warmup : patch.warmup ? 1 : 0,
       ctx.now().toISOString(),
       setId,
     );
@@ -337,6 +343,24 @@ export function resumeSession(ctx: AppContext, userId: string, sessionId: string
   });
 }
 
+/** Workout notes: control and zero-width characters removed, line breaks kept (at most two in a row), trimmed. */
+export function sanitizeNotes(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, "\n")
+    .replace(/(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Replaces the workout notes of an open session (already sanitized); null or empty clears them. */
+export function setNotes(ctx: AppContext, userId: string, sessionId: string, notes: string | null) {
+  transaction(ctx.db, () => {
+    const s = act(ctx, ownSession(ctx.db, userId, sessionId), "notes");
+    ctx.db.prepare("UPDATE workout_sessions SET notes = ?, updated_at = ? WHERE id = ?").run(notes || null, ctx.now().toISOString(), s.id);
+  });
+}
+
 export function discardSession(ctx: AppContext, userId: string, sessionId: string) {
   transaction(ctx.db, () => {
     const s = ownSession(ctx.db, userId, sessionId);
@@ -350,34 +374,38 @@ export function discardSession(ctx: AppContext, userId: string, sessionId: strin
 export function completionSummary(db: Db, userId: string, workoutId: string) {
   const w = db
     .prepare(
-      `SELECT w.id, w.local_date AS localDate, w.duration_minutes AS durationMinutes, w.pain_level AS painLevel, w.xp_flags AS flags, (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) AS xp
+      `SELECT w.id, w.local_date AS localDate, w.duration_minutes AS durationMinutes, w.pain_level AS painLevel, w.notes, w.xp_flags AS flags, (SELECT COALESCE(SUM(e.xp), 0) FROM xp_events e WHERE e.user_id = w.user_id AND e.source = 'workout' AND e.source_key = w.id) AS xp
        FROM workouts w
        WHERE w.id = ? AND w.user_id = ?`,
     )
-    .get(workoutId, userId) as { id: string; localDate: string; durationMinutes: number; painLevel: string; flags: string; xp: number } | undefined;
+    .get(workoutId, userId) as { id: string; localDate: string; durationMinutes: number; painLevel: string; notes: string | null; flags: string; xp: number } | undefined;
   if (!w) throw new HttpError(404, "not_found", "Workout not found");
   const setRows = db
     .prepare(
       `SELECT exercise_id AS exerciseId, set_index AS setIndex, target_reps AS targetReps, reps, verified_reps AS verifiedReps, load_kg AS loadKg,
-              verification_status AS verificationStatus, rom_percent AS romPercent, form_score AS formScore, analysis
+              verification_status AS verificationStatus, rom_percent AS romPercent, form_score AS formScore, analysis, warmup
        FROM workout_sets WHERE workout_id = ? ORDER BY id`,
     )
-    .all(workoutId) as { exerciseId: string; reps: number; verifiedReps: number; loadKg: number; formScore: number | null; analysis: string | null }[];
-  const sets = setRows.map(({ analysis, ...s }) => ({
+    .all(workoutId) as { exerciseId: string; reps: number; verifiedReps: number; loadKg: number; formScore: number | null; analysis: string | null; warmup: number }[];
+  const sets = setRows.map(({ analysis, warmup, ...s }) => ({
     ...s,
+    warmup: warmup === 1,
     name: EXERCISE_BY_ID.get(s.exerciseId)?.name ?? s.exerciseId,
     quality: analysis ? (JSON.parse(analysis) as SetAnalysisRecord).quality : null,
   }));
-  const scored = sets.filter((s) => s.formScore !== null && s.verifiedReps > 0);
+  // Warm-up sets are listed but never counted in any total.
+  const working = setRows.filter((s) => s.warmup === 0);
+  const scored = sets.filter((s) => !s.warmup && s.formScore !== null && s.verifiedReps > 0);
   const prs = db.prepare("SELECT exercise_id AS exerciseId, kind, value, previous, status FROM personal_records WHERE workout_id = ? ORDER BY id").all(workoutId);
   return {
-    workout: { id: w.id, localDate: w.localDate, durationMinutes: w.durationMinutes, painLevel: w.painLevel, xp: w.xp, flags: JSON.parse(w.flags) as string[] },
+    workout: { id: w.id, localDate: w.localDate, durationMinutes: w.durationMinutes, painLevel: w.painLevel, notes: w.notes, xp: w.xp, flags: JSON.parse(w.flags) as string[] },
     totals: {
-      sets: setRows.length,
-      reps: setRows.reduce((a, s) => a + s.reps, 0),
-      verifiedReps: setRows.reduce((a, s) => a + s.verifiedReps, 0),
-      volumeKg: Math.round(setRows.reduce((a, s) => a + s.reps * s.loadKg, 0)),
-      perfectReps: sets.reduce((a, s) => a + (s.quality?.perfectReps ?? 0), 0),
+      sets: working.length,
+      warmupSets: setRows.length - working.length,
+      reps: working.reduce((a, s) => a + s.reps, 0),
+      verifiedReps: working.reduce((a, s) => a + s.verifiedReps, 0),
+      volumeKg: Math.round(working.reduce((a, s) => a + s.reps * s.loadKg, 0)),
+      perfectReps: sets.filter((s) => !s.warmup).reduce((a, s) => a + (s.quality?.perfectReps ?? 0), 0),
       // Rep-weighted average form over camera-verified sets.
       averageFormScore: scored.length
         ? Math.round(scored.reduce((a, s) => a + s.formScore! * s.verifiedReps, 0) / scored.reduce((a, s) => a + s.verifiedReps, 0))
@@ -423,6 +451,7 @@ export function completeSession(ctx: AppContext, userId: string, sessionId: stri
         localDate: s.local_date,
         durationMinutes,
         painLevel,
+        notes: s.notes,
         priorTrainingMinutesToday: minutesTrainedOn(db, userId, s.local_date),
         now,
         sets: rows.map((r, i) => ({
@@ -437,6 +466,7 @@ export function completeSession(ctx: AppContext, userId: string, sessionId: stri
           verifiedRepDetails: JSON.parse(r.verified_rep_details),
           analysis: r.analysis ? JSON.parse(r.analysis) : null,
           targetReps: r.target_reps,
+          warmup: r.warmup === 1,
         })),
       });
     }

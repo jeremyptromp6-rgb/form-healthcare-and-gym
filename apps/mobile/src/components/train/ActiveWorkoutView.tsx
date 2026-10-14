@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseArt } from '@/components/art/ExerciseArt';
-import { AppText, Button, Divider, ExerciseRow, IconButton, InlineMessage, Row, StatStrip } from '@/components/ui';
+import { AppText, Button, Divider, ExerciseRow, Field, IconButton, InlineMessage, Row, StatStrip } from '@/components/ui';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
 import { formatVolume, loadFromDisplay, loadStep, loadToDisplay, loadUnit, snapLoadKg, useUnits, type Units } from '@/lib/units';
 import {
@@ -17,13 +17,18 @@ import {
   nextSetDefaults,
   restRemaining,
   verificationNote,
+  workingSets,
 } from '@/lib/workoutSession';
 import { colors, MAX_CONTENT_WIDTH, radius, space } from '@/theme/tokens';
 import { RestTimerPill } from './RestTimerPill';
 import { SetRow, SetTableHeader } from './SetRow';
 import { Stepper } from './Stepper';
 
-type Draft = { reps: number; loadKg: number };
+/** The next set being entered. `warmup` marks it a warm-up set (absent means a working set). */
+type Draft = { reps: number; loadKg: number; warmup?: boolean };
+
+/** Longest workout note the server keeps. */
+const NOTES_MAX = 500;
 
 export interface ActiveWorkoutViewProps {
   session: WorkoutSession;
@@ -48,7 +53,7 @@ export interface ActiveWorkoutViewProps {
    * Saves new reps and/or load (kg) for a logged set of the focused exercise. `done()` closes the row's editor,
    * `done('message')` keeps it open showing the message. Without it logged rows can't be edited.
    */
-  onEditSet?: (setId: string, patch: { reps?: number; loadKg?: number }, done: (error?: string | null) => void) => void;
+  onEditSet?: (setId: string, patch: { reps?: number; loadKg?: number; warmup?: boolean }, done: (error?: string | null) => void) => void;
   onPause: () => void;
   onResume: () => void;
   onSkipRest: () => void;
@@ -59,6 +64,11 @@ export interface ActiveWorkoutViewProps {
   onOpenCamera?: () => void;
   /** Logs the next set of another exercise straight from its row. Without it those rows are display-only. */
   onLogSetAt?: (exerciseIndex: number, draft: Draft) => void;
+  /**
+   * Saves the workout notes (null clears them). `done()` confirms, `done(message)` shows the message under the field.
+   * Without it the notes field is not offered.
+   */
+  onSaveNotes?: (notes: string | null, done: (error?: string | null) => void) => void;
   /** A pause, resume, rest or delete that failed; shown at the top (and over the pause screen) until the next try. */
   actionError?: string | null;
   /** Display units for loads (loads are stored and passed around in kg). Defaults to the user's setting. */
@@ -145,6 +155,7 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                 const key = draftKey(e);
                 const rowDraft = rowDrafts[key] ?? nextSetDefaults(e, units);
                 const patchRow = (patch: Partial<Draft>) => setRowDrafts((prev) => ({ ...prev, [key]: { ...(prev[key] ?? nextSetDefaults(e, units)), ...patch } }));
+                const patchDraft = (patch: Partial<Draft>) => (focused ? p.onChangeDraft({ ...p.draft, ...patch }) : patchRow(patch));
                 return (
                   <View key={`${e.exerciseId}-${i}`}>
                     {i > 0 ? <Divider /> : null}
@@ -171,12 +182,11 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                         draft={focused ? p.draft : rowDraft}
                         paused={paused}
                         busy={p.logging}
-                        onChangeKg={(loadKg) => (focused ? p.onChangeDraft({ ...p.draft, loadKg }) : patchRow({ loadKg }))}
-                        onChangeReps={(reps) => (focused ? p.onChangeDraft({ ...p.draft, reps }) : patchRow({ reps }))}
+                        onPatch={patchDraft}
                         onComplete={
                           focused
                             ? (values) => {
-                                const d: Draft = { reps: values.reps ?? p.draft.reps, loadKg: e.loadable ? (values.kg ?? p.draft.loadKg) : p.draft.loadKg };
+                                const d: Draft = { reps: values.reps ?? p.draft.reps, loadKg: e.loadable ? (values.kg ?? p.draft.loadKg) : p.draft.loadKg, ...(p.draft.warmup ? { warmup: true } : {}) };
                                 // The row reports each edited field separately, so push the whole set last.
                                 if (d.reps !== p.draft.reps || d.loadKg !== p.draft.loadKg) p.onChangeDraft(d);
                                 p.onLogSet(d);
@@ -186,6 +196,7 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                               : undefined
                         }
                         completeLabel={(n) => (focused ? `Complete set ${n}` : `Log set ${n} of ${e.name}`)}
+                        canMarkWarmup={focused}
                         deleteLabelled={focused}
                         onDeleteSet={p.onDeleteSet}
                         onEditSet={p.onEditSet}
@@ -198,6 +209,8 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
           ) : (
             <InlineMessage tone="info">No exercises in this workout yet.</InlineMessage>
           )}
+
+          {p.onSaveNotes ? <NotesField key={session.id} saved={session.notes ?? ''} onSave={p.onSaveNotes} /> : null}
 
           <Button label="End workout" variant="secondary" icon="flag-outline" onPress={p.onEnd} />
         </ScrollView>
@@ -234,7 +247,7 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
 
 /** The focused exercise: moving art, name, where you are, notes, camera, steppers and the log button. */
 function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWorkoutViewProps; exercise: SessionExercise; paused: boolean; units: Units; showError: boolean }) {
-  const setNumber = exercise.loggedSets.length + 1;
+  const setNumber = workingSets(exercise).length + 1;
   const target = formatTarget(exercise, units);
   const previous = formatPrevious(exercise, units);
   return (
@@ -247,9 +260,7 @@ function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWor
           {exercise.name}
         </AppText>
         <AppText variant="bodyStrong" color={colors.primary}>
-          Set {setNumber}
-          {exercise.sets ? ` of ${exercise.sets}` : ''}
-          {target ? ` · ${target}` : ''}
+          {p.draft.warmup ? 'Warm-up set' : `Set ${setNumber}${exercise.sets ? ` of ${exercise.sets}` : ''}${target ? ` · ${target}` : ''}`}
         </AppText>
         {previous ? (
           <AppText variant="caption" color={colors.textMuted}>
@@ -284,7 +295,7 @@ function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWor
           ) : null}
         </Row>
         {showError ? <InlineMessage tone="danger">{p.logError}</InlineMessage> : null}
-        <Button label={showError ? 'Retry — save this set' : `Log set ${setNumber}`} icon="checkmark" onPress={() => p.onLogSet()} loading={p.logging} disabled={paused} />
+        <Button label={showError ? 'Retry — save this set' : p.draft.warmup ? 'Log warm-up set' : `Log set ${setNumber}`} icon="checkmark" onPress={() => p.onLogSet()} loading={p.logging} disabled={paused} />
       </View>
     </>
   );
@@ -293,6 +304,7 @@ function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWor
 /**
  * One exercise's set table: SET · PREVIOUS · KG · REPS. Logged sets are done rows, the next set is
  * the one active row, the rest of the plan is queued (display-only: sets are appended in order).
+ * Warm-up sets show a W and are not numbered: the working sets count 1, 2, 3, and PREVIOUS lines up with them.
  */
 function SetTable({
   exercise,
@@ -301,10 +313,10 @@ function SetTable({
   draft,
   paused,
   busy,
-  onChangeKg,
-  onChangeReps,
+  onPatch,
   onComplete,
   completeLabel,
+  canMarkWarmup,
   deleteLabelled,
   onDeleteSet,
   onEditSet,
@@ -315,42 +327,55 @@ function SetTable({
   draft: Draft;
   paused: boolean;
   busy?: boolean;
-  onChangeKg: (v: number) => void;
-  onChangeReps: (v: number) => void;
+  /** Changes the next set's draft (several fields at once when PREVIOUS is tapped). */
+  onPatch: (patch: Partial<Draft>) => void;
   onComplete?: (values: { kg: number | null; reps: number | null }) => void;
   completeLabel: (setNumber: number) => string;
+  /** Only the focused exercise lets the next set be marked a warm-up (keeps each switch label unique). */
+  canMarkWarmup: boolean;
   /** Only the focused exercise offers delete (its label is just "Delete set N"), keeping each label unique. */
   deleteLabelled: boolean;
   onDeleteSet: (id: string) => void;
   onEditSet?: ActiveWorkoutViewProps['onEditSet'];
 }) {
   const logged = exercise.loggedSets.length;
+  const loggedWarmups = exercise.loggedSets.filter((s) => s.warmup).length;
   // The focused exercise always has a next set to log (even past the plan); others only while sets remain.
   const showActive = focused || !exerciseDone(exercise);
-  const total = Math.max(exercise.sets ?? 0, logged + (showActive ? 1 : 0));
+  const activeIsWarmup = showActive && !!onComplete && !!draft.warmup;
+  // Planned sets are working sets: warm-ups (logged, or the one being entered) come on top of them.
+  const total = Math.max((exercise.sets ?? 0) + loggedWarmups + (activeIsWarmup ? 1 : 0), logged + (showActive ? 1 : 0));
   if (total === 0) return null;
   const prev = exercise.previous?.sets ?? [];
-  const prevText = (i: number) => (prev[i] ? `${prev[i]!.reps}${prev[i]!.loadKg > 0 ? ` × ${loadToDisplay(prev[i]!.loadKg, units)}` : ''}` : '—');
+  const prevText = (working: number | null) => {
+    const p = working === null ? undefined : prev[working];
+    return p ? `${p.reps}${p.loadKg > 0 ? ` × ${loadToDisplay(p.loadKg, units)}` : ''}` : '—';
+  };
   const targetReps = exercise.targetReps ? (exercise.targetReps.min === exercise.targetReps.max ? String(exercise.targetReps.min) : `${exercise.targetReps.min}–${exercise.targetReps.max}`) : null;
   const targetKg = exercise.targetLoadKg != null ? String(loadToDisplay(snapLoadKg(exercise.targetLoadKg, units), units)) : null;
   const unit = loadUnit(units);
+  // Working and warm-up sets seen so far in the walk down the table.
+  let work = 0;
+  let warm = 0;
   return (
     <View style={{ gap: space.xs }}>
       <SetTableHeader loadable={exercise.loadable} unit={unit} />
       {Array.from({ length: total }, (_, i) => {
         const s = exercise.loggedSets[i];
-        const n = i + 1;
-        // One key per set number, whatever its state: logging set n turns the same SetRow from active to done
+        // One key per row position, whatever its state: logging set n turns the same SetRow from active to done
         // (not an unmount + mount), which is what lets it play its completion animation.
-        const rowKey = `set-${exercise.exerciseId}-${n}`;
+        const rowKey = `set-${exercise.exerciseId}-${i + 1}`;
         if (s) {
+          const isWarmup = !!s.warmup;
+          const n = isWarmup ? ++warm : ++work;
           return (
             <SetRow
               key={rowKey}
               number={n}
+              warmup={isWarmup}
               state="done"
               loadable={exercise.loadable}
-              previous={prevText(i)}
+              previous={prevText(isWarmup ? null : n - 1)}
               unit={unit}
               kg={String(loadToDisplay(s.loadKg, units))}
               reps={String(s.reps)}
@@ -360,10 +385,11 @@ function SetTable({
                 deleteLabelled && onEditSet
                   ? (values, done) => {
                       // Send only what changed; nothing changed means nothing to save.
-                      const patch: { reps?: number; loadKg?: number } = {};
+                      const patch: { reps?: number; loadKg?: number; warmup?: boolean } = {};
                       if (values.reps !== null && values.reps !== s.reps) patch.reps = values.reps;
                       if (exercise.loadable && values.kg !== null && values.kg !== loadToDisplay(s.loadKg, units)) patch.loadKg = loadFromDisplay(values.kg, units);
-                      if (patch.reps === undefined && patch.loadKg === undefined) done();
+                      if (values.warmup !== undefined) patch.warmup = values.warmup;
+                      if (patch.reps === undefined && patch.loadKg === undefined && patch.warmup === undefined) done();
                       else onEditSet(s.id, patch, done);
                     }
                   : undefined
@@ -382,30 +408,72 @@ function SetTable({
         }
         // Without a way to log it (another exercise, no onLogSetAt) the next set is shown, not editable.
         if (i === logged && showActive && onComplete) {
+          const isWarmup = activeIsWarmup;
+          const n = isWarmup ? ++warm : ++work;
+          const last = isWarmup ? undefined : prev[n - 1];
           return (
             <SetRow
               key={rowKey}
               number={n}
+              warmup={isWarmup}
+              onToggleWarmup={canMarkWarmup ? () => onPatch({ warmup: !draft.warmup }) : undefined}
+              onUsePrevious={last ? () => onPatch({ reps: last.reps, ...(exercise.loadable ? { loadKg: last.loadKg } : {}) }) : undefined}
               state="active"
               loadable={exercise.loadable}
-              previous={prevText(i)}
+              previous={prevText(isWarmup ? null : n - 1)}
               kg={null}
               reps={null}
               unit={unit}
               kgValue={loadToDisplay(draft.loadKg, units)}
               repsValue={draft.reps}
-              onChangeKg={(v) => onChangeKg(loadFromDisplay(v, units))}
-              onChangeReps={onChangeReps}
+              onChangeKg={(v) => onPatch({ loadKg: loadFromDisplay(v, units) })}
+              onChangeReps={(reps) => onPatch({ reps })}
               onComplete={onComplete && ((values) => onComplete({ kg: values.kg === null ? null : loadFromDisplay(values.kg, units), reps: values.reps }))}
-              completeLabel={completeLabel(n)}
+              completeLabel={isWarmup ? 'Complete warm-up set' : completeLabel(n)}
               busy={busy}
               disabled={paused}
             />
           );
         }
-        return <SetRow key={rowKey} number={n} state="queued" loadable={exercise.loadable} unit={unit} previous={prevText(i)} kg={targetKg} reps={targetReps} />;
+        const n = ++work;
+        return <SetRow key={rowKey} number={n} state="queued" loadable={exercise.loadable} unit={unit} previous={prevText(n - 1)} kg={targetKg} reps={targetReps} />;
       })}
+      {canMarkWarmup && onComplete ? (
+        <AppText variant="caption" color={colors.textFaint}>
+          Tap the set number to mark a warm-up, or the previous value to reuse it. Warm-ups don&apos;t count towards XP, records or totals.
+        </AppText>
+      ) : null}
     </View>
+  );
+}
+
+/** Free-text notes on the workout. Saved when the field loses focus; the server trims and sanitizes. */
+function NotesField({ saved, onSave }: { saved: string; onSave: NonNullable<ActiveWorkoutViewProps['onSaveNotes']> }) {
+  const [text, setText] = useState(saved);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSaved, setLastSaved] = useState(saved);
+  const commit = () => {
+    const next = text.trim();
+    if (next === lastSaved.trim()) return;
+    setError(null);
+    onSave(next === '' ? null : next, (message) => {
+      if (message) setError(message);
+      else setLastSaved(next);
+    });
+  };
+  return (
+    <Field
+      label="Workout notes"
+      placeholder="How did it feel? Anything to remember next time?"
+      value={text}
+      onChangeText={setText}
+      onBlur={commit}
+      multiline
+      maxLength={NOTES_MAX}
+      textAlignVertical="top"
+      hint={`${text.length} / ${NOTES_MAX}`}
+      error={error ?? undefined}
+    />
   );
 }
 

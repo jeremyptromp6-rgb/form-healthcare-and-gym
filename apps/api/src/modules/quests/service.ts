@@ -48,14 +48,14 @@ export function questMetrics(db: Db, userId: string, from: string, to: string): 
   const verified = db
     .prepare(
       `SELECT COALESCE(SUM(s.verified_reps), 0) AS reps FROM workout_sets s JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious'`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious' AND s.warmup = 0`,
     )
     .get(userId, from, to) as { reps: number };
   // Form Master: verified reps the server scored 85+ (no reps from a serious-pain session count).
   const goodForm = db
     .prepare(
       `SELECT COUNT(*) AS n FROM verified_reps r JOIN workout_sets s ON s.id = r.set_id JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious' AND r.form_score >= ?`,
+       WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious' AND s.warmup = 0 AND r.form_score >= ?`,
     )
     .get(userId, from, to, XP_RULES.goodFormScore) as { n: number };
   const prs = db
@@ -91,7 +91,7 @@ function usedCameraRecently(db: Db, userId: string, today: string): boolean {
   const row = db
     .prepare(
       `SELECT 1 FROM workout_sets s JOIN workouts w ON w.id = s.workout_id
-       WHERE w.user_id = ? AND w.local_date >= ? AND s.verified_reps > 0 LIMIT 1`,
+       WHERE w.user_id = ? AND w.local_date >= ? AND s.warmup = 0 AND s.verified_reps > 0 LIMIT 1`,
     )
     .get(userId, addDays(today, -28));
   return row !== undefined;

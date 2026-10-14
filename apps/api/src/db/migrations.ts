@@ -987,6 +987,18 @@ const V23_FOCUS_AREAS = `
   ALTER TABLE profiles ADD COLUMN focus_areas TEXT CHECK (focus_areas IS NULL OR json_valid(focus_areas));
 `;
 
+/**
+ * Warm-up sets and workout notes. A warm-up set is logged and shown but never counts: not for XP, records,
+ * verified-rep totals, volume/weekly stats or the daily caps (every reader filters `warmup = 0`).
+ * Existing rows are working sets. Notes are the user's free text on a live session, copied to the workout.
+ */
+const V24_WARMUP_NOTES = `
+  ALTER TABLE session_sets ADD COLUMN warmup INTEGER NOT NULL DEFAULT 0 CHECK (warmup IN (0, 1));
+  ALTER TABLE workout_sets ADD COLUMN warmup INTEGER NOT NULL DEFAULT 0 CHECK (warmup IN (0, 1));
+  ALTER TABLE workout_sessions ADD COLUMN notes TEXT;
+  ALTER TABLE workouts ADD COLUMN notes TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1011,4 +1023,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 21, name: "post_workout_ads", up: V21_POST_WORKOUT_ADS },
   { version: 22, name: "provider_usage_events", up: V22_PROVIDER_USAGE_EVENTS },
   { version: 23, name: "focus_areas", up: V23_FOCUS_AREAS },
+  { version: 24, name: "warmup_notes", up: V24_WARMUP_NOTES },
 ];

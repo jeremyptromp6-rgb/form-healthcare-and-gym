@@ -234,6 +234,26 @@ describe('WorkoutSummaryView', () => {
     expect(onCoachAction).toHaveBeenCalledWith('/train/exercise/bicep_curl');
   });
 
+  it('shows the workout notes, lists warm-ups without numbering them, and leaves them out of the muscle count', async () => {
+    const withWarmup = {
+      ...summary,
+      workout: { ...summary.workout, notes: 'Felt strong, top set easy' },
+      sets: [{ ...summary.sets[0]!, warmup: true, reps: 8, loadKg: 5 }, { ...summary.sets[0]!, setIndex: 1 }],
+    };
+    await render(<WorkoutSummaryView summary={withWarmup} />);
+    expect(screen.getByText('Workout notes')).toBeTruthy();
+    expect(screen.getByText('Felt strong, top set easy')).toBeTruthy();
+    expect(screen.getByText('Warm-up: 8 reps × 5 kg · target 12')).toBeTruthy();
+    expect(screen.getByText('Set 1: 10 reps × 12 kg · target 12')).toBeTruthy();
+    // One working set of a bicep curl: "1 set", not 2.
+    expect(screen.getByText('1 set')).toBeTruthy();
+  });
+
+  it('shows no notes card when there are none', async () => {
+    await render(<WorkoutSummaryView summary={summary} />);
+    expect(screen.queryByText('Workout notes')).toBeNull();
+  });
+
   it('summarises XP, totals, PRs and each set with target, verified and ROM', async () => {
     const onDone = jest.fn();
     await render(<WorkoutSummaryView summary={summary} onDone={onDone} />);

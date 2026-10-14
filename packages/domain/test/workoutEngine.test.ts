@@ -50,4 +50,13 @@ describe("Workout Engine", () => {
   it("rejects unknown exercises", () => {
     expect(() => evaluateWorkout({ ...base, sets: [{ exerciseId: "nope", reps: 5, loadKg: 0 }] })).toThrow(DomainValidationError);
   });
+
+  it("keeps warm-up sets out of the XP award", () => {
+    const working = { exerciseId: "push_up", reps: 10, loadKg: 0 };
+    const plain = evaluateWorkout({ ...base, sets: [working] });
+    const withWarmup = evaluateWorkout({ ...base, sets: [{ exerciseId: "push_up", reps: 50, loadKg: 0, warmup: true }, working] });
+    expect(withWarmup.award.xp).toBe(plain.award.xp);
+    expect(withWarmup.sets[0]).toMatchObject({ warmup: true });
+    expect(withWarmup.sets[1]!.warmup).toBeUndefined();
+  });
 });

@@ -253,3 +253,50 @@ describe('RestTimerPill', () => {
     expect(screen.getByLabelText('30 seconds of rest left').props.accessibilityLiveRegion).toBeUndefined();
   });
 });
+
+describe('SetRow warm-ups and previous values', () => {
+  it('shows a W instead of the number on a warm-up row and names it so it never shares a label with a working set', async () => {
+    await render(<SetRow {...base} number={1} warmup state="done" kg="20" reps="10" kgValue={20} repsValue={10} onDelete={jest.fn()} />);
+    expect(screen.getByText('W')).toBeTruthy();
+    expect(screen.queryByText('1')).toBeNull();
+    expect(screen.getByLabelText('Set 1 (warm-up) done')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete set 1 (warm-up)' })).toBeTruthy();
+  });
+
+  it('turns the number into a switch on the active row when the owner handles it', async () => {
+    const onToggleWarmup = jest.fn();
+    await render(<SetRow {...base} number={1} state="active" kgValue={20} repsValue={8} onToggleWarmup={onToggleWarmup} />);
+    const sw = screen.getByRole('switch', { name: 'Warm-up for set 1' });
+    expect(sw.props.accessibilityState).toMatchObject({ checked: false });
+    await fireEvent.press(sw);
+    expect(onToggleWarmup).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no switch on queued rows or without a handler', async () => {
+    await render(<SetRow {...base} state="active" kgValue={20} repsValue={8} />);
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('fills the draft from the previous value when it is tapped on the active row', async () => {
+    const onUsePrevious = jest.fn();
+    await render(<SetRow {...base} state="active" previous="15 × 65" kgValue={20} repsValue={8} onUsePrevious={onUsePrevious} />);
+    await fireEvent.press(screen.getByRole('button', { name: 'Use previous: 15 × 65' }));
+    expect(onUsePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the previous value plain text when there is none, or the row is blocked', async () => {
+    const { rerender } = await render(<SetRow {...base} state="active" previous="—" kgValue={20} repsValue={8} onUsePrevious={jest.fn()} />);
+    expect(screen.queryByRole('button', { name: /Use previous/ })).toBeNull();
+    await rerender(<SetRow {...base} state="active" previous="15 × 65" kgValue={20} repsValue={8} onUsePrevious={jest.fn()} disabled />);
+    expect(screen.queryByRole('button', { name: /Use previous/ })).toBeNull();
+  });
+
+  it('lets an edit flip a set to a warm-up, reporting warmup only when it changed', async () => {
+    const onEdit = jest.fn((_v: unknown, done: (e?: string | null) => void) => done());
+    await render(<SetRow {...base} number={2} state="done" kg="20" reps="10" kgValue={20} repsValue={10} onEdit={onEdit} />);
+    await fireEvent.press(screen.getByRole('button', { name: /^Edit set 2/ }));
+    await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 2' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Save set 2' }));
+    expect(onEdit).toHaveBeenCalledWith({ kg: 20, reps: 10, warmup: true }, expect.any(Function));
+  });
+});

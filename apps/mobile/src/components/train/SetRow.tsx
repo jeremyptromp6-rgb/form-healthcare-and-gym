@@ -6,7 +6,7 @@ import { a11y, colors, radius, space } from '@/theme/tokens';
 import { AppText, Badge, IconButton, InlineMessage } from '@/components/ui';
 
 /** Fixed column widths (pt). PREVIOUS takes whatever is left, so the table fits a 360 px screen. */
-const COL = { set: 30, input: 62, check: a11y.minTouch } as const;
+const COL = { set: 36, input: 62, check: a11y.minTouch } as const;
 const GAP = 6;
 
 /** Largest load a field takes, in its unit (1000 kg, the API's limit). */
@@ -15,6 +15,12 @@ const REPS_MAX = 200;
 
 export interface SetRowProps {
   number: number;
+  /** A warm-up set: shows 'W' instead of its number. On the active row and while editing, the badge is a switch that marks it. */
+  warmup?: boolean;
+  /** Active row: flips whether the set being entered is a warm-up. Without it the badge is not a control. */
+  onToggleWarmup?: () => void;
+  /** Active row: tapping the PREVIOUS value fills the load and reps from it. Without it the value is plain text. */
+  onUsePrevious?: () => void;
   state: 'done' | 'active' | 'queued';
   loadable: boolean;
   /** Last time's set, e.g. "12 × 10", or "—". */
@@ -36,7 +42,7 @@ export interface SetRowProps {
    * Done rows only: when given, tapping the row opens its reps and load for editing. Save calls this with the
    * typed numbers and a `done` callback: `done()` closes the editor, `done('message')` keeps it open with the message.
    */
-  onEdit?: (values: { kg: number | null; reps: number | null }, done: (error?: string | null) => void) => void;
+  onEdit?: (values: { kg: number | null; reps: number | null; warmup?: boolean }, done: (error?: string | null) => void) => void;
   onDelete?: () => void;
   verified?: { label: string; tone?: 'primary' | 'warning' } | null;
   /** Camera-verified reps on this set: editing the reps below this lowers it (the server's rule), and the editor says so. */
@@ -118,6 +124,9 @@ function NumberField({ label, text, onChangeText, integer, onCommit }: { label: 
 /** One set in the table: logged (done), being entered (active) or still to come (queued). */
 export function SetRow({
   number,
+  warmup = false,
+  onToggleWarmup,
+  onUsePrevious,
   state,
   loadable,
   previous,
@@ -202,7 +211,9 @@ export function SetRow({
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const editable = done && !!onEdit && !editing;
+  const [editWarmup, setEditWarmup] = useState(false);
   const startEdit = () => {
+    setEditWarmup(warmup);
     setKgText(fmt(kgValue));
     setRepsText(fmt(repsValue));
     setEditError(null);
@@ -217,7 +228,7 @@ export function SetRow({
     const r = commitReps();
     setSaving(true);
     setEditError(null);
-    onEdit?.({ kg: k ?? null, reps: r ?? null }, (error) => {
+    onEdit?.({ kg: k ?? null, reps: r ?? null, ...(editWarmup !== warmup ? { warmup: editWarmup } : {}) }, (error) => {
       setSaving(false);
       if (error) setEditError(error);
       else setEditing(false);
@@ -227,26 +238,55 @@ export function SetRow({
   const lowersVerified = verifiedReps > 0 && editedReps !== null && editedReps < verifiedReps;
 
   const blocked = !!disabled || !!busy;
-  const completeName = completeLabel ?? `Complete set ${number}`;
+  /** How the row is named to a screen reader: its number, plus '(warm-up)' so it never shares a label with a working set. */
+  const rowId = warmup ? `${number} (warm-up)` : String(number);
+  const completeName = completeLabel ?? `Complete set ${rowId}`;
 
   const fields = active || editing;
   const labelPrefix = editing ? 'Edit set' : 'Set';
+  const isWarmup = editing ? editWarmup : warmup;
+  const toggle = editing ? () => setEditWarmup((w) => !w) : active ? onToggleWarmup : undefined;
+  const badge = (
+    <View style={[styles.badge, !!toggle && styles.badgeButton, isWarmup && styles.badgeWarmup]}>
+      <AppText variant="bodyStrong" color={isWarmup ? colors.warning : textColor} style={styles.num}>
+        {isWarmup ? 'W' : String(number)}
+      </AppText>
+    </View>
+  );
+  const canUsePrevious = active && !!onUsePrevious && !blocked;
   const cells = (
     <>
-      <View style={{ width: COL.set }}>
-        <AppText variant="bodyStrong" color={textColor} style={styles.num}>
-          {String(number)}
-        </AppText>
-      </View>
+      {toggle ? (
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityLabel={`Warm-up for set ${number}`}
+          accessibilityHint="Warm-up sets are logged but don't count towards XP, records or totals"
+          accessibilityState={{ checked: isWarmup }}
+          hitSlop={{ left: 4, right: 4 }}
+          onPress={toggle}
+          style={styles.badgeWrap}>
+          {badge}
+        </Pressable>
+      ) : (
+        <View style={styles.badgeWrap}>{badge}</View>
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>
-        <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
-          {previous}
-        </AppText>
+        {canUsePrevious && previous !== '—' ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={`Use previous: ${previous}`} accessibilityHint="Fills in the weight and reps from last time" onPress={onUsePrevious} style={styles.prevButton}>
+            <AppText variant="label" color={colors.primary} numberOfLines={1} style={{ textDecorationLine: 'underline' }}>
+              {previous}
+            </AppText>
+          </Pressable>
+        ) : (
+          <AppText variant="label" color={colors.textMuted} numberOfLines={1}>
+            {previous}
+          </AppText>
+        )}
       </View>
       {fields ? (
         <>
-          {loadable ? <NumberField label={`${labelPrefix} ${number} weight in ${unitName}`} text={kgText} onChangeText={typeKg} integer={false} onCommit={commitKg} /> : null}
-          <NumberField label={`${labelPrefix} ${number} reps`} text={repsText} onChangeText={typeReps} integer onCommit={commitReps} />
+          {loadable ? <NumberField label={`${labelPrefix} ${rowId} weight in ${unitName}`} text={kgText} onChangeText={typeKg} integer={false} onCommit={commitKg} /> : null}
+          <NumberField label={`${labelPrefix} ${rowId} reps`} text={repsText} onChangeText={typeReps} integer onCommit={commitReps} />
         </>
       ) : (
         <>
@@ -264,7 +304,7 @@ export function SetRow({
         {editable ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Edit set ${number}: ${reps ?? 0} reps${loadable && kg ? ` at ${kg} ${unit}` : ''}`}
+            accessibilityLabel={`Edit set ${rowId}: ${reps ?? 0} reps${loadable && kg ? ` at ${kg} ${unit}` : ''}`}
             accessibilityHint="Change the reps or weight of this set"
             onPress={startEdit}
             style={styles.cells}>
@@ -287,7 +327,7 @@ export function SetRow({
           ) : editing ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Save set ${number}`}
+              accessibilityLabel={`Save set ${rowId}`}
               accessibilityState={{ disabled: saving, busy: saving }} aria-disabled={saving} aria-busy={saving}
               disabled={saving}
               onPress={save}
@@ -295,7 +335,7 @@ export function SetRow({
               <Ionicons name="checkmark" size={20} color={colors.primary} />
             </Pressable>
           ) : done ? (
-            <Animated.View accessible accessibilityLabel={`Set ${number} done`} style={[styles.checkDone, { transform: [{ scale }] }]}>
+            <Animated.View accessible accessibilityLabel={`Set ${rowId} done`} style={[styles.checkDone, { transform: [{ scale }] }]}>
               <Ionicons name="checkmark" size={18} color={colors.onPrimary} />
             </Animated.View>
           ) : (
@@ -306,8 +346,8 @@ export function SetRow({
       {done && (verified || onDelete || editing) ? (
         <View style={styles.extra}>
           <View style={{ flex: 1, alignItems: 'flex-start' }}>{verified ? <Badge label={verified.label} tone={verified.tone ?? 'primary'} icon="camera-outline" /> : null}</View>
-          {editing ? <IconButton icon="close" label={`Cancel editing set ${number}`} onPress={cancelEdit} /> : null}
-          {onDelete ? <IconButton icon="trash-outline" label={`Delete set ${number}`} onPress={onDelete} /> : null}
+          {editing ? <IconButton icon="close" label={`Cancel editing set ${rowId}`} onPress={cancelEdit} /> : null}
+          {onDelete ? <IconButton icon="trash-outline" label={`Delete set ${rowId}`} onPress={onDelete} /> : null}
         </View>
       ) : null}
       {editing && lowersVerified ? (
@@ -342,6 +382,11 @@ const styles = StyleSheet.create({
   cells: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: GAP, minHeight: a11y.minTouch },
   editNote: { paddingLeft: COL.set + GAP, paddingBottom: space.xs },
   num: { fontVariant: ['tabular-nums'] },
+  badgeWrap: { width: COL.set, minHeight: a11y.minTouch, alignItems: 'center', justifyContent: 'center' },
+  badge: { minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  badgeButton: { borderWidth: 1, borderColor: colors.borderStrong },
+  badgeWarmup: { backgroundColor: colors.warningSoft, borderColor: colors.warning },
+  prevButton: { minHeight: a11y.minTouch, justifyContent: 'center' },
   input: {
     width: COL.input,
     minHeight: a11y.minTouch,

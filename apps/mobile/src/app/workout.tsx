@@ -11,7 +11,7 @@ import { usePostWorkoutAd } from '@/lib/ads/usePostWorkoutAd';
 import type { ApiError } from '@/lib/api';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { livePoseSupport } from '@/lib/pose/support';
-import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useStartRest, useUpdateSet } from '@/lib/queries';
+import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useSessionNotes, useStartRest, useUpdateSet } from '@/lib/queries';
 import type { CompletionResult, PainLevel, WorkoutSession } from '@/lib/types';
 import { useUnits } from '@/lib/units';
 import { currentExerciseIndex, exerciseDone, nextSetDefaults } from '@/lib/workoutSession';
@@ -69,10 +69,11 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const action = useSessionAction(session.id);
   const rest = useStartRest(session.id);
   const complete = useCompleteSession(session.id);
+  const saveNotes = useSessionNotes(session.id);
 
   const [now, setNow] = useState(() => new Date());
   const [selected, setSelected] = useState<number | null>(null);
-  const [override, setOverride] = useState<{ key: string; reps: number; loadKg: number } | null>(null);
+  const [override, setOverride] = useState<{ key: string; reps: number; loadKg: number; warmup?: boolean } | null>(null);
   // A failed save keeps its client id, so "Retry" can never create a second copy of the set.
   // Keyed `${exerciseId}:${loggedCount}` so every exercise's pending set has its own id.
   const pending = useRef(new Map<string, string>());
@@ -99,7 +100,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const loadStepKg = library.data?.exercises.find((e) => e.id === exercise?.exerciseId)?.loadIncrementKg || 2.5;
 
   /** Logs the next set of exercise `i` with exactly `values` — the focused exercise or any other. */
-  const logAt = (i: number, values: { reps: number; loadKg: number }) => {
+  const logAt = (i: number, values: { reps: number; loadKg: number; warmup?: boolean }) => {
     const target = session.exercises[i];
     if (!target || logSet.isPending) return;
     const key = `${target.exerciseId}:${target.loggedSets.length}`;
@@ -116,6 +117,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
         targetReps: target.targetReps?.max,
         targetLoadKg: target.targetLoadKg ?? undefined,
         restSeconds: target.restSeconds,
+        ...(values.warmup ? { warmup: true } : {}),
       },
       {
         onSuccess: ({ session: next }) => {
@@ -143,7 +145,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
     mutate(failed(what));
   };
   // The focused row's check passes the values it just typed; the Log button logs the current draft.
-  const onLogSet = (typed?: { reps: number; loadKg: number }) => logAt(index, typed ?? draft);
+  const onLogSet = (typed?: { reps: number; loadKg: number; warmup?: boolean }) => logAt(index, typed ?? draft);
 
   if (finishing) {
     return (
@@ -231,6 +233,12 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
           { setId, ...patch },
           { onSuccess: () => done(), onError: (e) => done(e.kind === 'network' ? "Couldn't save the change — check your connection and try again." : e.message) },
         )
+      }
+      onSaveNotes={(notes, done) =>
+        saveNotes.mutate(notes, {
+          onSuccess: () => done(),
+          onError: (e) => done(e.kind === 'network' ? "Couldn't save the notes — check your connection and try again." : e.message),
+        })
       }
       onPause={() => act("Couldn't pause", (onError) => action.mutate('pause', { onError }))}
       onResume={() => act("Couldn't resume", (onError) => action.mutate('resume', { onError }))}

@@ -34,7 +34,7 @@ function lastWorkout(ctx: AppContext, userId: string, today: string) {
     .get(userId, today) as { id: string; localDate: string; durationMinutes: number; painLevel: string; xp: number } | undefined;
   if (!w) return null;
   const sets = ctx.db
-    .prepare("SELECT exercise_id AS exerciseId, reps, verified_reps AS verifiedReps, load_kg AS loadKg FROM workout_sets WHERE workout_id = ? ORDER BY set_index")
+    .prepare("SELECT exercise_id AS exerciseId, reps, verified_reps AS verifiedReps, load_kg AS loadKg FROM workout_sets WHERE workout_id = ? AND warmup = 0 ORDER BY set_index")
     .all(w.id) as { exerciseId: string; reps: number; verifiedReps: number; loadKg: number }[];
   const byExercise = new Map<string, { exerciseId: string; name: string; sets: number; totalReps: number; verifiedReps: number; bestLoadKg: number }>();
   for (const s of sets) {

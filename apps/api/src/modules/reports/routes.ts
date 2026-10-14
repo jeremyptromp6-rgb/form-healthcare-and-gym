@@ -23,7 +23,7 @@ function training(db: Db, userId: string, from: string, to: string, plannedDays:
               SUM(CASE WHEN ws.form_score IS NOT NULL AND ws.verified_reps > 0 THEN ws.verified_reps END) AS fn,
               SUM(CASE WHEN ws.rom_percent IS NOT NULL AND ws.verified_reps > 0 THEN ws.rom_percent * ws.verified_reps END) AS rw,
               SUM(CASE WHEN ws.rom_percent IS NOT NULL AND ws.verified_reps > 0 THEN ws.verified_reps END) AS rn
-       FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious'`,
+       FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id WHERE w.user_id = ? AND w.local_date BETWEEN ? AND ? AND w.pain_level <> 'serious' AND ws.warmup = 0`,
     )
     .get(userId, from, to) as { v: number; fw: number | null; fn: number | null; rw: number | null; rn: number | null };
   return {

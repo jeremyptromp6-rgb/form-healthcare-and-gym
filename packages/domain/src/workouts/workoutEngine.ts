@@ -17,6 +17,8 @@ export interface SubmittedSet {
   reps: number;
   loadKg: number;
   trace?: RepTrace;
+  /** A warm-up set is recorded but never counts: no XP, records, verified-rep totals, volume or daily caps. */
+  warmup?: boolean;
 }
 
 /**
@@ -54,6 +56,8 @@ export interface EvaluatedSet extends Omit<WorkoutSet, "verificationStatus"> {
   verifiedRepDetails: AssessedRep[];
   /** Camera analysis of the set (attempts, rejections, quality, gates) — persisted for audit. Null without a trace. */
   analysis: SetAnalysisRecord | null;
+  /** Carried through from the submission; see SubmittedSet.warmup. */
+  warmup?: boolean;
 }
 
 /** What's stored per set for audit/debugging: everything except the per-rep list (stored separately). */
@@ -95,6 +99,7 @@ export function evaluateSet(s: SubmittedSet, setIndex: number, traceBudgetRemain
     formScore: analysis?.quality.averageFormScore ?? null,
     verifiedRepDetails: kept,
     analysis: analysis ? (record as SetAnalysisRecord) : null,
+    ...(s.warmup ? { warmup: true } : {}),
   };
 }
 
@@ -107,7 +112,8 @@ export function evaluateWorkout(input: WorkoutSubmission): { sets: EvaluatedSet[
   });
 
   const award = workoutXp({
-    sets: sets.map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
+    // Warm-up sets are evaluated and returned but earn nothing.
+    sets: sets.filter((s) => !s.warmup).map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
     durationMinutes: input.durationMinutes,
     priorTrainingMinutesToday: input.priorTrainingMinutesToday,
     painLevel: input.painLevel,

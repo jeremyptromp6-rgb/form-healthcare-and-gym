@@ -658,6 +658,8 @@ export interface SessionSet {
   formScore: number | null;
   /** Camera analysis summary (attempted / verified / perfect reps, averages); null without a trace. */
   quality: SetQuality | null;
+  /** A warm-up set is logged and shown but never counts (no XP, records, totals or caps). */
+  warmup?: boolean;
   createdAt: string;
 }
 
@@ -693,13 +695,15 @@ export interface WorkoutSession {
   rest: { endsAt: string; seconds: number | null; remainingSeconds: number | null } | null;
   workoutId: string | null;
   completedAt: string | null;
+  /** Free-text workout notes (at most 500 characters); null when none. */
+  notes?: string | null;
   exercises: SessionExercise[];
 }
 
 export interface WorkoutSummaryDetail {
-  workout: { id: string; localDate: string; durationMinutes: number; painLevel: PainLevel; xp: number; flags: string[] };
-  totals: { sets: number; reps: number; verifiedReps: number; volumeKg: number; perfectReps: number; averageFormScore: number | null };
-  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null; verificationStatus?: string }[];
+  workout: { id: string; localDate: string; durationMinutes: number; painLevel: PainLevel; xp: number; flags: string[]; notes?: string | null };
+  totals: { sets: number; warmupSets?: number; reps: number; verifiedReps: number; volumeKg: number; perfectReps: number; averageFormScore: number | null };
+  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; warmup?: boolean; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null; verificationStatus?: string }[];
   prs: { exerciseId: string; kind: string; value: number; status: string; previous?: number | null }[];
 }
 
@@ -944,4 +948,10 @@ export interface MuscleRanks {
   from: string;
   to: string;
   ranks: MuscleRank[];
+}
+
+/** GET /progress/standing: the caller's anonymous "Top X%" by XP. `percentile` is null while too few people have XP. */
+export interface Standing {
+  percentile: number | null;
+  rankedUsers: number;
 }

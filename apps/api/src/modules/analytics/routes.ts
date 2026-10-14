@@ -7,6 +7,7 @@ import { userClock } from "../../shared/userClock";
 import { entitlementsFor, proRequired } from "../billing/entitlements";
 import { muscleRanks } from "./muscleRanks";
 import { lockForTier, progressAnalytics } from "./service";
+import { standing } from "./standing";
 
 export function analyticsRoutes(app: FastifyInstance, ctx: AppContext): void {
   /** Progress analytics for 7, 30 or 90 local days, optionally focused on one exercise. */
@@ -30,5 +31,11 @@ export function analyticsRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get("/progress/muscle-ranks", async (req) => {
     const q = z.object({ today: dateKey.optional() }).strict().parse(req.query);
     return muscleRanks(ctx, req.user.sub, userClock(ctx, req.user.sub, q.today));
+  });
+
+  /** "Top X% of FORM users" by XP: the caller's own anonymous percentile and the population size, nothing else. Free for everyone. */
+  app.get("/progress/standing", async (req) => {
+    z.object({}).strict().parse(req.query);
+    return standing(ctx, req.user.sub);
   });
 }
