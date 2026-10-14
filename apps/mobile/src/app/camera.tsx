@@ -1,11 +1,10 @@
 import { EXERCISE_BY_ID, LivePoseSession } from '@form/domain';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LiveCameraView } from '@/components/camera/LiveCameraView';
 import { PoseCameraFeed } from '@/components/camera/PoseCameraFeed';
-import { PoseDiagnostics } from '@/components/camera/PoseDiagnostics';
 import { StateView } from '@/components/ui';
 import { config } from '@/lib/config';
 import { nativePoseAvailable } from '@/lib/pose/nativePose';
@@ -16,6 +15,9 @@ import { useActiveSession, useLogSet, useSessionAction } from '@/lib/queries';
 import { useUnits } from '@/lib/units';
 import { formatTarget, nextSetDefaults, verificationNote } from '@/lib/workoutSession';
 import { colors } from '@/theme/tokens';
+
+/** How far ahead (ms) the native body outline is drawn, in builds that collect feed numbers. */
+const OVERLAY_LEAD_MS = 60;
 
 /**
  * Live camera for one exercise. Inside a workout it shows the current set, pauses the workout with
@@ -44,9 +46,11 @@ export default function CameraScreen() {
   const [camera, setCamera] = useState<CameraStatus>({ kind: 'off' });
   const [pose, setPose] = useState<PoseStatus>({ kind: 'idle' });
   const [readout, setReadout] = useState<LiveReadout | null>(null);
-  // Preview builds only: the feed's performance numbers, and the overlay lead being tuned (ms).
-  const [diag, setDiag] = useState<PoseDiag | null>(null);
-  const [leadMs, setLeadMs] = useState(60);
+  // Preview builds only, background only (never rendered): the feed's latest performance numbers.
+  const diag = useRef<PoseDiag | null>(null);
+  const onDiag = useCallback((d: PoseDiag) => {
+    diag.current = d;
+  }, []);
   // The engine the feed is actually running (it can fall back from native to the WebView mid-session).
   const [engine, setEngine] = useState<'native' | 'webview' | null>(null);
   const [retryToken, setRetryToken] = useState(0);
@@ -135,7 +139,7 @@ export default function CameraScreen() {
   };
 
   // Main builds subscribe to nothing and pass nothing extra.
-  const feedDiagnostics = config.diagnostics ? { onDiag: setDiag, leadMs } : {};
+  const feedDiagnostics = config.diagnostics ? { onDiag, leadMs: OVERLAY_LEAD_MS } : {};
   const setNumber = inWorkout ? inWorkout.loggedSets.length + 1 : null;
   return (
     <LiveCameraView
@@ -155,7 +159,6 @@ export default function CameraScreen() {
           <PoseCameraFeed active={!paused} session={session} retryToken={retryToken} onCamera={setCamera} onPose={setPose} onReadout={setReadout} onEngine={setEngine} {...feedDiagnostics} />
         ) : null
       }
-      diagnostics={config.diagnostics ? <PoseDiagnostics diag={diag} readout={readout} leadMs={leadMs} onLeadChange={setLeadMs} /> : undefined}
       onLogSet={inWorkout ? onLogSet : undefined}
       logging={logSet.isPending}
       logMessage={logMessage}

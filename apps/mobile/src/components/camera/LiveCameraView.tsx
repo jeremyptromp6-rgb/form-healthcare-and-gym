@@ -28,8 +28,6 @@ export interface LiveCameraViewProps {
    * `aspect` (default): the feed gets a box with the video's own aspect, so nothing is cropped (WebView, web).
    */
   feedFit?: FeedFit;
-  /** Preview builds: the diagnostics chip, shown on the video under the privacy chip. */
-  diagnostics?: ReactNode;
   /** Workout mode: save this set with its trace (the server re-verifies it). */
   onLogSet?: () => void;
   logging?: boolean;
@@ -102,7 +100,6 @@ export function LiveCameraView(p: LiveCameraViewProps) {
                       Private · not recorded
                     </AppText>
                   </View>
-                  {p.diagnostics}
                 </View>
                 {rep ? (
                   <View style={[styles.counter, { top: reserve }]} accessible accessibilityLabel={`${verified} verified ${verified === 1 ? 'rep' : 'reps'}`}>

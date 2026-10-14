@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject
 import { StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { config } from '@/lib/config';
+import { nativeCameraFailedOnThisBuild, recordNativeCameraFailure } from '@/lib/pose/nativeFallback';
 import { nativePoseAvailable } from '@/lib/pose/nativePose';
 import { colors } from '@/theme/tokens';
 import type { PoseCameraFeedProps } from './feedTypes';
@@ -21,13 +22,18 @@ export { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS } from './poseFeedCore';
  * identical on every platform. Nothing is recorded; the camera stops whenever `active` goes false.
  */
 export function PoseCameraFeed(p: PoseCameraFeedProps) {
-  const [nativeFailed, setNativeFailed] = useState(false);
+  // A native camera that already failed on this build is not tried again: the WebView engine starts directly.
+  // The flag is read synchronously from local storage once, before the first render commits.
+  const [nativeFailed, setNativeFailed] = useState(nativeCameraFailedOnThisBuild);
   const native = !nativeFailed && nativePoseAvailable();
   const { onEngine } = p;
   useEffect(() => {
     onEngine?.(native ? 'native' : 'webview');
   }, [native, onEngine]);
-  const onFatal = useCallback(() => setNativeFailed(true), []);
+  const onFatal = useCallback((reason: string) => {
+    recordNativeCameraFailure(reason);
+    setNativeFailed(true);
+  }, []);
   return native ? <NativePoseFeed {...p} onFatal={onFatal} /> : <WebViewPoseFeed {...p} />;
 }
 

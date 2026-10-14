@@ -18,7 +18,7 @@ export const NATIVE_LIVE_FALLBACK_MS = 8000;
  * as the WebView feed's, through the same handler. A fatal native failure hands the session to the
  * WebView feed (`onFatal`). The camera stops whenever `active` goes false (the view is removed).
  */
-export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void }) {
+export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: (reason: string) => void }) {
   const { onFatal } = p;
   // The skeleton's state is read from the tracker on every render; a push only asks for one.
   const [, redraw] = useReducer((n: number) => n + 1, 0);
@@ -30,11 +30,12 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
     latest.current = { onPose: p.onPose, onReadout: p.onReadout, onDiag: p.onDiag, leadMs: p.leadMs, onFatal };
   });
 
-  const handOver = useCallback(() => {
-    // No point retrying natively: the WebView engine takes over for this session and starts from "loading".
+  const handOver = useCallback((reason: string) => {
+    // No point retrying natively (and the reason is remembered for this build): the WebView engine takes
+    // over and starts from "loading", so the screen stays on its calm loading copy, never an error.
     latest.current.onReadout(null);
     latest.current.onPose({ kind: 'loading' });
-    latest.current.onFatal();
+    latest.current.onFatal(reason);
   }, []);
 
   // A native camera that never delivers a frame (a device quirk) must not end in an error screen:
@@ -49,7 +50,7 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
     framed.current = false;
     readyTimer.current = null;
     const t = setTimeout(() => {
-      if (!live.current) handOver();
+      if (!live.current) handOver('no_live');
     }, NATIVE_LIVE_FALLBACK_MS);
     return () => {
       clearTimeout(t);
@@ -69,12 +70,12 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: () => void })
     (e: { nativeEvent: NativePoseEvent }) => {
       const ev = e.nativeEvent;
       if (ev.kind === 'failed' && ev.fatal) {
-        handOver();
+        handOver(`fatal:${ev.message ?? 'unknown'}`);
         return;
       }
       if (ev.kind === 'ready' && !framed.current && !readyTimer.current) {
         readyTimer.current = setTimeout(() => {
-          if (!framed.current) handOver();
+          if (!framed.current) handOver('no_frame_after_ready');
         }, NATIVE_LIVE_FALLBACK_MS);
       }
       handle(toEngineMessage('pose', ev));

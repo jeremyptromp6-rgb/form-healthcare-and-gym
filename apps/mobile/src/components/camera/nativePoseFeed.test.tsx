@@ -35,6 +35,21 @@ jest.mock('../../../modules/form-pose-camera', () => {
   };
 });
 jest.mock('expo-camera', () => ({ useCameraPermissions: jest.fn() }));
+// Local storage and the build id, in memory: the "native camera failed on this build" flag lives there.
+const mockStore = new Map<string, string>();
+let mockBuildCode = 7;
+jest.mock('expo-secure-store', () => ({
+  getItem: (k: string) => mockStore.get(k) ?? null,
+  setItem: (k: string, v: string) => void mockStore.set(k, v),
+}));
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    get expoConfig() {
+      return { version: '0.1.0', android: { versionCode: mockBuildCode } };
+    },
+  },
+}));
 // The WebView engine, for the fallback: it records its message handler.
 const mockWeb: { onMessage: ((e: { nativeEvent: { data: string } }) => void) | null; inject: jest.Mock } = { onMessage: null, inject: jest.fn() };
 jest.mock('react-native-webview', () => {
@@ -90,6 +105,8 @@ beforeEach(() => {
   mockAvailable = true;
   mockNativeProps = null;
   mockMounts = 0;
+  mockStore.clear();
+  mockBuildCode = 7;
   mockWeb.onMessage = null;
   mockWeb.inject.mockClear();
   permission.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
@@ -327,6 +344,71 @@ describe('native pose feed', () => {
     // And the WebView feed works from there on.
     await webMessage({ t: 'camera', kind: 'live' });
     expect(h.onCamera).toHaveBeenCalledWith({ kind: 'live' });
+  });
+
+  describe('sticky native fallback', () => {
+    const storedReason = () => (JSON.parse([...mockStore.values()][0] ?? '{}') as { reason?: string; build?: string });
+
+    it('a fatal failure is remembered with its reason for this build', async () => {
+      const { session } = fakeSession();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+      await fire('onPose', { kind: 'failed', fatal: true, message: 'no camerax' });
+      expect(storedReason()).toMatchObject({ reason: 'fatal:no camerax', build: '0.1.0+7' });
+    });
+
+    it('a camera that never goes live is remembered as no_live', async () => {
+      jest.useFakeTimers();
+      try {
+        const { session } = fakeSession();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+        await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 100));
+        expect(storedReason().reason).toBe('no_live');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('a ready engine that never frames is remembered as no_frame_after_ready', async () => {
+      jest.useFakeTimers();
+      try {
+        const { session } = fakeSession();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+        await fire('onCamera', { kind: 'live', name: null });
+        await fire('onPose', { kind: 'ready', backend: 'GPU', variant: 'full', rung: 'mask' });
+        await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 100));
+        expect(storedReason().reason).toBe('no_frame_after_ready');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('with the flag set for this build the WebView engine starts directly, with no native attempt', async () => {
+      const { session } = fakeSession();
+      const first = await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+      await fire('onPose', { kind: 'failed', fatal: true, message: 'x' });
+      await first.unmount();
+      mockNativeProps = null;
+      mockMounts = 0;
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(mockMounts).toBe(0);
+      expect(h.onEngine).toHaveBeenCalledWith('webview');
+      expect(h.onEngine).not.toHaveBeenCalledWith('native');
+    });
+
+    it('a different build tries the native camera again', async () => {
+      const { session } = fakeSession();
+      const first = await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+      await fire('onPose', { kind: 'failed', fatal: true, message: 'x' });
+      await first.unmount();
+      mockBuildCode = 8;
+      mockNativeProps = null;
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+      expect(screen.queryByTestId('camera-view')).toBeNull();
+    });
   });
 
   it('raises the front-on stance after a second of frames and reports the frame aspect', async () => {

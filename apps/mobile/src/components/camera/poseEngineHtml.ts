@@ -279,7 +279,7 @@ const sctx = sampler.getContext('2d', { willReadFrequently: true });
 window.__skeletonColor = CFG.colors.warn;
 let engine = null, mode = 'worker', ready = false, busy = false, busySince = 0, stream = null, stopped = false;
 let latency = 0, lastLumaAt = -1e9, luma = undefined, frameErrors = [];
-const START_TIMEOUT_MS = 25000;
+const START_TIMEOUT_MS = 45000;
 const ENGINE_CFG = Object.assign({ cdn: CFG.cdn, modelUrl: CFG.modelUrl, liteUrl: CFG.liteUrl }, CFG.engine);
 
 // ---- the skeleton: the canvas covers the view; the mapper (mirrored) lines it up with the video ----

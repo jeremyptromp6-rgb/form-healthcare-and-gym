@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import CameraScreen from '@/app/camera';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
@@ -21,7 +21,7 @@ jest.mock('expo-router', () => ({
   useLocalSearchParams: () => mockParams,
 }));
 jest.mock('expo-keep-awake', () => ({ activateKeepAwakeAsync: jest.fn(() => Promise.resolve()), deactivateKeepAwake: jest.fn(() => Promise.resolve()) }));
-// Preview builds show the diagnostics chip; the flag is read when the screen renders, so a test can turn it on.
+// Preview builds collect the feed numbers (never shown); the flag is read when the screen renders, so a test can turn it on.
 jest.mock('@/lib/config', () => {
   const actual = jest.requireActual('@/lib/config');
   const config = { ...actual.config };
@@ -252,14 +252,13 @@ describe('camera screen layout and diagnostics', () => {
     expect(mockFeedProps.leadMs).toBeUndefined();
   });
 
-  it('in a preview build subscribes to the feed numbers, shows them, and passes the chosen overlay lead back', async () => {
+  it('in a preview build collects the feed numbers in the background and shows nothing', async () => {
     mockDiagnostics = true;
     await renderCamera();
-    const chip = within(screen.getByTestId('pose-diagnostics'));
-    expect(chip.getByText('engine native | GPU | full | outline:mask')).toBeTruthy();
+    expect(screen.queryByTestId('pose-diagnostics')).toBeNull();
+    expect(screen.queryByText(/engine native|fps |latency|Overlay lead/)).toBeNull();
+    expect(typeof mockFeedProps.onDiag).toBe('function');
     expect(mockFeedProps.leadMs).toBe(60);
-    await fireEvent.press(chip.getByRole('button', { name: 'Overlay lead 30 milliseconds' }));
-    expect(mockFeedProps.leadMs).toBe(30);
   });
 
   it('keeps every control reachable: pause, end, the log button and the counters', async () => {

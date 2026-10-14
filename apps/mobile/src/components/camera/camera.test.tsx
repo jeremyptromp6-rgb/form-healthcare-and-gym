@@ -12,7 +12,6 @@ import { cameraErrorStatus, cameraScreenModel, loadingMessage, type CameraStatus
 import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
-import { diagnosticsLines, PoseDiagnostics } from './PoseDiagnostics';
 import { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
 import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
 import { skeletonPalette } from './skeletonState';
@@ -331,14 +330,10 @@ describe('LiveCameraView', () => {
     }
   });
 
-  it('shows the diagnostics chip only when it is handed one (main builds hand none)', async () => {
-    const { rerender } = await render(<LiveCameraView {...props()} />);
+  it('never shows a diagnostics chip (the numbers stay in the background)', async () => {
+    await render(<LiveCameraView {...props()} />);
     expect(screen.queryByTestId('pose-diagnostics')).toBeNull();
-    const diag = { fps: 27, inferMs: 31, ageP50: 78, ageP95: 120, backend: 'GPU' as const, variant: 'full' as const, rung: 'mask' as const, engine: 'native' as const, leadMs: 60 };
-    await rerender(<LiveCameraView {...props({ diagnostics: <PoseDiagnostics diag={diag} readout={null} /> })} />);
-    expect(screen.getByTestId('pose-diagnostics')).toBeTruthy();
-    expect(screen.getByText('engine native | GPU | full | outline:mask')).toBeTruthy();
-    expect(screen.getByText('fps 27 | infer 31 ms | age p50 78 / p95 120 ms')).toBeTruthy();
+    expect(screen.queryByText(/engine |fps |latency/)).toBeNull();
   });
 
   it('the paused and start states keep the top controls above the state card', async () => {
@@ -347,34 +342,6 @@ describe('LiveCameraView', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'End camera' }));
     expect(onEnd).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
-  });
-});
-
-describe('PoseDiagnostics', () => {
-  const native = { fps: 27, inferMs: 31, ageP50: 78, ageP95: 120, backend: 'GPU' as const, variant: 'full' as const, rung: 'mask' as const, engine: 'native' as const, region: '288×640', view: '360×560', mirrorX: true, leadMs: 60 };
-
-  it('prints the native feed the way a screenshot needs it', () => {
-    expect(diagnosticsLines(native, null)).toEqual([
-      'engine native | GPU | full | outline:mask',
-      'fps 27 | infer 31 ms | age p50 78 / p95 120 ms',
-      'region 288×640 | view 360×560 | mirror on | lead 60',
-    ]);
-  });
-
-  it('prints the WebView and web feeds with the readout’s latency, and a blank chip before anything arrives', () => {
-    const web = { fps: 24, inferMs: null, ageP50: null, ageP95: null, backend: 'CPU' as const, variant: null, rung: 'webview' as const, engine: 'webview' as const };
-    expect(diagnosticsLines(web, readout(null))).toEqual(['engine webview | CPU | – | outline:webview', 'fps 24 | latency 19 ms']);
-    expect(diagnosticsLines(null, null)).toEqual(['engine –', 'fps – | latency – ms']);
-    expect(diagnosticsLines(null, readout(null))).toEqual(['engine –', 'fps 28 | latency 19 ms']);
-  });
-
-  it('offers the lead stepper on the native feed only, and reports the choice', async () => {
-    const onLeadChange = jest.fn();
-    const { rerender } = await render(<PoseDiagnostics diag={native} readout={null} leadMs={60} onLeadChange={onLeadChange} />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Overlay lead 90 milliseconds' }));
-    expect(onLeadChange).toHaveBeenCalledWith(90);
-    await rerender(<PoseDiagnostics diag={{ ...native, engine: 'webview' }} readout={null} leadMs={60} onLeadChange={onLeadChange} />);
-    expect(screen.queryByRole('button', { name: /Overlay lead/ })).toBeNull();
   });
 });
 
