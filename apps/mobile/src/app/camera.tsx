@@ -45,6 +45,17 @@ export default function CameraScreen() {
   const [localPaused, setLocalPaused] = useState(false);
   const [camera, setCamera] = useState<CameraStatus>({ kind: 'off' });
   const [pose, setPose] = useState<PoseStatus>({ kind: 'idle' });
+  // A failed load is retried once on its own (a flaky download or a slow start) before the user ever sees it.
+  const [autoRetried, setAutoRetried] = useState(false);
+  const onPose = (p: PoseStatus) => {
+    if (p.kind === 'failed' && p.retryable && !autoRetried) {
+      setAutoRetried(true);
+      setPose({ kind: 'loading' });
+      setRetryToken((n) => n + 1);
+      return;
+    }
+    setPose(p);
+  };
   const [readout, setReadout] = useState<LiveReadout | null>(null);
   // Preview builds only, background only (never rendered): the feed's latest performance numbers.
   const diag = useRef<PoseDiag | null>(null);
@@ -156,7 +167,7 @@ export default function CameraScreen() {
       feedFit={(engine ?? (nativePoseAvailable() ? 'native' : 'webview')) === 'native' ? 'fill' : 'aspect'}
       feed={
         started ? (
-          <PoseCameraFeed active={!paused} session={session} retryToken={retryToken} onCamera={setCamera} onPose={setPose} onReadout={setReadout} onEngine={setEngine} {...feedDiagnostics} />
+          <PoseCameraFeed active={!paused} session={session} retryToken={retryToken} onCamera={setCamera} onPose={onPose} onReadout={setReadout} onEngine={setEngine} {...feedDiagnostics} />
         ) : null
       }
       onLogSet={inWorkout ? onLogSet : undefined}

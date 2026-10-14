@@ -69,8 +69,10 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: (reason: stri
   const onPose = useCallback(
     (e: { nativeEvent: NativePoseEvent }) => {
       const ev = e.nativeEvent;
-      if (ev.kind === 'failed' && ev.fatal) {
-        handOver(`fatal:${ev.message ?? 'unknown'}`);
+      // Any native failure (a failed model download included) hands over to the WebView engine, which
+      // works on every phone: the user never sees "couldn't start" from the native engine.
+      if (ev.kind === 'failed') {
+        handOver(`${ev.fatal ? 'fatal' : 'failed'}:${ev.message ?? 'unknown'}`);
         return;
       }
       if (ev.kind === 'ready' && !framed.current && !readyTimer.current) {

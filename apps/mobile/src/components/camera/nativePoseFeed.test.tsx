@@ -261,9 +261,11 @@ describe('native pose feed', () => {
     expect(h.onPose).toHaveBeenCalledWith({ kind: 'ready', backend: 'CPU' });
     await fire('onCamera', { kind: 'error', name: 'NotReadableError' });
     expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'in_use' });
+    // Even a non-fatal native failure never reaches the user: the WebView engine takes over.
     await fire('onPose', { kind: 'failed', offline: true, message: 'x', fatal: false });
-    expect(h.onPose).toHaveBeenCalledWith({ kind: 'failed', message: 'Camera coaching needs an internet connection the first time it loads.', retryable: true });
-    expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+    expect(h.onPose).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }));
+    expect(screen.queryByTestId('camera-view-native')).toBeNull();
+    expect(screen.getByTestId('camera-view')).toBeTruthy();
   });
 
   it('a native camera that never delivers a frame hands over to the WebView engine instead of failing', async () => {
