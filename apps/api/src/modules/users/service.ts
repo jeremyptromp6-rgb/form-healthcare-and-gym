@@ -1,5 +1,6 @@
 import {
   buildPersonalization,
+  normalizeFocusAreas,
   normalizeNutritionPreferences,
   onboardingStatus,
   targetsForUser,
@@ -13,7 +14,7 @@ import { emptyProfile, latestWeight, loadGoalHistory, loadPreferences, loadProfi
 
 /** Fields a client may edit. Everything else (derived fields, ownership, onboarding state) is server-controlled. */
 export type ProfilePatch = Partial<
-  Pick<UserProfile, "displayName" | "primaryGoal" | "sex" | "ageYears" | "heightCm" | "weightKg" | "experience" | "trainingDaysPerWeek" | "trainingLocation" | "equipment">
+  Pick<UserProfile, "displayName" | "primaryGoal" | "sex" | "ageYears" | "heightCm" | "weightKg" | "experience" | "trainingDaysPerWeek" | "trainingLocation" | "equipment" | "focusAreas">
 >;
 
 const TARGET_INPUTS: (keyof UserProfile)[] = ["sex", "ageYears", "heightCm", "weightKg", "trainingDaysPerWeek", "primaryGoal"];
@@ -27,7 +28,7 @@ const TARGET_INPUTS: (keyof UserProfile)[] = ["sex", "ageYears", "heightCm", "we
  */
 export function applyProfilePatch(db: Db, userId: string, patch: ProfilePatch, localDate: string, now: Date): UserProfile {
   const current = loadProfile(db, userId) ?? emptyProfile(userId, now);
-  const merged: UserProfile = { ...current, ...patch };
+  const merged: UserProfile = { ...current, ...patch, ...(patch.focusAreas ? { focusAreas: normalizeFocusAreas(patch.focusAreas) } : {}) };
   const saved = writeProfile(db, merged, now);
 
   if (patch.primaryGoal !== undefined && patch.primaryGoal !== current.primaryGoal) {

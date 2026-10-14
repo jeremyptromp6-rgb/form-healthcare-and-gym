@@ -1,7 +1,7 @@
 import type { PainLevel } from "../progression/progressionEngine";
 import { dayNumber, type DateKey } from "../shared/dates";
-import type { Equipment, ExperienceLevel, PrimaryGoal } from "../users/profileOptions";
-import { canPerform, EXERCISES, suitableFor, type Exercise, type MovementPattern } from "./exercises";
+import { FOCUS_AREAS, type Equipment, type ExperienceLevel, type FocusArea, type PrimaryGoal } from "../users/profileOptions";
+import { canPerform, EXERCISES, suitableFor, type Exercise, type MovementPattern, type MuscleGroup } from "./exercises";
 
 /**
  * Workout generation. Generators are pluggable: anything implementing WorkoutGenerator can
@@ -23,6 +23,8 @@ export interface GenerationInput {
   experience: ExperienceLevel | null;
   equipment: Equipment[];
   trainingDaysPerWeek: number | null;
+  /** Body areas to lean towards (up to 3). Missing, empty or "full body" = no lean. */
+  focusAreas?: FocusArea[] | null;
   /** Sessions already completed this week (rotates upper/lower splits). */
   sessionsThisWeek: number;
   daysSinceLastWorkout: number | null;
@@ -87,6 +89,87 @@ const FULL_BODY: Slot[] = [["squat", "lunge"], ["push_horizontal", "push_vertica
 const LOWER: Slot[] = [["squat"], ["hinge"], ["lunge"]];
 const UPPER: Slot[] = [["push_horizontal"], ["pull_horizontal", "pull_vertical"], ["push_vertical"], ["elbow_flexion"]];
 
+// ---- Focus areas -------------------------------------------------------------------------
+
+const UPPER_MUSCLES: readonly MuscleGroup[] = ["chest", "back", "lats", "shoulders", "biceps", "triceps"];
+const LOWER_MUSCLES: readonly MuscleGroup[] = ["quads", "hamstrings", "glutes", "calves"];
+
+/** The muscles each focus area trains. Full body has none: it means no lean. */
+export const FOCUS_MUSCLES: Record<FocusArea, readonly MuscleGroup[]> = {
+  full_body: [],
+  upper_body: UPPER_MUSCLES,
+  lower_body: LOWER_MUSCLES,
+  chest: ["chest"],
+  back: ["back", "lats"],
+  shoulders: ["shoulders"],
+  arms: ["biceps", "triceps"],
+  core: ["core"],
+  legs: ["quads", "hamstrings", "glutes", "calves"],
+  glutes: ["glutes"],
+};
+
+/** Score added to an exercise whose primary (or secondary) muscles are in the focus; beats the slot-pattern preference. */
+const FOCUS_PRIMARY_BONUS = 10;
+const FOCUS_SECONDARY_BONUS = 3;
+/** Extra focus-only exercises added to a session: two on a full-body day, one on a day already on the focus side. */
+const FOCUS_EXTRA_FULL_BODY = 2;
+const FOCUS_EXTRA_SIDE = 1;
+
+const FOCUS_LABEL = new Map<string, string>(FOCUS_AREAS.map((a) => [a.key, a.label]));
+
+/** The focus areas that actually lean the plan (de-duplicated; "full body" and unknown keys drop out). */
+function activeFocus(input: GenerationInput): FocusArea[] {
+  return [...new Set(input.focusAreas ?? [])].filter((a) => FOCUS_MUSCLES[a]?.length > 0);
+}
+
+/** Which half of the body the focus sits on, or null when it spans both halves (or is only core). */
+function focusSide(areas: readonly FocusArea[]): "upper" | "lower" | null {
+  let upper = false;
+  let lower = false;
+  for (const a of areas) {
+    for (const m of FOCUS_MUSCLES[a]) {
+      if (UPPER_MUSCLES.includes(m)) upper = true;
+      if (LOWER_MUSCLES.includes(m)) lower = true;
+    }
+  }
+  return upper === lower ? null : upper ? "upper" : "lower";
+}
+
+/**
+ * Which kind of session this is. Without a one-sided focus: full body up to 3 days a week, otherwise
+ * upper/lower alternating. With one (e.g. chest, legs): two of every three sessions are on that side
+ * and the third keeps the other half trained (full body up to 3 days, the other side above that), so
+ * nothing is dropped for good while the focus gets roughly two thirds of the work.
+ */
+function sessionFocus(days: number, sessionsThisWeek: number, side: "upper" | "lower" | null): WorkoutPlan["focus"] {
+  if (days <= 2 || !side) return days <= 3 ? "full_body" : sessionsThisWeek % 2 === 0 ? "lower" : "upper";
+  const other = side === "upper" ? "lower" : "upper";
+  const turn = sessionsThisWeek % 3;
+  if (turn === 1) return days <= 3 ? "full_body" : other;
+  return side;
+}
+
+/** The focus muscles that make sense for this session (an upper day never gets a leg-focus exercise). */
+function focusMusclesFor(areas: readonly FocusArea[], session: WorkoutPlan["focus"]): Set<MuscleGroup> {
+  const allowed = session === "upper" ? UPPER_MUSCLES : session === "lower" ? LOWER_MUSCLES : null;
+  const out = new Set<MuscleGroup>();
+  for (const a of areas) {
+    for (const m of FOCUS_MUSCLES[a]) {
+      if (!allowed || allowed.includes(m) || m === "core") out.add(m);
+    }
+  }
+  return out;
+}
+
+const focusBonus = (e: Exercise, muscles: ReadonlySet<MuscleGroup>) =>
+  muscles.size === 0
+    ? 0
+    : e.primaryMuscles.some((m) => muscles.has(m))
+      ? FOCUS_PRIMARY_BONUS
+      : e.secondaryMuscles.some((m) => muscles.has(m))
+        ? FOCUS_SECONDARY_BONUS
+        : 0;
+
 const RETURNING_AFTER_DAYS = 14;
 const MIN_ROM_TO_PROGRESS = 80;
 
@@ -100,13 +183,22 @@ export function loadableWith(exercise: Exercise, equipment: readonly Equipment[]
   return exercise.loadable && exercise.equipment.some((alt) => alt.every((x) => x !== "bodyweight" && equipment.includes(x)));
 }
 
-function pick(slot: Slot, candidates: Exercise[], input: GenerationInput, used: Set<string>, goal: PrimaryGoal | null): Exercise | null {
+function pick(
+  slot: Slot,
+  candidates: Exercise[],
+  input: GenerationInput,
+  used: Set<string>,
+  goal: PrimaryGoal | null,
+  focus: ReadonlySet<MuscleGroup> = new Set(),
+): Exercise | null {
   const options = candidates.filter((e) => !used.has(e.id));
   if (options.length === 0) return null;
   const experience = input.experience ?? "beginner";
   const score = (e: Exercise) =>
     // The slot's first pattern is what the slot is for; later ones are fallbacks.
     (e.pattern === slot[0] ? 8 : 0) +
+    // The user's focus areas: a movement that trains them wins the slot.
+    focusBonus(e, focus) +
     // Strength goals prefer movements the user can load; newer lifters prefer camera-verifiable
     // ones (so their reps can be verified); everyone gets movements matched to their level.
     (goal === "get_stronger" || goal === "build_muscle" ? (loadableWith(e, input.equipment) ? 4 : 0) : 0) +
@@ -182,8 +274,10 @@ export const ruleBasedGenerator: WorkoutGenerator = {
     const experience = input.experience ?? "beginner";
 
     const days = input.trainingDaysPerWeek ?? 3;
-    const focus: WorkoutPlan["focus"] = days <= 3 ? "full_body" : input.sessionsThisWeek % 2 === 0 ? "lower" : "upper";
+    const areas = activeFocus(input);
+    const focus = sessionFocus(days, input.sessionsThisWeek, focusSide(areas));
     const slots = focus === "full_body" ? FULL_BODY : focus === "lower" ? LOWER : UPPER;
+    const focusMuscles = focusMusclesFor(areas, focus);
 
     const available = EXERCISES.filter((e) => canPerform(e, input.equipment) && suitableFor(e, experience));
     const used = new Set<string>();
@@ -199,9 +293,25 @@ export const ruleBasedGenerator: WorkoutGenerator = {
       notes.push("Welcome back. Volume and loads are eased back for your first session after a break.");
     }
 
+    // Focus-only slots follow the base slots: any movement whose main muscles are in the focus.
+    const focusSlots = focusMuscles.size === 0 ? 0 : focus === "full_body" ? FOCUS_EXTRA_FULL_BODY : FOCUS_EXTRA_SIDE;
+    // Muscles in the focus not yet worked by a focus-only slot, so two slots spread across the chosen areas.
+    let uncovered = new Set(focusMuscles);
+
     const exercises: PlannedExercise[] = [];
-    for (const slot of slots) {
-      const exercise = pick(slot, available.filter((e) => slot.includes(e.pattern)), input, used, goal);
+    const planned: { slot: Slot; focused: boolean }[] = [...slots.map((slot) => ({ slot, focused: false })), ...Array.from({ length: focusSlots }, () => ({ slot: [] as Slot, focused: true }))];
+    for (const { slot, focused } of planned) {
+      let exercise: Exercise | null;
+      if (focused) {
+        if (uncovered.size === 0) uncovered = new Set(focusMuscles);
+        let pool = available.filter((e) => e.primaryMuscles.some((m) => uncovered.has(m)) && !used.has(e.id));
+        if (pool.length === 0) pool = available.filter((e) => e.primaryMuscles.some((m) => focusMuscles.has(m)));
+        exercise = pick(slot, pool, input, used, goal, uncovered);
+        if (exercise) for (const m of exercise.primaryMuscles) uncovered.delete(m);
+      } else {
+        exercise = pick(slot, available.filter((e) => slot.includes(e.pattern)), input, used, goal, focusMuscles);
+        if (exercise) for (const m of exercise.primaryMuscles) uncovered.delete(m);
+      }
       if (!exercise) continue;
       used.add(exercise.id);
       // Bodyweight movements can't be made easier with load, so they keep their own rep range.
@@ -223,11 +333,14 @@ export const ruleBasedGenerator: WorkoutGenerator = {
     const secondsPerRep = 4;
     const workSeconds = exercises.reduce((a, e) => a + e.sets * (((e.targetReps.min + e.targetReps.max) / 2) * secondsPerRep * (EXERCISES.find((x) => x.id === e.exerciseId)?.perSide ? 2 : 1) + e.restSeconds), 0);
     const focusLabel = focus === "full_body" ? "Full Body" : focus === "upper" ? "Upper Body" : "Lower Body";
+    // Name the chosen areas only when this session actually leans on them.
+    const leaning = focusMuscles.size > 0 ? areas.filter((a) => FOCUS_MUSCLES[a].some((m) => focusMuscles.has(m))).map((a) => FOCUS_LABEL.get(a)!) : [];
+    if (leaning.length > 0) notes.push(`Leaning on your focus today: ${leaning.join(", ")}. The rest of the body still gets work, so nothing falls behind.`);
 
     return {
       generator: { id: this.id, version: this.version },
       date: input.date,
-      title: `${focusLabel} · ${scheme.label}`,
+      title: leaning.length > 0 ? `${focusLabel} · ${leaning.join(" + ")} focus · ${scheme.label}` : `${focusLabel} · ${scheme.label}`,
       focus,
       exercises,
       estimatedMinutes: Math.max(10, Math.round(workSeconds / 60) + 5),

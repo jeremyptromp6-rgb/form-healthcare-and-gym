@@ -1,4 +1,4 @@
-import { ACCENTS, art, artPalettes, FOODS, METALS, METAL_SYMBOL, METAL_TEXT, STROKE, VIEWBOX, type ArtTone } from './artPalette';
+import { ACCENTS, ANATOMY, art, artPalettes, FOOD_EXTRA, FOODS, METALS, METAL_SYMBOL, METAL_TEXT, STROKE, VIEWBOX, type ArtTone } from './artPalette';
 import { contrastRatio } from './contrast';
 import { palettes } from './tokens';
 
@@ -102,6 +102,11 @@ describe('METALS, FOODS and accents', () => {
     expect(Object.keys(METAL_SYMBOL)).toHaveLength(7);
     for (const t of TONES) for (const c of Object.values(METAL_TEXT[t])) expect(c).toMatch(HEX);
     expect(Object.keys(METAL_TEXT.dark)).toEqual(Object.keys(METAL_TEXT.light));
+  });
+
+  it('has hex food extras and an anatomy palette with the same keys in both tones', () => {
+    for (const [name, c] of Object.entries(FOOD_EXTRA)) expect({ name, ok: HEX.test(c) }).toEqual({ name, ok: true });
+    expect(Object.keys(ANATOMY.dark)).toEqual(Object.keys(ANATOMY.light));
   });
 
   it('has the same accent keys in both tones', () => {

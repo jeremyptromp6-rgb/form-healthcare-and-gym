@@ -57,6 +57,25 @@ export const DEFAULT_EQUIPMENT: Record<TrainingLocation, Equipment[]> = {
 };
 
 /**
+ * Body areas the user wants workouts to lean towards. `broad` areas name a whole half of the body;
+ * `specific` ones name a muscle group. Choose up to PROFILE_LIMITS.focusAreasMax. "Full body"
+ * means no lean (and is what everyone without a choice gets), so it can't be combined with others.
+ */
+export const FOCUS_AREAS = [
+  { key: "full_body", label: "Full body", description: "A balanced mix, no particular lean.", group: "broad" },
+  { key: "upper_body", label: "Upper body", description: "Chest, back, shoulders and arms.", group: "broad" },
+  { key: "lower_body", label: "Lower body", description: "Legs and glutes.", group: "broad" },
+  { key: "chest", label: "Chest", description: "Pressing and pushing strength.", group: "specific" },
+  { key: "back", label: "Back", description: "Pulling, posture and a strong back.", group: "specific" },
+  { key: "shoulders", label: "Shoulders", description: "Width, stability and overhead strength.", group: "specific" },
+  { key: "arms", label: "Arms", description: "Biceps and triceps.", group: "specific" },
+  { key: "core", label: "Core", description: "Abs, trunk strength and control.", group: "specific" },
+  { key: "legs", label: "Legs", description: "Quads, hamstrings and calves.", group: "specific" },
+  { key: "glutes", label: "Glutes", description: "Hips, glutes and power.", group: "specific" },
+] as const satisfies readonly { key: string; label: string; description: string; group: "broad" | "specific" }[];
+export type FocusArea = (typeof FOCUS_AREAS)[number]["key"];
+
+/**
  * Dietary preferences. `restriction` = a hard rule (never recommend conflicting food).
  * `style` = a soft preference that shapes suggestions but excludes nothing.
  */
@@ -119,6 +138,7 @@ export const PROFILE_LIMITS = {
   heightCm: { min: 120, max: 240 },
   weightKg: { min: 30, max: 300 },
   trainingDaysPerWeek: { min: 1, max: 7 },
+  focusAreasMax: 3,
   displayNameLength: 40,
   foodListMax: 30,
   customAllergyMax: 10,

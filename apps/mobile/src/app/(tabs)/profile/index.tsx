@@ -13,7 +13,7 @@ import { useFeature } from '@/lib/features';
 import { labelOf } from '@/lib/profileForm';
 import { useAchievements, useBodyQuest, useCatalog, useMe, useProfileSummary, useProgress, useRecords, useRefetchOnFocus, useWeightHistory, useWorkouts } from '@/lib/queries';
 import { ActivitySummary } from '@/components/profile/ActivitySummary';
-import type { OnboardingStep } from '@/lib/types';
+import type { EditableSection } from '@/lib/types';
 import { formatWeight } from '@/lib/units';
 import { colors, gradients, space } from '@/theme/tokens';
 
@@ -39,7 +39,7 @@ export default function ProfileHub() {
   const name = m.profile?.displayName ?? m.user.email.split('@')[0]!;
   const goal = m.profile?.primaryGoal;
   const missing = m.onboarding.remaining;
-  const edit = (s: OnboardingStep) => router.push(`/profile/edit/${s}` as Href);
+  const edit = (s: EditableSection) => router.push(`/profile/edit/${s}` as Href);
   const latestWeight = weight.data?.entries[0];
   const unlocked = achievements.data ? achievements.data.achievements.filter((a) => a.state === 'unlocked').length : 0;
   const achievementTotal = achievements.data?.achievements.length ?? 0;

@@ -123,6 +123,7 @@ export function generationInput(ctx: AppContext, userId: string, clock: UserCloc
     experience: profile?.experience ?? null,
     equipment: profile?.equipment ?? ["bodyweight"],
     trainingDaysPerWeek: profile?.trainingDaysPerWeek ?? null,
+    focusAreas: profile?.focusAreas ?? null,
     // Sessions before today, so the plan stays the same all day.
     sessionsThisWeek: new Set(recent.filter((r) => r.d >= clock.weekStart).map((r) => r.d)).size,
     daysSinceLastWorkout: last ? daysBetween(last, clock.today) : null,

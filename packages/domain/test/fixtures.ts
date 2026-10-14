@@ -13,6 +13,7 @@ export function profileFixture(overrides: Partial<UserProfile> = {}): UserProfil
     trainingDaysPerWeek: 4,
     trainingLocation: "gym",
     equipment: ["barbell", "dumbbells"],
+    focusAreas: null,
     activity: "active",
     energyGoal: "gain",
     onboardingCompletedAt: null,

@@ -63,6 +63,7 @@ export type Goal = 'lose' | 'recomp' | 'maintain' | 'gain';
 export type PrimaryGoal = 'build_muscle' | 'get_stronger' | 'lose_fat' | 'get_lean' | 'improve_fitness' | 'improve_health';
 export type Experience = 'beginner' | 'intermediate' | 'advanced';
 export type TrainingLocation = 'home' | 'gym' | 'both';
+export type FocusArea = 'full_body' | 'upper_body' | 'lower_body' | 'chest' | 'back' | 'shoulders' | 'arms' | 'core' | 'legs' | 'glutes';
 
 /** Stored profile. Nullable while onboarding is in progress; `activity` and `energyGoal` are server-derived. */
 export interface UserProfile {
@@ -76,6 +77,8 @@ export interface UserProfile {
   trainingDaysPerWeek: number | null;
   trainingLocation: TrainingLocation | null;
   equipment: string[] | null;
+  /** Body areas workouts lean towards; null/absent = not chosen (treated as full body). */
+  focusAreas?: FocusArea[] | null;
   activity: Activity | null;
   energyGoal: Goal | null;
   onboardingCompletedAt: string | null;
@@ -84,7 +87,7 @@ export interface UserProfile {
 /** Fields the client may edit. */
 export type ProfilePatch = Partial<
   Pick<UserProfile, 'displayName' | 'primaryGoal' | 'sex' | 'ageYears' | 'heightCm' | 'weightKg' | 'experience' | 'trainingDaysPerWeek' | 'trainingLocation'>
-> & { equipment?: string[] };
+> & { equipment?: string[]; focusAreas?: FocusArea[] };
 
 /** Allergies (hard constraints) and dislikes (soft preferences) are deliberately separate. */
 export interface NutritionPreferences {
@@ -97,6 +100,8 @@ export interface NutritionPreferences {
 }
 
 export type OnboardingStep = 'goal' | 'body' | 'training' | 'nutrition' | 'habits';
+/** Sections with their own editor: the server's onboarding steps plus the app-only focus step. */
+export type EditableSection = OnboardingStep | 'focus';
 
 export interface Option {
   key: string;
@@ -110,6 +115,7 @@ export interface ProfileOptions {
   trainingLocations: (Option & { key: TrainingLocation })[];
   equipment: Option[];
   defaultEquipment: Record<TrainingLocation, string[]>;
+  focusAreas: (Option & { key: FocusArea; description: string; group: 'broad' | 'specific' })[];
   dietaryPreferences: (Option & { kind: 'restriction' | 'style' })[];
   exclusiveDietPatterns: string[];
   allergens: Option[];
@@ -120,6 +126,7 @@ export interface ProfileOptions {
     heightCm: { min: number; max: number };
     weightKg: { min: number; max: number };
     trainingDaysPerWeek: { min: number; max: number };
+    focusAreasMax: number;
     displayNameLength: number;
     foodListMax: number;
     customAllergyMax: number;

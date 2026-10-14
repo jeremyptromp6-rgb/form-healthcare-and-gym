@@ -3,34 +3,37 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Buddy, type BuddyMood } from '@/components/art/Buddy';
+import { FocusSection } from '@/components/profile/FocusSection';
 import { ProfileSummary } from '@/components/profile/ProfileSummary';
 import { BodySection, GoalSection, HabitsSection, NutritionSection, TrainingSection, type SectionProps } from '@/components/profile/sections';
 import { AppText, Button, ErrorState, IconButton, InlineMessage, ProgressBar, Row, StateView } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
 import { useAuth } from '@/lib/auth';
 import { useCatalog, useCompleteOnboarding, useMe } from '@/lib/queries';
-import type { OnboardingStep } from '@/lib/types';
+import type { EditableSection } from '@/lib/types';
 import { colors, MAX_CONTENT_WIDTH, space } from '@/theme/tokens';
 
-type Step = OnboardingStep | 'review';
-const ORDER: Step[] = ['goal', 'body', 'training', 'nutrition', 'habits', 'review'];
+type Step = EditableSection | 'review';
+const ORDER: Step[] = ['goal', 'body', 'training', 'focus', 'nutrition', 'habits', 'review'];
 
 const COPY: Record<Step, { title: string; subtitle: string }> = {
   goal: { title: "What's your main goal?", subtitle: 'Pick the one that matters most right now. You can change it any time.' },
   body: { title: 'About you', subtitle: 'Used to set calorie and macro targets that are safe for you. Private to your account.' },
   training: { title: 'How you train', subtitle: 'So future plans fit your experience, schedule and kit.' },
+  focus: { title: 'What do you want to focus on?', subtitle: 'Pick up to 3 areas and your workouts will lean on them, while still training the rest of you. Skip it for a balanced full-body plan.' },
   nutrition: { title: 'Food preferences', subtitle: 'Allergies are hard rules. Dislikes are just preferences. Skip anything that doesn’t apply.' },
   habits: { title: 'Food habits', subtitle: 'So meal ideas fit your time and budget.' },
   review: { title: 'Check your answers', subtitle: 'Everything look right? You can edit any of this later in Profile.' },
 };
 
 /** Pip's mood follows each step: welcoming, curious about you, kitted up, fed, proud at the end. */
-const PIP_MOOD: Record<Step, BuddyMood> = { goal: 'happy', body: 'thinking', training: 'workout', nutrition: 'happy', habits: 'happy', review: 'proud' };
+const PIP_MOOD: Record<Step, BuddyMood> = { goal: 'happy', body: 'thinking', training: 'workout', focus: 'workout', nutrition: 'happy', habits: 'happy', review: 'proud' };
 
-const SECTIONS: Record<OnboardingStep, (p: SectionProps) => React.JSX.Element> = {
+const SECTIONS: Record<EditableSection, (p: SectionProps) => React.JSX.Element> = {
   goal: GoalSection,
   body: BodySection,
   training: TrainingSection,
+  focus: FocusSection,
   nutrition: NutritionSection,
   habits: HabitsSection,
 };
@@ -45,7 +48,9 @@ export default function Onboarding() {
   const [editingFromReview, setEditingFromReview] = useState(false);
   const scroll = useRef<ScrollView>(null);
   // Until the user navigates, resume at the server's next unanswered step.
-  const step: Step | null = chosenStep ?? (me.data ? (me.data.onboarding.nextStep ?? 'review') : null);
+  // The focus question is app-only (the server's steps don't include it): ask it once training is answered.
+  const serverNext = me.data ? (me.data.onboarding.nextStep ?? 'review') : null;
+  const step: Step | null = chosenStep ?? (serverNext === 'nutrition' && me.data?.profile?.focusAreas == null ? 'focus' : serverNext);
 
   // Each step starts at the top — after the new step has rendered, not before.
   useEffect(() => {

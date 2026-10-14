@@ -5,8 +5,12 @@ import {
   EXERCISE_BY_ID,
   EXERCISES,
   exerciseAnalyzer,
+  FOCUS_AREAS,
+  FOCUS_MUSCLES,
   jointAngleDeg,
   liveRepCounter,
+  normalizeFocusAreas,
+  PROFILE_LIMITS,
   MovementStateMachine,
   repVerifier,
   restRemainingSeconds,
@@ -31,6 +35,28 @@ describe("exercise library", () => {
       expect(e.targetReps.min).toBeLessThan(e.targetReps.max);
     }
     expect(EXERCISE_BY_ID.get("bodyweight_squat")!.name).toBe("Bodyweight Squat");
+  });
+
+  it("covers the whole body with a wide, well-formed library", () => {
+    expect(EXERCISES.length).toBeGreaterThanOrEqual(100);
+    const trained = new Set(EXERCISES.flatMap((e) => e.primaryMuscles));
+    for (const m of ["chest", "back", "lats", "shoulders", "traps", "biceps", "triceps", "forearms", "core", "glutes", "quads", "hamstrings", "calves"]) {
+      expect(trained.has(m as never), m).toBe(true);
+    }
+    for (const e of EXERCISES) {
+      expect(e.id, e.id).toMatch(/^[a-z0-9]+(_[a-z0-9]+)*$/);
+      expect(e.instructions.length, e.id).toBeGreaterThan(1);
+      expect(e.safety.length, e.id).toBeGreaterThan(0);
+      expect(e.targetReps.min, e.id).toBeLessThan(e.targetReps.max);
+      expect(e.primaryMuscles.length, e.id).toBeGreaterThan(0);
+      expect(e.secondaryMuscles.filter((m) => e.primaryMuscles.includes(m)), e.id).toEqual([]);
+      expect(e.loadable, e.id).toBe(e.loadIncrementKg > 0);
+      expect(e.equipment.length, e.id).toBeGreaterThan(0);
+    }
+    // The original library keeps its ids.
+    for (const id of ["bodyweight_squat", "push_up", "bicep_curl", "lunge", "glute_bridge", "goblet_squat", "squat", "deadlift", "bench_press", "overhead_press", "row", "band_row", "cable_row", "lat_pulldown", "pull_up"]) {
+      expect(EXERCISE_BY_ID.has(id), id).toBe(true);
+    }
   });
 
   it("claims camera support only where ROM rules exist, with a visibility setup", () => {
@@ -100,6 +126,77 @@ describe("workout generator (rule-based v1)", () => {
     const four = { ...base, trainingDaysPerWeek: 4, equipment: ["dumbbells", "bench", "pull_up_bar"] as GenerationInput["equipment"], experience: "intermediate" as const };
     expect(ruleBasedGenerator.generate({ ...four, sessionsThisWeek: 0 }).focus).toBe("lower");
     expect(ruleBasedGenerator.generate({ ...four, sessionsThisWeek: 1 }).focus).toBe("upper");
+  });
+
+  describe("focus areas", () => {
+    const gym = {
+      ...base,
+      trainingDaysPerWeek: 4,
+      experience: "intermediate" as const,
+      equipment: ["bodyweight", "dumbbells", "barbell", "bench", "squat_rack", "cable_machine", "machines", "pull_up_bar"] as GenerationInput["equipment"],
+    };
+    const primary = (input: GenerationInput, muscles: string[]) =>
+      ruleBasedGenerator.generate(input).exercises.filter((e) => EXERCISE_BY_ID.get(e.exerciseId)!.primaryMuscles.some((m) => muscles.includes(m))).length;
+
+    it("changes nothing without a focus, or with full body", () => {
+      const plain = ruleBasedGenerator.generate(gym);
+      for (const focusAreas of [null, [], ["full_body"]] as GenerationInput["focusAreas"][]) {
+        expect(ruleBasedGenerator.generate({ ...gym, focusAreas })).toEqual(plain);
+      }
+    });
+
+    it("leads with the focus side two sessions in three and still trains the other half", () => {
+      const focusOf = (n: number, focusAreas: GenerationInput["focusAreas"], days = 4) => ruleBasedGenerator.generate({ ...gym, trainingDaysPerWeek: days, focusAreas, sessionsThisWeek: n }).focus;
+      expect([0, 1, 2].map((n) => focusOf(n, ["chest"]))).toEqual(["upper", "lower", "upper"]);
+      expect([0, 1, 2].map((n) => focusOf(n, ["glutes"]))).toEqual(["lower", "upper", "lower"]);
+      // Three days: the middle session stays full body, so legs are never dropped.
+      expect([0, 1, 2].map((n) => focusOf(n, ["chest"], 3))).toEqual(["upper", "full_body", "upper"]);
+      // A focus on both halves keeps the plain alternation.
+      expect([0, 1].map((n) => focusOf(n, ["chest", "legs"]))).toEqual(["lower", "upper"]);
+    });
+
+    it("weights a session towards the chosen muscles", () => {
+      const upper = { ...gym, sessionsThisWeek: 0 };
+      const chestPlan = ruleBasedGenerator.generate({ ...upper, focusAreas: ["chest"] });
+      expect(chestPlan.focus).toBe("upper");
+      expect(chestPlan.title).toContain("Chest focus");
+      expect(primary({ ...upper, focusAreas: ["chest"] }, ["chest"])).toBeGreaterThan(primary(upper, ["chest"]));
+      expect(chestPlan.exercises.length).toBeGreaterThan(ruleBasedGenerator.generate(upper).exercises.length);
+      const lower = { ...gym, sessionsThisWeek: 0 };
+      expect(ruleBasedGenerator.generate({ ...lower, focusAreas: ["glutes"] }).focus).toBe("lower");
+      expect(primary({ ...lower, focusAreas: ["glutes"] }, ["glutes"])).toBeGreaterThanOrEqual(primary(lower, ["glutes"]));
+      expect(primary({ ...lower, focusAreas: ["glutes"] }, ["glutes"])).toBeGreaterThanOrEqual(2);
+    });
+
+    it("never puts a leg-focus movement on an upper day", () => {
+      const plan = ruleBasedGenerator.generate({ ...gym, sessionsThisWeek: 1, focusAreas: ["legs"], trainingDaysPerWeek: 5 });
+      // Sessions 0 and 1 of a leg focus: lower then upper; the upper day has no focus extras and stays upper-body.
+      expect(plan.focus).toBe("upper");
+      expect(plan.title).not.toContain("focus");
+    });
+
+    it("validates the choice: up to three, de-duplicated, full body alone", () => {
+      expect(normalizeFocusAreas(["chest", "chest", "back"])).toEqual(["chest", "back"]);
+      expect(normalizeFocusAreas(["full_body"])).toEqual(["full_body"]);
+      expect(() => normalizeFocusAreas([])).toThrow();
+      expect(() => normalizeFocusAreas(["chest", "back", "arms", "core"])).toThrow(`up to ${PROFILE_LIMITS.focusAreasMax}`);
+      expect(() => normalizeFocusAreas(["full_body", "chest"])).toThrow();
+    });
+
+    it("maps every offered area to muscles that exist in the library", () => {
+      const muscles = new Set(EXERCISES.flatMap((e) => [...e.primaryMuscles, ...e.secondaryMuscles]));
+      for (const a of FOCUS_AREAS) {
+        if (a.key === "full_body") expect(FOCUS_MUSCLES[a.key]).toEqual([]);
+        else expect(FOCUS_MUSCLES[a.key].some((m) => muscles.has(m))).toBe(true);
+      }
+    });
+
+    it("is deterministic and keeps variety within the focus", () => {
+      const input = { ...gym, focusAreas: ["chest", "back", "arms"] as GenerationInput["focusAreas"] };
+      const a = ruleBasedGenerator.generate(input);
+      expect(a).toEqual(ruleBasedGenerator.generate(input));
+      expect(new Set(a.exercises.map((e) => e.exerciseId)).size).toBe(a.exercises.length);
+    });
   });
 
   it("progresses from previous performance: load up when every set hit the top", () => {

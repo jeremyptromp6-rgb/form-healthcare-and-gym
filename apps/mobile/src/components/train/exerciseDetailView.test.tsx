@@ -54,7 +54,7 @@ describe('ExerciseDetailView', () => {
       await render(<ExerciseDetailView detail={detail(goblet)} poseAvailable onPractise={jest.fn()} />);
       expect(screen.getByRole('tab', { name: 'About' }).props.accessibilityState).toMatchObject({ selected: true });
       expect(screen.getByLabelText('Exercise sections').props.accessibilityRole).toBe('tablist');
-      expect(screen.getByText('Muscles worked')).toBeTruthy();
+      expect(screen.getByText('Target muscles')).toBeTruthy();
       expect(screen.getByText('Equipment')).toBeTruthy();
       expect(screen.getByText('dumbbells')).toBeTruthy();
       expect(screen.getByText('kettlebell')).toBeTruthy();
@@ -68,11 +68,12 @@ describe('ExerciseDetailView', () => {
       expect(screen.getByLabelText('Coaching: Camera')).toBeTruthy();
     });
 
-    it('names the three legend keys from the art colours', async () => {
+    it('names the legend keys from the art colours', async () => {
       await render(<ExerciseDetailView detail={detail(goblet)} poseAvailable onPractise={jest.fn()} />);
       expect(screen.getByText('Start')).toBeTruthy();
       expect(screen.getByText('Finish')).toBeTruthy();
-      expect(screen.getByText('Muscles working')).toBeTruthy();
+      expect(screen.getByText('Main muscles')).toBeTruthy();
+      expect(screen.getByText('Helping')).toBeTruthy();
     });
 
     it('offers camera practice only when the exercise supports it and the device can run it, and calls onPractise with the id', async () => {

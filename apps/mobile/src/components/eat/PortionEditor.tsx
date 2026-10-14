@@ -1,6 +1,7 @@
-import { presentAmount, unitSymbol, type ScaleProvider } from '@form/domain';
+import { foodCategory, presentAmount, unitSymbol, type ScaleProvider } from '@form/domain';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { FoodArt } from '@/components/art/FoodArt';
 import { AppText, Badge, Button, Card, Field, InlineMessage, Row, Segmented } from '@/components/ui';
 import type { WeightSource } from '@/lib/api';
 import { allowedMethods, defaultMethod, MEAL_LABEL, MEALS, METHOD_LABEL, previewPortion, readAmount, unitOptions, type UnitGroup, type UnitOption } from '@/lib/eat';
@@ -140,15 +141,18 @@ export function PortionEditor({ food, initial, submitLabel, busy, error, onSubmi
 
   return (
     <Card style={{ gap: space.lg }}>
-      <View style={{ gap: 2 }}>
-        <AppText variant="heading" header>
-          {food.name}
-        </AppText>
-        <AppText variant="caption" color={colors.textMuted}>
-          {food.brand ? `${food.brand} · ` : ''}
-          {sourceLabel ?? (food.origin === 'verified_database' ? 'Verified database' : 'Your food')} · {Math.round(food.per100.kcal)} kcal per 100 {food.basis}
-        </AppText>
-      </View>
+      <Row gap={space.md}>
+        <FoodArt category={foodCategory(food)} size={56} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <AppText variant="heading" header>
+            {food.name}
+          </AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            {food.brand ? `${food.brand} · ` : ''}
+            {sourceLabel ?? (food.origin === 'verified_database' ? 'Verified database' : 'Your food')} · {Math.round(food.per100.kcal)} kcal per 100 {food.basis}
+          </AppText>
+        </View>
+      </Row>
 
       <View style={{ gap: space.sm }}>
         <Row gap={space.sm} style={{ alignItems: 'flex-end' }}>

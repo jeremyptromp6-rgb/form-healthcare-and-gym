@@ -12,12 +12,17 @@ const catalog = {
   trainingLocations: [{ key: 'home', label: 'Home' }],
   equipment: [{ key: 'bodyweight', label: 'Bodyweight only' }],
   defaultEquipment: { home: ['bodyweight'], gym: [], both: [] },
+  focusAreas: [
+    { key: 'full_body', label: 'Full body', description: '', group: 'broad' },
+    { key: 'chest', label: 'Chest', description: '', group: 'specific' },
+    { key: 'back', label: 'Back', description: '', group: 'specific' },
+  ],
   dietaryPreferences: [{ key: 'vegetarian', label: 'Vegetarian', kind: 'restriction' }],
   exclusiveDietPatterns: ['vegetarian'],
   allergens: [{ key: 'peanuts', label: 'Peanuts' }],
   cookingTimes: [{ key: 'under_15', label: 'Under 15 min', maxMinutes: 15 }],
   foodBudgets: [{ key: 'low', label: 'Budget-friendly' }],
-  limits: { ageYears: { min: 13, max: 100 }, heightCm: { min: 120, max: 240 }, weightKg: { min: 30, max: 300 }, trainingDaysPerWeek: { min: 1, max: 7 }, displayNameLength: 40, foodListMax: 30, customAllergyMax: 10, foodItemLength: 40 },
+  limits: { ageYears: { min: 13, max: 100 }, heightCm: { min: 120, max: 240 }, weightKg: { min: 30, max: 300 }, trainingDaysPerWeek: { min: 1, max: 7 }, focusAreasMax: 3, displayNameLength: 40, foodListMax: 30, customAllergyMax: 10, foodItemLength: 40 },
 } as ProfileOptions;
 
 function me(overrides: Partial<Me> = {}): Me {
@@ -111,6 +116,14 @@ describe('ProfileSummary', () => {
     await render(<ProfileSummary me={me({ settings: { units: 'imperial', timezone: null, timezoneAuto: true, dateFormat: 'system', personalizedAdsConsent: false, analyticsConsent: false, aiCoachEnabled: true, aiCoachConsent: false, coachKeepHistory: true, foodScanConsent: false } })} catalog={catalog} />);
     expect(screen.getByText('132.3 lb')).toBeTruthy();
     expect(screen.getByText('5′ 5″')).toBeTruthy();
+  });
+
+  it('shows the focus, defaulting to full body', async () => {
+    await render(<ProfileSummary me={me()} catalog={catalog} />);
+    expect(screen.getByText('Full body')).toBeTruthy();
+    const base = me();
+    await render(<ProfileSummary me={{ ...base, profile: { ...base.profile!, focusAreas: ['chest', 'back'] } }} catalog={catalog} />);
+    expect(screen.getByText('Chest, Back')).toBeTruthy();
   });
 
   it('marks unanswered sections and offers edit links', async () => {

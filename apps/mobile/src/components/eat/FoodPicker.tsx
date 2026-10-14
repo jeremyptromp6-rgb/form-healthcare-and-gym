@@ -1,6 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { foodCategory } from '@form/domain';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
+import { FoodArt } from '@/components/art/FoodArt';
 import { AppText, Badge, Card, ErrorState, Field, Row, StateView } from '@/components/ui';
 import { useFoodSearch } from '@/lib/queries';
 import type { FoodItem } from '@/lib/types';
@@ -46,7 +48,8 @@ export function FoodRow({ food, onPress }: { food: FoodItem; onPress: () => void
       accessibilityLabel={`${food.name}${food.brand ? `, ${food.brand}` : ''}, ${Math.round(food.per100.kcal)} calories per 100 ${food.basis}`}
       onPress={onPress}
       style={({ pressed }) => [{ minHeight: 52, justifyContent: 'center', borderRadius: radius.sm, opacity: pressed ? 0.7 : 1 }]}>
-      <Row>
+      <Row gap={space.md}>
+        <FoodArt category={foodCategory(food)} size={40} />
         <View style={{ flex: 1, gap: 2 }}>
           <Row gap={space.sm}>
             <AppText variant="body" numberOfLines={1} style={{ flexShrink: 1 }}>

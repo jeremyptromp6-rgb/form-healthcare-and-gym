@@ -1,4 +1,4 @@
-import { labelOf, toggle, toggleDiet, validateBodyForm, validateTrainingForm } from './profileForm';
+import { labelOf, toggle, toggleDiet, toggleFocus, validateBodyForm, validateTrainingForm } from './profileForm';
 import type { ProfileOptions } from './types';
 import { cmToFtIn, formatHeight, formatWeight, ftInToCm, heightInputToCm, heightToInput, kgToLb, lbToKg, parseNumber, weightInputToKg, weightToInput } from './units';
 
@@ -7,6 +7,7 @@ const limits: ProfileOptions['limits'] = {
   heightCm: { min: 120, max: 240 },
   weightKg: { min: 30, max: 300 },
   trainingDaysPerWeek: { min: 1, max: 7 },
+  focusAreasMax: 3,
   displayNameLength: 40,
   foodListMax: 30,
   customAllergyMax: 10,
@@ -96,6 +97,14 @@ describe('training form and choice helpers', () => {
     expect(toggleDiet(['vegetarian', 'halal'], 'vegan', exclusive)).toEqual(['halal', 'vegan']);
     expect(toggleDiet(['vegan'], 'vegan', exclusive)).toEqual([]);
     expect(toggleDiet(['vegan'], 'high_protein', exclusive)).toEqual(['vegan', 'high_protein']);
+  });
+
+  it('toggles focus areas: up to the limit, and full body stands alone', () => {
+    expect(toggleFocus([], 'chest', 3)).toEqual(['chest']);
+    expect(toggleFocus(['chest', 'back'], 'chest', 3)).toEqual(['back']);
+    expect(toggleFocus(['chest', 'back', 'arms'], 'core', 3)).toEqual(['chest', 'back', 'arms']);
+    expect(toggleFocus(['chest', 'back'], 'full_body', 3)).toEqual(['full_body']);
+    expect(toggleFocus(['full_body'], 'legs', 3)).toEqual(['legs']);
   });
 
   it('toggles and labels', () => {

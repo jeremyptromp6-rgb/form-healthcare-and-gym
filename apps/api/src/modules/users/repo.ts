@@ -25,6 +25,7 @@ interface ProfileRow {
   training_days_per_week: number | null;
   training_location: UserProfile["trainingLocation"];
   equipment: string | null;
+  focus_areas: string | null;
   activity: UserProfile["activity"];
   goal: UserProfile["energyGoal"];
   onboarding_completed_at: string | null;
@@ -46,6 +47,7 @@ export function loadProfile(db: Db, userId: string): UserProfile | null {
     trainingDaysPerWeek: r.training_days_per_week,
     trainingLocation: r.training_location,
     equipment: r.equipment ? JSON.parse(r.equipment) : null,
+    focusAreas: r.focus_areas ? JSON.parse(r.focus_areas) : null,
     activity: r.activity,
     energyGoal: r.goal,
     onboardingCompletedAt: r.onboarding_completed_at,
@@ -66,6 +68,7 @@ export function emptyProfile(userId: string, now: Date): UserProfile {
     trainingDaysPerWeek: null,
     trainingLocation: null,
     equipment: null,
+    focusAreas: null,
     activity: null,
     energyGoal: null,
     onboardingCompletedAt: null,
@@ -79,12 +82,12 @@ export function writeProfile(db: Db, p: UserProfile, now: Date): UserProfile {
   const next: UserProfile = { ...p, ...derived, updatedAt: now.toISOString() };
   db.prepare(
     `INSERT INTO profiles (user_id, display_name, primary_goal, sex, age_years, height_cm, weight_kg, experience,
-       training_days_per_week, training_location, equipment, activity, goal, onboarding_completed_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       training_days_per_week, training_location, equipment, focus_areas, activity, goal, onboarding_completed_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET display_name = excluded.display_name, primary_goal = excluded.primary_goal,
        sex = excluded.sex, age_years = excluded.age_years, height_cm = excluded.height_cm, weight_kg = excluded.weight_kg,
        experience = excluded.experience, training_days_per_week = excluded.training_days_per_week,
-       training_location = excluded.training_location, equipment = excluded.equipment, activity = excluded.activity,
+       training_location = excluded.training_location, equipment = excluded.equipment, focus_areas = excluded.focus_areas, activity = excluded.activity,
        goal = excluded.goal, updated_at = excluded.updated_at`,
   ).run(
     next.userId,
@@ -98,6 +101,7 @@ export function writeProfile(db: Db, p: UserProfile, now: Date): UserProfile {
     next.trainingDaysPerWeek,
     next.trainingLocation,
     next.equipment ? JSON.stringify(next.equipment) : null,
+    next.focusAreas ? JSON.stringify(next.focusAreas) : null,
     next.activity,
     next.energyGoal,
     next.onboardingCompletedAt,

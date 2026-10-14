@@ -10,6 +10,7 @@ import {
   type DietPreference,
   type Equipment,
   type ExperienceLevel,
+  type FocusArea,
   type FoodBudget,
   type PrimaryGoal,
   type TrainingLocation,
@@ -39,6 +40,8 @@ export interface UserProfile {
   trainingDaysPerWeek: number | null;
   trainingLocation: TrainingLocation | null;
   equipment: Equipment[] | null;
+  /** Body areas workouts lean towards. Null = not chosen, treated as full body. */
+  focusAreas: FocusArea[] | null;
   activity: ActivityLevel | null;
   energyGoal: Goal | null;
   onboardingCompletedAt: string | null;
@@ -192,6 +195,15 @@ export function validateDietPreferences(prefs: readonly DietPreference[]): DietP
   if (patterns.length > 1) {
     throw new DomainValidationError(`choose only one of ${EXCLUSIVE_DIET_PATTERNS.join(", ")}`, "dietaryPreferences");
   }
+  return unique;
+}
+
+/** De-duplicates the chosen focus areas and enforces the limit; "full body" stands alone. */
+export function normalizeFocusAreas(areas: readonly FocusArea[]): FocusArea[] {
+  const unique = [...new Set(areas)];
+  if (unique.length === 0) throw new DomainValidationError("choose at least one focus area", "focusAreas");
+  if (unique.length > PROFILE_LIMITS.focusAreasMax) throw new DomainValidationError(`choose up to ${PROFILE_LIMITS.focusAreasMax} focus areas`, "focusAreas");
+  if (unique.includes("full_body") && unique.length > 1) throw new DomainValidationError("full body can't be combined with other focus areas", "focusAreas");
   return unique;
 }
 

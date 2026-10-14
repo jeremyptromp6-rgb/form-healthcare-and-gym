@@ -39,6 +39,7 @@ export const SECTION_ICONS: Record<string, { icon: IconName; tint: string }> = {
   Appearance: { icon: 'color-palette', tint: colors.accent },
   Achievements: { icon: 'ribbon', tint: colors.accent },
   'Muscles worked': { icon: 'body', tint: colors.protein },
+  'Target muscles': { icon: 'body', tint: colors.protein },
   'Last session': { icon: 'body', tint: colors.protein },
   Equipment: { icon: 'barbell', tint: colors.primary },
   'Your training': { icon: 'stats-chart', tint: colors.primary },

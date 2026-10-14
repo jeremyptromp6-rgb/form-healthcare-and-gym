@@ -1,3 +1,4 @@
+import { EXERCISES } from '@form/domain';
 import { act, render, screen } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
 import { countSvg } from '@/test-utils/svgNodes';
@@ -173,6 +174,26 @@ describe('ExerciseArt rendering', () => {
     mockReduce = false;
     await render(<ExerciseArt exerciseId="bicep_curl" name="Curl" animated />);
     expect(screen.getByLabelText('Curl illustration')).toBeTruthy();
+  });
+});
+
+describe('ExerciseArt across the library', () => {
+  beforeEach(() => {
+    mockReduce = true;
+  });
+
+  it('has a picture for every exercise in the library', () => {
+    expect(EXERCISES.map((e) => e.id).filter((id) => !ILLUSTRATED_EXERCISES.includes(id))).toEqual([]);
+    expect(ILLUSTRATED_EXERCISES.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it('colours the worked muscles from the library, so exercises sharing a pose still differ', async () => {
+    // Same bench pose and gear; the main movers differ (shoulders vs triceps).
+    const { unmount } = await render(<ExerciseArt exerciseId="incline_bench_press" tone="light" />);
+    const incline = snapshot();
+    await unmount();
+    await render(<ExerciseArt exerciseId="close_grip_bench_press" tone="light" />);
+    expect(snapshot()).not.toBe(incline);
   });
 });
 

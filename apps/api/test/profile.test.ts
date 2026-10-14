@@ -230,6 +230,40 @@ describe("onboarding flow", () => {
   });
 });
 
+describe("focus areas", () => {
+  it("serves the options, defaults to none, and stores up to three", async () => {
+    ({ app } = await makeApp());
+    const u = await registerUser(app);
+    const c = await getJson(u.auth, "/catalog/profile-options");
+    expect(c.focusAreas.map((f: { key: string }) => f.key)).toEqual(expect.arrayContaining(["full_body", "upper_body", "lower_body", "chest", "back", "shoulders", "arms", "core", "legs", "glutes"]));
+    expect(c.limits.focusAreasMax).toBe(3);
+    await onboard(app, u.auth);
+    expect((await getJson(u.auth, "/me")).profile.focusAreas).toBeNull();
+    const res = await patchProfile(u.auth, { focusAreas: ["chest", "back", "chest"], localDate: TODAY });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.focusAreas).toEqual(["chest", "back"]);
+    expect((await getJson(u.auth, "/me")).profile.focusAreas).toEqual(["chest", "back"]);
+  });
+
+  it("rejects unknown areas, too many, empty and full body combined", async () => {
+    ({ app } = await makeApp());
+    const u = await registerUser(app);
+    await onboard(app, u.auth);
+    for (const focusAreas of [["biceps_peak"], ["chest", "back", "arms", "core"], [], ["full_body", "chest"]]) {
+      expect([400, 422]).toContain((await patchProfile(u.auth, { focusAreas, localDate: TODAY })).statusCode);
+    }
+  });
+
+  it("shapes today's plan", async () => {
+    ({ app } = await makeApp());
+    const u = await registerUser(app);
+    await onboard(app, u.auth);
+    await patchProfile(u.auth, { focusAreas: ["chest"], trainingDaysPerWeek: 3, localDate: TODAY });
+    const today = (await app.inject({ method: "GET", url: "/workouts/today", headers: u.auth })).json();
+    expect(today.plan.title).toContain("Chest focus");
+  });
+});
+
 describe("profile edits and mass assignment", () => {
   it("edits individual fields without touching others", async () => {
     ({ app } = await makeApp());

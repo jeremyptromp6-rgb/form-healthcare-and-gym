@@ -1,14 +1,16 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
+import { FocusSection } from '@/components/profile/FocusSection';
 import { BodySection, GoalSection, HabitsSection, NutritionSection, TrainingSection, type SectionProps } from '@/components/profile/sections';
 import { ErrorState, InlineMessage, Screen, StateView } from '@/components/ui';
 import { useCatalog, useMe } from '@/lib/queries';
-import type { OnboardingStep } from '@/lib/types';
+import type { EditableSection } from '@/lib/types';
 
-const SECTIONS: Record<OnboardingStep, { title: string; component: (p: SectionProps) => React.JSX.Element }> = {
+const SECTIONS: Record<EditableSection, { title: string; component: (p: SectionProps) => React.JSX.Element }> = {
   goal: { title: 'Goal', component: GoalSection },
   body: { title: 'About you', component: BodySection },
   training: { title: 'Training', component: TrainingSection },
+  focus: { title: 'Focus', component: FocusSection },
   nutrition: { title: 'Food preferences', component: NutritionSection },
   habits: { title: 'Food habits', component: HabitsSection },
 };
@@ -24,7 +26,7 @@ export default function EditSection() {
   useEffect(() => () => {
     if (backTimer.current) clearTimeout(backTimer.current);
   }, []);
-  const def = SECTIONS[section as OnboardingStep];
+  const def = SECTIONS[section as EditableSection];
 
   if (!def) {
     return (

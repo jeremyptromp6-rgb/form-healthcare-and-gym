@@ -3,7 +3,7 @@ import { Children, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { AppText, Badge, Card, Divider, Row, SectionAction } from '@/components/ui';
 import { labelOf } from '@/lib/profileForm';
-import type { Me, OnboardingStep, ProfileOptions } from '@/lib/types';
+import type { EditableSection, Me, ProfileOptions } from '@/lib/types';
 import { formatHeight, formatWeight } from '@/lib/units';
 import { colors, space } from '@/theme/tokens';
 
@@ -58,21 +58,21 @@ export function ProfileSummary({
   me,
   catalog,
   onEdit,
-  sections = ['goal', 'body', 'training', 'nutrition', 'habits'],
+  sections = ['goal', 'body', 'training', 'focus', 'nutrition', 'habits'],
 }: {
   me: Me;
   catalog: ProfileOptions;
-  onEdit?: (step: OnboardingStep) => void;
-  sections?: OnboardingStep[];
+  onEdit?: (step: EditableSection) => void;
+  sections?: EditableSection[];
 }) {
   const p = me.profile;
   const n = me.preferences;
   const units = me.settings.units;
   const missing = new Set(me.onboarding.remaining);
-  const edit = (s: OnboardingStep) => (onEdit ? () => onEdit(s) : undefined);
+  const edit = (s: EditableSection) => (onEdit ? () => onEdit(s) : undefined);
   const labels = (opts: { key: string; label: string }[], keys: string[] = []) => keys.map((k) => labelOf(opts, k));
 
-  const known: OnboardingStep[] = ['goal', 'body', 'training', 'nutrition', 'habits'];
+  const known: EditableSection[] = ['goal', 'body', 'training', 'focus', 'nutrition', 'habits'];
   if (!sections.some((s) => known.includes(s))) return null;
 
   return (
@@ -98,6 +98,12 @@ export function ProfileSummary({
             <Line label="Days per week" value={p?.trainingDaysPerWeek != null ? String(p.trainingDaysPerWeek) : '—'} />
             <Line label="Where" value={labelOf(catalog.trainingLocations, p?.trainingLocation)} />
             <Line label="Equipment" value={list(labels(catalog.equipment, p?.equipment ?? []))} />
+          </Section>
+        ) : null}
+
+        {sections.includes('focus') ? (
+          <Section title="Focus" onEdit={edit('focus')}>
+            <AppText variant="bodyStrong">{p?.focusAreas?.length ? list(labels(catalog.focusAreas, p.focusAreas)) : 'Full body'}</AppText>
           </Section>
         ) : null}
 

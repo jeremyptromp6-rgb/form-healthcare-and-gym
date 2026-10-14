@@ -1,16 +1,22 @@
+import { EXERCISE_BY_ID } from '@form/domain';
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import { AppState, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useReducedMotion } from '@/lib/a11y';
-import { ACCENTS, art, artPalettes, LIGHT_DIR, METALS, STROKE, type ArtPalette, type ArtTone, type Metal } from '@/theme/artPalette';
+import { ANATOMY, artPalettes, LIGHT_DIR, METALS, STROKE, type ArtPalette, type ArtTone, type Metal } from '@/theme/artPalette';
 import { palettes, scheme } from '@/theme/tokens';
 
 /**
  * Exercise illustrations: original vector art drawn from a small figure rig, so every movement in
- * the catalogue has an accurate picture. The figure is a friendly, stylised person (a tapered
- * torso in a tank top and shorts, soft limbs, hands, shoes, a head with hair and an ear) lit from the
- * top-left, with the working muscles in terracotta, the start position as a faint silhouette and the
- * equipment drawn in METALS. Side view, facing right. Style rules: docs/art-style.md.
+ * the catalogue has a picture. The figure is a stylised, muscular anatomy model in light grey (a smooth
+ * head, a broad torso, rounded limbs with fine muscle seams), lit from the top-left. The exercise's
+ * main muscles are filled in the accent colour and its helpers in a softer tint of it; the start
+ * position is a faint silhouette and the equipment is drawn in METALS. Side view, facing right.
+ *
+ * Data-driven: a handful of reusable movement templates (stand, hinge, squat, lunge, plank, supine,
+ * seated, hanging, overhead...) hold the start and end poses and default props; ART maps every exercise
+ * id to a template (and, where it differs, its props), and the highlighted muscles come from the domain
+ * library's primary/secondary muscles. Style rules: docs/art-style.md.
  * Budget: 50 SVG elements for the figure with its ghost and gear, 25 as a thumb, 12 for the placeholder.
  */
 
@@ -27,13 +33,11 @@ export interface Pose {
   knee2?: P;
   foot2?: P;
 }
-type Segment = 'torso' | 'thigh' | 'shin' | 'upperArm' | 'forearm';
-type Equipment = 'plate' | 'dumbbell' | 'kettlebell' | 'bench' | 'band' | 'cable' | 'pulldown' | 'bar' | 'seat' | 'floor';
+type Equipment = 'plate' | 'dumbbell' | 'kettlebell' | 'bench' | 'bench_end' | 'rails' | 'band' | 'cable' | 'pulldown' | 'bar' | 'seat' | 'floor';
 
-interface ExerciseDrawing {
+interface Template {
   start: Pose;
   end: Pose;
-  work: Segment[];
   equipment: Equipment[];
 }
 
@@ -51,52 +55,69 @@ const SQUAT_LEGS = {
   neck: [106, 68],
   head: [112, 57],
 } as const;
+/** Hinged forward with a flat back, legs soft. */
+const HINGE_ROW = {
+  foot: [100, 128],
+  knee: [108, 105],
+  hip: [82, 84],
+  neck: [120, 68],
+  head: [131, 62],
+} as const;
+const SEATED = {
+  hip: [90, 104],
+  knee: [116, 100],
+  foot: [120, 128],
+  neck: [94, 70],
+  head: [96, 57],
+} as const;
+const OVERHEAD = { head: [101, 28], neck: [100, 41], hip: [99, 73], knee: [99, 99], foot: [99, 125] } as const;
+const PUSH_UP_TOP = {
+  foot: [36, 126],
+  knee: [62, 118],
+  hip: [90, 110],
+  neck: [138, 96],
+  head: [151, 90],
+  elbow: [138, 111],
+  hand: [138, 127],
+} as const;
+const PUSH_UP_LOW = {
+  foot: [36, 126],
+  knee: [62, 121],
+  hip: [90, 117],
+  neck: [138, 111],
+  head: [151, 107],
+  elbow: [121, 113],
+  hand: [138, 127],
+} as const;
+const LEG_EXT_BENT: Pose = { ...SEATED, elbow: [100, 94], hand: [104, 104], knee: [116, 100], foot: [118, 128] };
+const LEG_EXT_STRAIGHT: Pose = { ...SEATED, elbow: [100, 94], hand: [104, 104], knee: [116, 102], foot: [145, 100] };
+const BURPEE_UP: Pose = { ...OVERHEAD, elbow: [106, 32], hand: [104, 17] };
 
-const DRAWINGS: Record<string, ExerciseDrawing> = {
+/** The movements the original library was drawn for: each keeps its own id as its template name. */
+const BASE: Record<string, Template> = {
   bodyweight_squat: {
     start: { ...STAND, elbow: [113, 48], hand: [128, 48] },
     end: { ...SQUAT_LEGS, elbow: [120, 72], hand: [136, 72] },
-    work: ['thigh', 'shin'],
     equipment: ['floor'],
   },
   goblet_squat: {
     start: { ...STAND, elbow: [108, 62], hand: [112, 52] },
     end: { ...SQUAT_LEGS, elbow: [114, 84], hand: [118, 74] },
-    work: ['thigh', 'shin'],
     equipment: ['floor', 'kettlebell'],
   },
   squat: {
     start: { ...STAND, elbow: [89, 58], hand: [96, 46] },
     end: { ...SQUAT_LEGS, elbow: [95, 82], hand: [102, 70] },
-    work: ['thigh', 'shin'],
     equipment: ['floor', 'plate'],
   },
   push_up: {
-    start: {
-      foot: [36, 126],
-      knee: [62, 118],
-      hip: [90, 110],
-      neck: [138, 96],
-      head: [151, 90],
-      elbow: [138, 111],
-      hand: [138, 127],
-    },
-    end: {
-      foot: [36, 126],
-      knee: [62, 121],
-      hip: [90, 117],
-      neck: [138, 111],
-      head: [151, 107],
-      elbow: [121, 113],
-      hand: [138, 127],
-    },
-    work: ['upperArm', 'forearm', 'torso'],
+    start: PUSH_UP_TOP,
+    end: PUSH_UP_LOW,
     equipment: ['floor'],
   },
   bicep_curl: {
     start: { ...STAND, elbow: [101, 62], hand: [102, 82] },
     end: { ...STAND, elbow: [101, 62], hand: [113, 48] },
-    work: ['upperArm', 'forearm'],
     equipment: ['floor', 'dumbbell'],
   },
   lunge: {
@@ -118,7 +139,6 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       knee2: [84, 125],
       foot2: [62, 121],
     },
-    work: ['thigh', 'shin'],
     equipment: ['floor'],
   },
   glute_bridge: {
@@ -140,7 +160,6 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       elbow: [72, 125],
       hand: [92, 126],
     },
-    work: ['thigh', 'torso'],
     equipment: ['floor'],
   },
   deadlift: {
@@ -154,7 +173,6 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       hand: [110, 114],
     },
     end: { ...STAND, elbow: [101, 62], hand: [102, 84] },
-    work: ['thigh', 'torso'],
     equipment: ['floor', 'plate'],
   },
   bench_press: {
@@ -177,35 +195,16 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       elbow: [62, 80],
       hand: [62, 60],
     },
-    work: ['upperArm', 'forearm', 'torso'],
     equipment: ['floor', 'bench', 'plate'],
   },
   overhead_press: {
     start: { ...STAND, elbow: [112, 57], hand: [110, 43] },
     end: { ...STAND, elbow: [106, 32], hand: [104, 17] },
-    work: ['upperArm', 'forearm'],
     equipment: ['floor', 'plate'],
   },
   row: {
-    start: {
-      foot: [100, 128],
-      knee: [108, 105],
-      hip: [82, 84],
-      neck: [120, 68],
-      head: [131, 62],
-      elbow: [122, 86],
-      hand: [122, 104],
-    },
-    end: {
-      foot: [100, 128],
-      knee: [108, 105],
-      hip: [82, 84],
-      neck: [120, 68],
-      head: [131, 62],
-      elbow: [100, 74],
-      hand: [114, 90],
-    },
-    work: ['upperArm', 'forearm'],
+    start: { ...HINGE_ROW, elbow: [122, 86], hand: [122, 104] },
+    end: { ...HINGE_ROW, elbow: [100, 74], hand: [114, 90] },
     equipment: ['floor', 'plate'],
   },
   band_row: {
@@ -227,7 +226,6 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       elbow: [84, 60],
       hand: [104, 56],
     },
-    work: ['upperArm', 'forearm'],
     equipment: ['floor', 'band'],
   },
   cable_row: {
@@ -249,29 +247,11 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       elbow: [68, 90],
       hand: [90, 90],
     },
-    work: ['upperArm', 'forearm'],
     equipment: ['floor', 'seat', 'cable'],
   },
   lat_pulldown: {
-    start: {
-      hip: [90, 104],
-      knee: [116, 100],
-      foot: [120, 128],
-      neck: [94, 70],
-      head: [96, 57],
-      elbow: [104, 40],
-      hand: [112, 16],
-    },
-    end: {
-      hip: [90, 104],
-      knee: [116, 100],
-      foot: [120, 128],
-      neck: [94, 70],
-      head: [96, 57],
-      elbow: [86, 82],
-      hand: [106, 64],
-    },
-    work: ['upperArm', 'forearm'],
+    start: { ...SEATED, knee: [116, 100], foot: [120, 128], elbow: [104, 40], hand: [112, 16] },
+    end: { ...SEATED, elbow: [86, 82], hand: [106, 64] },
     equipment: ['floor', 'seat', 'pulldown'],
   },
   pull_up: {
@@ -293,20 +273,340 @@ const DRAWINGS: Record<string, ExerciseDrawing> = {
       knee: [106, 86],
       foot: [94, 98],
     },
-    work: ['upperArm', 'forearm', 'torso'],
     equipment: ['bar'],
   },
 };
 
-const HEAD_R = 10.5;
-const TORSO_W = [9, 8.2, 9.6] as const;
-const LEG_W = [7.6, 5.9, 3.8] as const;
-const ARM_W = [4.9, 3.9, 3] as const;
+/** Reusable movement templates for the wider library. */
+const EXTRA: Record<string, Template> = {
+  calf_raise: {
+    start: { ...STAND, elbow: [101, 62], hand: [102, 82] },
+    end: { head: [101, 25], neck: [100, 38], hip: [99, 70], knee: [99, 96], foot: [99, 122], elbow: [101, 56], hand: [102, 76] },
+    equipment: ['floor'],
+  },
+  front_raise: {
+    start: { ...STAND, elbow: [101, 62], hand: [103, 82] },
+    end: { ...STAND, elbow: [119, 52], hand: [137, 50] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  upright: {
+    start: { ...STAND, elbow: [104, 64], hand: [103, 84] },
+    end: { ...STAND, elbow: [113, 48], hand: [104, 56] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  shrug: {
+    start: { ...STAND, elbow: [101, 62], hand: [102, 84] },
+    end: { head: [101, 28], neck: [100, 41], hip: [99, 76], knee: [99, 102], foot: [99, 128], elbow: [101, 60], hand: [102, 81] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  tri_overhead: {
+    start: { ...STAND, elbow: [100, 28], hand: [89, 40] },
+    end: { ...STAND, elbow: [100, 28], hand: [101, 8] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  kickback: {
+    start: { ...HINGE_ROW, elbow: [100, 76], hand: [101, 96] },
+    end: { ...HINGE_ROW, elbow: [100, 76], hand: [80, 78] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  pushdown: {
+    start: { ...STAND, elbow: [101, 62], hand: [113, 57] },
+    end: { ...STAND, elbow: [101, 62], hand: [103, 84] },
+    equipment: ['floor', 'pulldown'],
+  },
+  crunch: {
+    start: { head: [38, 117], neck: [52, 121], hip: [98, 122], knee: [126, 100], foot: [146, 127], elbow: [52, 108], hand: [42, 112] },
+    end: { head: [60, 98], neck: [68, 108], hip: [98, 122], knee: [126, 100], foot: [146, 127], elbow: [66, 92], hand: [58, 98] },
+    equipment: ['floor'],
+  },
+  leg_raise: {
+    start: { head: [38, 121], neck: [52, 122], hip: [92, 123], knee: [122, 122], foot: [150, 123], elbow: [68, 126], hand: [88, 127] },
+    end: { head: [38, 121], neck: [52, 122], hip: [92, 123], knee: [93, 95], foot: [95, 67], elbow: [68, 126], hand: [88, 127] },
+    equipment: ['floor'],
+  },
+  hang_knee: {
+    start: { hand: [110, 18], elbow: [108, 36], neck: [104, 56], head: [105, 43], hip: [102, 90], knee: [103, 114], foot: [100, 126] },
+    end: { hand: [110, 18], elbow: [108, 36], neck: [104, 56], head: [105, 43], hip: [102, 90], knee: [124, 84], foot: [112, 104] },
+    equipment: ['bar'],
+  },
+  vsit: {
+    start: { head: [72, 76], neck: [80, 88], hip: [102, 116], knee: [128, 92], foot: [148, 104], elbow: [106, 96], hand: [124, 94] },
+    end: { head: [72, 76], neck: [80, 88], hip: [102, 116], knee: [128, 92], foot: [148, 104], elbow: [96, 100], hand: [112, 100] },
+    equipment: ['floor'],
+  },
+  plank: {
+    start: { foot: [36, 126], knee: [62, 119], hip: [90, 113], neck: [136, 104], head: [149, 100], elbow: [134, 121], hand: [150, 125] },
+    end: { foot: [36, 126], knee: [62, 118], hip: [90, 111], neck: [136, 104], head: [149, 100], elbow: [134, 121], hand: [150, 125] },
+    equipment: ['floor'],
+  },
+  mountain: {
+    start: { ...PUSH_UP_TOP, knee2: [64, 118], foot2: [38, 126] },
+    end: { ...PUSH_UP_TOP, knee2: [112, 98], foot2: [92, 117] },
+    equipment: ['floor'],
+  },
+  superman: {
+    start: { head: [150, 118], neck: [136, 121], hip: [100, 122], knee: [70, 123], foot: [40, 124], elbow: [150, 121], hand: [168, 123] },
+    end: { head: [152, 108], neck: [137, 114], hip: [100, 122], knee: [70, 116], foot: [42, 110], elbow: [152, 111], hand: [170, 105] },
+    equipment: ['floor'],
+  },
+  seat_press: {
+    start: { ...SEATED, elbow: [106, 92], hand: [108, 70] },
+    end: { ...SEATED, elbow: [97, 56], hand: [98, 34] },
+    equipment: ['floor', 'seat', 'dumbbell'],
+  },
+  leg_ext: { start: LEG_EXT_BENT, end: LEG_EXT_STRAIGHT, equipment: ['floor', 'seat'] },
+  leg_curl: { start: LEG_EXT_STRAIGHT, end: LEG_EXT_BENT, equipment: ['floor', 'seat'] },
+  leg_press: {
+    start: { head: [32, 86], neck: [42, 92], hip: [66, 112], knee: [92, 94], foot: [114, 112], elbow: [80, 100], hand: [92, 108] },
+    end: { head: [32, 86], neck: [42, 92], hip: [66, 112], knee: [94, 104], foot: [122, 92], elbow: [80, 100], hand: [92, 108] },
+    equipment: ['floor'],
+  },
+  wall_sit: {
+    start: { head: [89, 52], neck: [88, 66], hip: [88, 100], knee: [116, 100], foot: [116, 128], elbow: [98, 86], hand: [112, 92] },
+    end: { head: [89, 52], neck: [88, 66], hip: [88, 100], knee: [116, 100], foot: [116, 128], elbow: [98, 86], hand: [112, 92] },
+    equipment: ['floor'],
+  },
+  dip: {
+    start: { head: [102, 38], neck: [100, 52], hip: [98, 84], knee: [106, 106], foot: [98, 120], elbow: [93, 76], hand: [100, 92] },
+    end: { head: [103, 52], neck: [101, 66], hip: [99, 96], knee: [107, 113], foot: [98, 126], elbow: [88, 84], hand: [100, 92] },
+    equipment: ['floor', 'rails'],
+  },
+  hip_thrust: {
+    start: { head: [46, 98], neck: [58, 102], hip: [96, 118], knee: [120, 100], foot: [136, 127], elbow: [80, 112], hand: [96, 112] },
+    end: { head: [46, 98], neck: [58, 102], hip: [98, 98], knee: [124, 95], foot: [132, 127], elbow: [82, 100], hand: [98, 98] },
+    equipment: ['floor', 'bench_end', 'plate'],
+  },
+  hinge: {
+    start: { ...STAND, elbow: [101, 62], hand: [102, 84] },
+    end: { foot: [100, 128], knee: [100, 104], hip: [80, 86], neck: [112, 72], head: [123, 67], elbow: [108, 90], hand: [108, 108] },
+    equipment: ['floor', 'plate'],
+  },
+  sldl: {
+    start: { ...STAND, elbow: [101, 62], hand: [102, 84], knee2: [99, 102], foot2: [99, 128] },
+    end: { foot: [100, 128], knee: [100, 104], hip: [80, 86], neck: [112, 72], head: [123, 67], elbow: [108, 90], hand: [108, 108], knee2: [58, 88], foot2: [32, 92] },
+    equipment: ['floor', 'dumbbell'],
+  },
+  swing: {
+    start: { ...HINGE_ROW, elbow: [104, 92], hand: [102, 106] },
+    end: { ...STAND, elbow: [114, 54], hand: [132, 52] },
+    equipment: ['floor', 'kettlebell'],
+  },
+  jack: {
+    start: { ...STAND, elbow: [101, 62], hand: [102, 82] },
+    end: BURPEE_UP,
+    equipment: ['floor'],
+  },
+  burpee: { start: PUSH_UP_LOW, end: BURPEE_UP, equipment: ['floor'] },
+  thruster: {
+    start: { ...SQUAT_LEGS, elbow: [95, 82], hand: [102, 70] },
+    end: { ...STAND, elbow: [106, 32], hand: [104, 17] },
+    equipment: ['floor', 'dumbbell'],
+  },
+};
+
+/** An exercise's art: a template name, or a template with its own props. */
+type ArtSpec = string | readonly [string, readonly Equipment[]];
+const DB: readonly Equipment[] = ['floor', 'dumbbell'];
+const BAR: readonly Equipment[] = ['floor', 'plate'];
+const CABLE: readonly Equipment[] = ['floor', 'cable'];
+const MACHINE: readonly Equipment[] = ['floor', 'seat'];
+const FLOOR: readonly Equipment[] = ['floor'];
+const FREE: Record<string, ArtSpec> = {
+  // chest
+  incline_bench_press: 'bench_press',
+  dumbbell_bench_press: ['bench_press', ['floor', 'bench', 'dumbbell']],
+  incline_dumbbell_press: ['bench_press', ['floor', 'bench', 'dumbbell']],
+  dumbbell_fly: ['bench_press', ['floor', 'bench', 'dumbbell']],
+  cable_crossover: ['front_raise', CABLE],
+  machine_chest_press: ['bench_press', ['floor', 'bench']],
+  pec_deck: ['front_raise', FLOOR],
+  incline_push_up: 'push_up',
+  knee_push_up: 'push_up',
+  diamond_push_up: 'push_up',
+  // back
+  one_arm_dumbbell_row: ['row', DB],
+  t_bar_row: 'row',
+  inverted_row: ['row', FLOOR],
+  chin_up: 'pull_up',
+  assisted_pull_up: 'pull_up',
+  close_grip_pulldown: 'lat_pulldown',
+  straight_arm_pulldown: 'pushdown',
+  face_pull: ['band_row', CABLE],
+  single_arm_cable_row: 'cable_row',
+  superman: 'superman',
+  back_extension: ['hinge', FLOOR],
+  rack_pull: 'deadlift',
+  dumbbell_shrug: 'shrug',
+  rear_delt_fly: ['row', DB],
+  // shoulders
+  dumbbell_shoulder_press: ['overhead_press', DB],
+  seated_dumbbell_press: 'seat_press',
+  arnold_press: ['overhead_press', DB],
+  lateral_raise: 'front_raise',
+  front_raise: 'front_raise',
+  upright_row: 'upright',
+  push_press: 'overhead_press',
+  machine_shoulder_press: ['seat_press', MACHINE],
+  cable_lateral_raise: ['front_raise', CABLE],
+  pike_push_up: 'push_up',
+  // biceps
+  hammer_curl: 'bicep_curl',
+  barbell_curl: ['bicep_curl', BAR],
+  concentration_curl: 'bicep_curl',
+  cable_curl: ['bicep_curl', CABLE],
+  incline_dumbbell_curl: 'bicep_curl',
+  band_curl: ['bicep_curl', ['floor', 'band']],
+  // triceps
+  triceps_pushdown: 'pushdown',
+  overhead_triceps_extension: 'tri_overhead',
+  skull_crusher: 'bench_press',
+  close_grip_bench_press: 'bench_press',
+  bench_dip: ['dip', FLOOR],
+  triceps_kickback: 'kickback',
+  band_pushdown: ['pushdown', FLOOR],
+  machine_dip: 'dip',
+  // forearms and grip
+  wrist_curl: 'bicep_curl',
+  reverse_wrist_curl: 'bicep_curl',
+  reverse_curl: ['bicep_curl', BAR],
+  farmers_carry: 'shrug',
+  dead_hang: 'pull_up',
+  // core
+  plank: 'plank',
+  side_plank: 'plank',
+  crunch: 'crunch',
+  bicycle_crunch: 'crunch',
+  sit_up: 'crunch',
+  lying_leg_raise: 'leg_raise',
+  hanging_knee_raise: 'hang_knee',
+  russian_twist: 'vsit',
+  mountain_climber: 'mountain',
+  dead_bug: 'leg_raise',
+  bird_dog: 'plank',
+  cable_crunch: 'crunch',
+  pallof_press: ['front_raise', CABLE],
+  // glutes
+  hip_thrust: 'hip_thrust',
+  single_leg_glute_bridge: 'glute_bridge',
+  donkey_kick: 'plank',
+  fire_hydrant: 'plank',
+  cable_kickback: ['plank', CABLE],
+  step_up: 'lunge',
+  banded_lateral_walk: 'bodyweight_squat',
+  // quads
+  front_squat: ['squat', BAR],
+  sumo_squat: 'goblet_squat',
+  bulgarian_split_squat: 'lunge',
+  reverse_lunge: 'lunge',
+  walking_lunge: 'lunge',
+  leg_press: 'leg_press',
+  leg_extension: 'leg_ext',
+  wall_sit: 'wall_sit',
+  jump_squat: 'bodyweight_squat',
+  hack_squat: 'bodyweight_squat',
+  // hamstrings
+  romanian_deadlift: 'hinge',
+  dumbbell_romanian_deadlift: ['hinge', DB],
+  leg_curl: 'leg_curl',
+  good_morning: 'hinge',
+  single_leg_deadlift: 'sldl',
+  kettlebell_swing: 'swing',
+  sumo_deadlift: 'deadlift',
+  // calves
+  standing_calf_raise: 'calf_raise',
+  seated_calf_raise: 'calf_raise',
+  single_leg_calf_raise: 'calf_raise',
+  // full body
+  burpee: 'burpee',
+  thruster: 'thruster',
+  kettlebell_clean_and_press: ['overhead_press', ['floor', 'kettlebell']],
+  jumping_jack: 'jack',
+  bear_crawl: 'mountain',
+};
+const ART: Record<string, ArtSpec> = { ...Object.fromEntries(Object.keys(BASE).map((id) => [id, id])), ...FREE };
+const TEMPLATES: Record<string, Template> = { ...BASE, ...EXTRA };
+
+type ExerciseDrawing = Template;
+
+const DRAWINGS: Record<string, ExerciseDrawing> = Object.fromEntries(
+  Object.entries(ART).map(([id, spec]): [string, ExerciseDrawing] => {
+    const [name, gear] = typeof spec === 'string' ? [spec, undefined] : spec;
+    const t = TEMPLATES[name]!;
+    return [id, { start: t.start, end: t.end, equipment: [...(gear ?? t.equipment)] }];
+  }),
+);
+
+// ---- muscles ----------------------------------------------------------------------------------------
+
+/** How hard each body zone works: 0 not at all, 1 helps, 2 main mover. */
+interface Levels {
+  delt: number;
+  upper: number;
+  core: number;
+  glute: number;
+  thigh: number;
+  calf: number;
+  arm: number;
+  fore: number;
+}
+const ZONE: Record<string, keyof Levels> = {
+  shoulders: 'delt',
+  chest: 'upper',
+  back: 'upper',
+  lats: 'upper',
+  traps: 'upper',
+  core: 'core',
+  glutes: 'glute',
+  quads: 'thigh',
+  hamstrings: 'thigh',
+  calves: 'calf',
+  biceps: 'arm',
+  triceps: 'arm',
+  forearms: 'fore',
+};
+
+/** The zones an exercise works, from the library's own primary and secondary muscles. */
+function levelsFor(exerciseId: string): Levels {
+  const out: Levels = { delt: 0, upper: 0, core: 0, glute: 0, thigh: 0, calf: 0, arm: 0, fore: 0 };
+  const e = EXERCISE_BY_ID.get(exerciseId);
+  if (!e) return out;
+  for (const m of e.secondaryMuscles) {
+    const z = ZONE[m];
+    if (z) out[z] = Math.max(out[z], 1);
+  }
+  for (const m of e.primaryMuscles) {
+    const z = ZONE[m];
+    if (z) out[z] = 2;
+  }
+  return out;
+}
+
+/** A colour part of the way from `a` to `b` (both #RRGGBB; anything else leaves `a`). */
+function mixHex(a: string, b: string, t: number): string {
+  const ok = /^#[0-9a-f]{6}$/i;
+  if (!ok.test(a) || !ok.test(b)) return a;
+  const ch = (s: string, i: number) => parseInt(s.slice(1 + 2 * i, 3 + 2 * i), 16);
+  const hex = (i: number) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0');
+  return `#${hex(0)}${hex(1)}${hex(2)}`;
+}
+
+/** The anatomy model's greys, per tone: body, far side, fine seams, outline. */
+const GREY = ANATOMY;
+const workOf = (t: ArtTone) => artPalettes[t].figure.work;
+const assistOf = (t: ArtTone) => mixHex(GREY[t].base, workOf(t), 0.5);
+
+const HEAD_R = 10;
+const TORSO_W = [10, 8.6, 10.5] as const;
+const THIGH_W = [8.8, 8.2, 6.4] as const;
+const LEG_W = [8.4, 6.6, 3.8] as const;
+const CALF_W = [6.4, 6.6, 3.8] as const;
+const ARM_W = [5.8, 4.8, 3.3] as const;
+const FORE_W = [4.6, 4.2, 3.1] as const;
 /** How far the far-side leg peeks out from behind the near one when the pose gives no second leg. */
 const FAR_LEG_DX = 5;
 
 /** The colours the art uses, so a legend elsewhere can match the picture instead of hard-coding a hex. */
-export const EXERCISE_ART_COLORS = { work: art.figure.work, ghost: art.figure.ghost, body: art.figure.skin } as const;
+export const EXERCISE_ART_COLORS = { work: workOf(scheme), assist: assistOf(scheme), ghost: GREY[scheme].seam, body: GREY[scheme].base } as const;
 
 const lerpPoint = (a: P, b: P, t: number): P => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 
@@ -414,23 +714,69 @@ function shoeD(foot: V, knee: V): string {
   return `M${at(-5.5, -5)}L${at(-5.5, 0.5)}Q${at(-5.5, 2)} ${at(-3.5, 2)}L${at(8.5, 2)}Q${at(12.2, 2)} ${at(12.2, -0.9)}Q${at(12.2, -2.8)} ${at(8.5, -3.4)}Q${at(4.5, -3.8)} ${at(2.5, -5)}Z`;
 }
 
-/** The head's local frame: turned with the neck (damped), so a push-up looks down and a bridge looks up. */
-function headFrame(p: Pose) {
-  const [ux, uy] = unit(p.head[0] - p.neck[0], p.head[1] - p.neck[1]);
-  let a = Math.atan2(uy, ux) + Math.PI / 2;
-  if (a > Math.PI) a -= 2 * Math.PI;
-  a *= 0.75;
-  const c = Math.cos(a);
-  const s = Math.sin(a);
-  return (x: number, y: number): V => [p.head[0] + x * c - y * s, p.head[1] + x * s + y * c];
+/** The front of a limb or the torso: the side its muscles bulge towards when the figure faces right. */
+const frontOf = (a: V, b: V, torso: boolean): V => {
+  const [x, y] = unit(b[0] - a[0], b[1] - a[1]);
+  // Torso: hip to shoulder, the belly is to the right of that. Limbs run the other way (joint to joint downwards).
+  return torso ? [-y, x] : [y, -x];
+};
+/** A line running along a limb from `t0` to `t1`, pushed `off` towards `side`. */
+const along = (a: V, b: V, t0: number, t1: number, off: number, side: V): string => {
+  const p0 = mix(a, b, t0);
+  const p1 = mix(a, b, t1);
+  return `M${fp(p0[0] + side[0] * off, p0[1] + side[1] * off)}L${fp(p1[0] + side[0] * off, p1[1] + side[1] * off)}`;
+};
+/** A short line across a limb at `t`, from `off0` to `off1` towards `side`. */
+const across = (a: V, b: V, t: number, off0: number, off1: number, side: V): string => {
+  const m = mix(a, b, t);
+  return `M${fp(m[0] + side[0] * off0, m[1] + side[1] * off0)}L${fp(m[0] + side[0] * off1, m[1] + side[1] * off1)}`;
+};
+
+/** The pieces of one pose shared by the figure and its ghost. */
+function rig(pose: Pose) {
+  const S = shoulder(pose);
+  const mid = mix(pose.hip, S, 0.5);
+  return {
+    S,
+    mid,
+    thigh: [pose.hip, mix(pose.hip, pose.knee, 0.5), pose.knee] as V[],
+    calf: [pose.knee, mix(pose.knee, pose.foot, 0.32), pose.foot] as V[],
+    lower: [pose.hip, mix(pose.hip, mid, 0.5), mid] as V[],
+    upper: [mid, mix(mid, S, 0.5), S] as V[],
+    arm: [S, mix(S, pose.elbow, 0.5), pose.elbow] as V[],
+    fore: [pose.elbow, mix(pose.elbow, pose.hand, 0.5), pose.hand] as V[],
+  };
+}
+
+/** Fine muscle seams over the near side of the figure: abs and ribs, pec and shoulder blade, quad sweep, calf, arm. */
+function seamsD(pose: Pose): string {
+  const { S, mid } = rig(pose);
+  const tf = frontOf(pose.hip, S, true);
+  const tb: V = [-tf[0], -tf[1]];
+  const lf = frontOf(pose.hip, pose.knee, false);
+  const cf = frontOf(pose.knee, pose.foot, false);
+  const af = frontOf(S, pose.elbow, false);
+  const ff = frontOf(pose.elbow, pose.hand, false);
+  return [
+    across(pose.hip, mid, 0.25, -1, 8.5, tf),
+    across(pose.hip, mid, 0.55, -1, 8.5, tf),
+    across(pose.hip, mid, 0.85, -1, 8.5, tf),
+    across(mid, S, 0.45, 0, 8.6, tf),
+    across(mid, S, 0.4, 1, 8, tb),
+    along(pose.hip, pose.knee, 0.18, 0.86, 2.6, lf),
+    along(pose.hip, pose.knee, 0.22, 0.8, 2.8, [-lf[0], -lf[1]]),
+    across(pose.knee, pose.foot, 0.3, -5.5, 5.5, cf),
+    along(pose.knee, pose.foot, 0.12, 0.62, 2.2, [-cf[0], -cf[1]]),
+    along(S, pose.elbow, 0.2, 0.85, 2, af),
+    along(pose.elbow, pose.hand, 0.1, 0.75, 1.4, ff),
+  ].join('');
 }
 
 // ---- kit ------------------------------------------------------------------------------------------
 
 interface Kit {
   a: ArtPalette;
-  /** Warm outline of the figure. */
-  edge: string;
+  t: ArtTone;
   /** Band colour. */
   primary: string;
   uid: string;
@@ -442,7 +788,7 @@ interface Kit {
 
 function makeKit(tone: ArtTone | undefined, uid: string, lite: boolean): Kit {
   const t = tone ?? scheme;
-  return { a: artPalettes[t], edge: ACCENTS[t].figureEdge, primary: palettes[t].primary, uid, lite, line: lite ? STROKE.bold : STROKE.line };
+  return { a: artPalettes[t], t, primary: palettes[t].primary, uid, lite, line: lite ? STROKE.bold : STROKE.line };
 }
 
 type MetalKey = 'iron' | 'rubber' | 'chrome';
@@ -463,12 +809,14 @@ function Grad({ id, m }: { id: string; m: Metal }) {
 // ---- equipment ------------------------------------------------------------------------------------
 
 /** Gear that stands still behind the figure: drawn once, in the static layer. */
-const STATIC_GEAR: readonly Equipment[] = ['bench', 'seat', 'bar', 'band', 'cable'];
+const STATIC_GEAR: readonly Equipment[] = ['bench', 'bench_end', 'rails', 'seat', 'bar', 'band', 'cable'];
 const GEAR_METALS: Record<Equipment, MetalKey[]> = {
   plate: ['rubber', 'chrome'],
   dumbbell: ['chrome', 'iron'],
   kettlebell: ['iron'],
   bench: ['rubber', 'iron'],
+  bench_end: ['rubber', 'iron'],
+  rails: ['chrome', 'iron'],
   band: ['iron', 'chrome'],
   cable: ['iron', 'chrome'],
   pulldown: ['chrome'],
@@ -492,6 +840,20 @@ function StaticGear({ kind, kit, hip }: { kind: Equipment; kit: Kit; hip: V }) {
           <Rect x={48} y={118} width={6} height={12} rx={2} fill={iron} {...metalEdge('iron', kit)} />
           <Rect x={116} y={118} width={6} height={12} rx={2} fill={iron} {...metalEdge('iron', kit)} />
           <Rect x={38} y={110} width={92} height={8} rx={4} fill={rubber} {...metalEdge('rubber', kit)} />
+        </>
+      );
+    case 'bench_end':
+      return (
+        <>
+          <Rect x={40} y={118} width={6} height={12} rx={2} fill={iron} {...metalEdge('iron', kit)} />
+          <Rect x={32} y={110} width={44} height={8} rx={4} fill={rubber} {...metalEdge('rubber', kit)} />
+        </>
+      );
+    case 'rails':
+      return (
+        <>
+          <Rect x={98} y={96} width={5} height={34} rx={2} fill={iron} {...metalEdge('iron', kit)} />
+          <Rect x={84} y={92} width={34} height={4.5} rx={2.2} fill={chrome} {...metalEdge('chrome', kit)} />
         </>
       );
     case 'seat':
@@ -595,13 +957,7 @@ const Backdrop = memo(function Backdrop({ id, tone, uid, lite }: { id: string; t
   return (
     <>
       {lite ? null : (
-        <Defs>
-          <LinearGradient id={`${uid}s`} {...LIGHT_DIR}>
-            <Stop offset="0" stopColor={kit.a.figure.skin} />
-            <Stop offset="1" stopColor={kit.a.figure.skinShade} />
-          </LinearGradient>
-          {(['iron', 'rubber', 'chrome'] as const).map((m) => (used.has(m) ? <Grad key={m} id={`${uid}${METAL_ID[m]}`} m={METALS[m]} /> : null))}
-        </Defs>
+        <Defs>{(['iron', 'rubber', 'chrome'] as const).map((m) => (used.has(m) ? <Grad key={m} id={`${uid}${METAL_ID[m]}`} m={METALS[m]} /> : null))}</Defs>
       )}
       <Ellipse cx={100} cy={131} rx={70} ry={4} fill={kit.a.shadow} opacity={kit.a.shadowOpacity} />
       <Line x1={14} y1={130} x2={186} y2={130} stroke={kit.a.floorLine} strokeWidth={STROKE.line} strokeLinecap="round" />
@@ -620,12 +976,12 @@ const Ghost = memo(function Ghost({ id, tone }: { id: string; tone: ArtTone | un
   if (!d) return null;
   const t = tone ?? scheme;
   const p = d.start;
-  const S = shoulder(p);
-  const parts = [tube([p.hip, mix(p.hip, S, 0.5), S], TORSO_W), tube([p.hip, p.knee, p.foot], LEG_W), tube([S, p.elbow, p.hand], ARM_W)];
+  const r = rig(p);
+  const parts = [tube([p.hip, r.mid, r.S], TORSO_W), tube([p.hip, p.knee, p.foot], LEG_W), tube([...r.arm, p.hand], [...ARM_W, 3])];
   if (p.knee2 && p.foot2) parts.push(tube([p.hip, p.knee2, p.foot2], LEG_W));
-  const color = artPalettes[t].figure.ghost;
+  const color = GREY[t].seam;
   return (
-    <G opacity={t === 'dark' ? 0.4 : 0.32}>
+    <G opacity={t === 'dark' ? 0.42 : 0.34}>
       <Path d={parts.join('')} fill={color} />
       <Circle cx={p.head[0]} cy={p.head[1]} r={HEAD_R} fill={color} />
     </G>
@@ -652,72 +1008,58 @@ const Placeholder = memo(function Placeholder({ tone, lite }: { tone: ArtTone | 
 // ---- the live figure ----------------------------------------------------------------------------------
 
 /**
- * The person. Back to front: the back-squat bar, the far leg and arm (skinShade), the near leg and shoe,
- * the torso with its tank top, shorts, any gear the hands hold, the near arm and hand, then the head.
+ * The anatomy model. Back to front: the back-squat bar, the far leg and arm (shade), the near leg and
+ * foot, the pelvis, the torso in two halves (core below, chest and back above), any gear the hands
+ * hold, the near arm, the shoulder cap and hand, then the head. Each muscle zone is filled grey, the
+ * soft tint (helps) or the accent (main mover).
  */
-function Figure({ pose, work, kit, back, held }: { pose: Pose; work: readonly Segment[]; kit: Kit; back?: ReactNode; held?: ReactNode }) {
-  const { a, edge, lite, line } = kit;
-  const fg = a.figure;
-  const S = shoulder(pose);
-  const skin = lite ? fg.skin : `url(#${kit.uid}s)`;
-  const torsoWork = work.includes('torso');
-  const legWork = work.includes('shin');
-  const thighOnly = work.includes('thigh') && !legWork;
-  const armWork = work.includes('upperArm') || work.includes('forearm');
+function Figure({ pose, lv, kit, back, held }: { pose: Pose; lv: Levels; kit: Kit; back?: ReactNode; held?: ReactNode }) {
+  const { t, lite, line } = kit;
+  const g = GREY[t];
+  const fill = (level: number) => (level >= 2 ? workOf(t) : level === 1 ? assistOf(t) : g.base);
+  const r = rig(pose);
   const hasFarLeg = Boolean(pose.knee2 && pose.foot2);
   const farKnee: V = pose.knee2 ?? nudge(pose.knee, FAR_LEG_DX, 0);
   const farFoot: V = pose.foot2 ?? nudge(pose.foot, FAR_LEG_DX, 0);
   const farElbow = nudge(pose.elbow, -3, 1);
   const farHand = nudge(pose.hand, -2.5, 1);
-  const legPts: V[] = [pose.hip, pose.knee, pose.foot];
-  const armPts: V[] = [S, pose.elbow, pose.hand];
-  const torsoPts: V[] = [pose.hip, mix(pose.hip, S, 0.5), S];
-  const edged = { stroke: edge, strokeWidth: line, strokeLinejoin: 'round' } as const;
-
-  const L = headFrame(pose);
-  const hair = (() => {
-    const p1 = L(8.9, -5.6);
-    const p2 = L(-10.1, 2.7);
-    const c1 = L(-6, -3.2);
-    const m = L(0, -4.6);
-    const c2 = L(5.5, -4.2);
-    return `M${fp(p1[0], p1[1])}A${HEAD_R} ${HEAD_R} 0 0 0 ${fp(p2[0], p2[1])}Q${fp(c1[0], c1[1])} ${fp(m[0], m[1])}Q${fp(c2[0], c2[1])} ${fp(p1[0], p1[1])}Z`;
-  })();
-  const ear = L(-1.4, 1.9);
-  const eye = L(5.4, -0.9);
+  const edged = { stroke: g.edge, strokeWidth: line, strokeLinejoin: 'round' } as const;
+  const pelvis = nudge(pose.hip, -1.5, 0);
+  const shade = lite
+    ? ''
+    : [tube(r.thigh, THIGH_W, 0.6), tube(r.calf, CALF_W, 0.6), tube(r.lower, TORSO_W, 0.6), tube(r.upper, TORSO_W, 0.6), tube(r.arm, ARM_W, 0.6), tube(r.fore, FORE_W, 0.6)].join('');
 
   return (
     <>
       {back}
       {hasFarLeg || !lite ? (
         <>
-          <Path d={tube([pose.hip, farKnee, farFoot], LEG_W)} fill={fg.skinShade} {...edged} />
-          <Path d={shoeD(farFoot, farKnee)} fill={fg.shoe} {...edged} />
-          <Path d={tube([pose.hip, mix(pose.hip, farKnee, 0.34)], [LEG_W[0] + 1.4, LEG_W[0] + 0.5])} fill={fg.shorts} {...edged} />
+          <Path d={tube([pose.hip, farKnee, farFoot], LEG_W)} fill={g.shade} {...edged} />
+          <Path d={shoeD(farFoot, farKnee)} fill={g.foot} {...edged} />
         </>
       ) : null}
-      {lite ? null : <Path d={tube([S, farElbow, farHand], ARM_W)} fill={fg.skinShade} {...edged} />}
-      {lite ? null : <Circle cx={farHand[0]} cy={farHand[1]} r={3.7} fill={fg.skinShade} {...edged} />}
-      {lite ? null : <Path d={tube([pose.neck, pose.head], [3.4, 3.4])} fill={fg.skinShade} {...edged} />}
-      <Path d={tube(legPts, LEG_W)} fill={legWork ? fg.work : fg.skin} {...edged} />
-      {lite ? null : <Path d={tube(legPts, LEG_W, 0.6)} fill={legWork ? fg.workDeep : fg.skinShade} />}
-      {thighOnly ? <Path d={tube([pose.hip, pose.knee], [LEG_W[0], LEG_W[1]])} fill={fg.work} {...edged} /> : null}
-      <Path d={shoeD(pose.foot, pose.knee)} fill={fg.shoe} {...edged} />
-      <Path d={tube(torsoPts, TORSO_W)} fill={torsoWork ? fg.work : fg.top} {...edged} />
-      {lite ? null : <Path d={tube(torsoPts, TORSO_W, 0.6)} fill={torsoWork ? fg.workDeep : a.shadow} opacity={torsoWork ? undefined : 0.22} />}
-      <Path d={tube([pose.hip, mix(pose.hip, pose.knee, 0.34)], [LEG_W[0] + 1.9, LEG_W[0] + 0.7])} fill={fg.shorts} {...edged} />
+      {lite ? null : <Path d={tube([r.S, farElbow, farHand], ARM_W)} fill={g.shade} {...edged} />}
+      <Path d={tube([pose.neck, pose.head], [4, 4])} fill={g.shade} {...edged} />
+      <Path d={tube(r.thigh, THIGH_W)} fill={fill(lv.thigh)} {...edged} />
+      <Path d={tube(r.calf, CALF_W)} fill={fill(lv.calf)} {...edged} />
+      <Path d={shoeD(pose.foot, pose.knee)} fill={g.foot} {...edged} />
+      <Circle cx={pelvis[0]} cy={pelvis[1]} r={9} fill={fill(lv.glute)} {...edged} />
+      <Path d={tube(r.lower, TORSO_W)} fill={fill(lv.core)} {...edged} />
+      <Path d={tube(r.upper, TORSO_W)} fill={fill(lv.upper)} {...edged} />
       {held}
-      <Path d={tube(armPts, ARM_W)} fill={armWork ? fg.work : fg.skin} {...edged} />
-      {lite ? null : <Path d={tube(armPts, ARM_W, 0.6)} fill={armWork ? fg.workDeep : fg.skinShade} />}
-      <Circle cx={pose.head[0]} cy={pose.head[1]} r={HEAD_R} fill={skin} {...edged} />
-      {lite ? null : <Circle cx={ear[0]} cy={ear[1]} r={2.3} fill={fg.skinShade} stroke={edge} strokeWidth={STROKE.hair} />}
-      <Path d={hair} fill={fg.hair} {...edged} />
-      {lite ? null : <Circle cx={eye[0]} cy={eye[1]} r={1.15} fill={a.featureInk} />}
-      <Circle cx={pose.hand[0]} cy={pose.hand[1]} r={lite ? 4.4 : 3.9} fill={skin} {...edged} />
+      <Path d={tube(r.arm, ARM_W)} fill={fill(lv.arm)} {...edged} />
+      <Path d={tube(r.fore, FORE_W)} fill={fill(lv.fore)} {...edged} />
+      <Circle cx={r.S[0]} cy={r.S[1]} r={6.4} fill={fill(lv.delt)} {...edged} />
+      {lite ? null : <Path d={shade} fill={g.edge} opacity={t === 'dark' ? 0.3 : 0.2} />}
+      {lite ? null : <Path d={seamsD(pose)} fill="none" stroke={g.seam} strokeWidth={STROKE.hair} strokeLinecap="round" />}
+      <Circle cx={pose.hand[0]} cy={pose.hand[1]} r={lite ? 4.4 : 3.9} fill={g.base} {...edged} />
+      <Circle cx={pose.head[0]} cy={pose.head[1]} r={HEAD_R} fill={g.base} {...edged} />
     </>
   );
 }
 
+/** Exercises whose bar rests across the back, so the plate is drawn at the neck instead of in the hands. */
+const BACK_BAR = new Set(['squat']);
 
 /** A movement picture for any exercise id (a dashed placeholder figure for an id with no drawing yet). */
 export function ExerciseArt({
@@ -784,18 +1126,18 @@ export function ExerciseArt({
   let figure: ReactNode;
   if (d) {
     const live = play ? lerpPose(d.start, d.end, loopProgress(phase)) : d.end;
-    const squatBar = exerciseId === 'squat';
+    const backBar = BACK_BAR.has(exerciseId);
     const held = d.equipment
-      .filter((k) => !STATIC_GEAR.includes(k) && k !== 'floor' && !(k === 'plate' && squatBar))
+      .filter((k) => !STATIC_GEAR.includes(k) && k !== 'floor' && !(k === 'plate' && backBar))
       .map((k) => <LiveGear key={k} kind={k} kit={kit} pose={live} />);
     // Bands and cables run to the hand; the static part of the same gear sits behind in the backdrop.
     for (const k of d.equipment) if ((k === 'band' || k === 'cable') && STATIC_GEAR.includes(k)) held.push(<LiveGear key={`${k}-line`} kind={k} kit={kit} pose={live} />);
-    const back = squatBar ? <LiveGear kind="plate" kit={kit} pose={live} at={[live.neck[0] - 2, live.neck[1] + 1]} /> : undefined;
+    const back = backBar ? <LiveGear kind="plate" kit={kit} pose={live} at={[live.neck[0] - 2, live.neck[1] + 1]} /> : undefined;
     figure = (
       <>
         <Backdrop id={exerciseId} tone={tone} uid={uid} lite={lite} />
         {lite ? null : <Ghost id={exerciseId} tone={tone} />}
-        <Figure pose={live} work={d.work} kit={kit} back={back} held={held} />
+        <Figure pose={live} lv={levelsFor(exerciseId)} kit={kit} back={back} held={held} />
       </>
     );
   } else {

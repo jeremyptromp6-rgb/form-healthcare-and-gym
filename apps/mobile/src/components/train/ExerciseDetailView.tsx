@@ -76,7 +76,8 @@ export function ExerciseDetailView({ detail, poseAvailable, onPractise, formHist
         <Row gap={space.md} style={{ flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: space.md }}>
           <Legend color={art.ghost} label="Start" />
           <Legend color={art.body} label="Finish" />
-          <Legend color={art.work} label="Muscles working" />
+          <Legend color={art.work} label="Main muscles" />
+          <Legend color={art.assist} label="Helping" />
         </Row>
       </LinearGradient>
 
@@ -101,7 +102,7 @@ function AboutTab({ detail, poseAvailable, onPractise }: { detail: ExerciseDetai
         ]}
       />
 
-      <SectionHeader title="Muscles worked" />
+      <SectionHeader title="Target muscles" />
       <Card style={{ gap: space.lg }}>
         <BodyMap primary={e.primaryMuscles} secondary={e.secondaryMuscles} height={210} style={{ alignSelf: 'center' }} />
         <MuscleBars

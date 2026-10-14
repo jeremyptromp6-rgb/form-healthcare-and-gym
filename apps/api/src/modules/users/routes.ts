@@ -6,6 +6,7 @@ import {
   EQUIPMENT,
   EXCLUSIVE_DIET_PATTERNS,
   EXPERIENCE_LEVELS,
+  FOCUS_AREAS,
   FOOD_BUDGETS,
   DATE_FORMATS,
   isValidTimeZone,
@@ -44,6 +45,8 @@ const profilePatch = z
     trainingDaysPerWeek: z.number().int().min(L.trainingDaysPerWeek.min).max(L.trainingDaysPerWeek.max),
     trainingLocation: z.enum(keysOf(TRAINING_LOCATIONS)),
     equipment: z.array(z.enum(keysOf(EQUIPMENT))).min(1).max(EQUIPMENT.length),
+    // Counts, uniqueness and "full body stands alone" are checked in the domain (normalizeFocusAreas).
+    focusAreas: z.array(z.enum(keysOf(FOCUS_AREAS))).min(1).max(FOCUS_AREAS.length),
   })
   .partial()
   .required({ localDate: true })
@@ -109,6 +112,7 @@ export function userRoutes(app: FastifyInstance, ctx: AppContext): void {
     trainingLocations: TRAINING_LOCATIONS,
     equipment: EQUIPMENT,
     defaultEquipment: DEFAULT_EQUIPMENT,
+    focusAreas: FOCUS_AREAS,
     dietaryPreferences: DIET_PREFERENCES,
     exclusiveDietPatterns: EXCLUSIVE_DIET_PATTERNS,
     allergens: ALLERGENS,

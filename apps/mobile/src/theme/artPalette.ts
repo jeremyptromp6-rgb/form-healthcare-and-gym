@@ -252,6 +252,74 @@ export const FOODS: Record<string, string> = {
   sceneAppleLeaf: '#7FAF6E',
 };
 
+/** Food colours the FOODS table has no slot for (the same in both tones). `shine` is the white glint on a food. */
+export const FOOD_EXTRA = {
+  carrot: '#F08A3C',
+  carrotDark: '#D9702A',
+  pod: '#5FA862',
+  steak: '#C9514A',
+  steakDark: '#A93B38',
+  fat: '#F7E3CE',
+  bone: '#F6EBDD',
+  roast: '#D98A4A',
+  roastDark: '#B86A2C',
+  fish: '#7FB5D6',
+  fishDark: '#5C97BE',
+  fishBelly: '#CFE6F2',
+  eggWhite: '#FFFFFF',
+  yolk: '#F7B733',
+  cheese: '#F7D56B',
+  cheeseTop: '#FBE9A6',
+  cheeseHole: '#E4B53F',
+  tofu: '#FFF7E3',
+  tofuLeft: '#F1E1BC',
+  tofuRight: '#E6D0A0',
+  nutShell: '#C99A62',
+  nutLine: '#A57A45',
+  oil: '#E8C547',
+  oilCap: '#6B4A2E',
+  label: '#FFF3D6',
+  bag: '#E9644B',
+  bagDark: '#C94A34',
+  chip: '#F5D26B',
+  sponge: '#F3D9A4',
+  frosting: '#F4A6B8',
+  cherry: '#D0402F',
+  cup: '#FFFFFF',
+  drink: '#6FB7E0',
+  straw: '#E9644B',
+  ice: '#DDF1FB',
+  bun: '#E0A04F',
+  patty: '#7A4A2E',
+  cheeseSlice: '#F7C948',
+  wheat: '#E2B85E',
+  loaf: '#D9A05B',
+  loafDark: '#B9783A',
+  steam: '#C9BBA8',
+  shine: '#FFFFFF',
+} as const;
+
+/** The grey anatomy mannequin (BodyMap, ExerciseArt), per tone. `line` is a fine seam drawn at `lineOpacity`. */
+export interface ArtAnatomy {
+  skinTop: string;
+  skinBottom: string;
+  muscleTop: string;
+  muscleBottom: string;
+  edge: string;
+  line: string;
+  lineOpacity: number;
+  /** ExerciseArt figure: body, far side, fine seams, feet. */
+  base: string;
+  shade: string;
+  seam: string;
+  foot: string;
+}
+
+export const ANATOMY: Record<ArtTone, ArtAnatomy> = {
+  light: { skinTop: '#E1E4E8', skinBottom: '#C4C8CF', muscleTop: '#D2D6DC', muscleBottom: '#B6BBC3', edge: '#6A707A', line: '#3C424C', lineOpacity: 0.3, base: '#D6D9DE', shade: '#B6BAC2', seam: '#8E949E', foot: '#9AA0AA' },
+  dark: { skinTop: '#9BA1AB', skinBottom: '#777D88', muscleTop: '#8A909A', muscleBottom: '#6B717C', edge: '#2B2E33', line: '#14161A', lineOpacity: 0.45, base: '#8C929C', shade: '#6C727C', seam: '#4F545D', foot: '#5E646E' },
+};
+
 /**
  * Small accents the current art uses that have no slot in ArtPalette: sparkles, the sleepy Zs, the
  * trophy, the kettlebell, the figure outline and the body map. Tone-aware where the colour is.

@@ -51,6 +51,17 @@ export function toggleDiet(selected: readonly string[], key: string, exclusive: 
   return [...without, key];
 }
 
+/**
+ * Toggling a focus area: "Full body" stands alone (picking it clears the rest, picking anything else
+ * clears it), and at the limit a further pick is ignored.
+ */
+export function toggleFocus(selected: readonly string[], key: string, max: number): string[] {
+  if (selected.includes(key)) return selected.filter((k) => k !== key);
+  if (key === 'full_body') return ['full_body'];
+  const without = selected.filter((k) => k !== 'full_body');
+  return without.length >= max ? [...selected] : [...without, key];
+}
+
 export function toggle(selected: readonly string[], key: string): string[] {
   return selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key];
 }

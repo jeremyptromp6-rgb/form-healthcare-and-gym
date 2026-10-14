@@ -63,7 +63,9 @@ describe('BodyMap', () => {
   });
 
   it('keeps its labels and exports', async () => {
-    expect(MUSCLES).toHaveLength(11);
+    expect(MUSCLES).toHaveLength(13);
+    expect(MUSCLE_LABEL.forearms).toBe('Forearms');
+    expect(MUSCLE_LABEL.traps).toBe('Traps');
     expect(MUSCLE_LABEL.hamstrings).toBe('Hamstrings');
     await render(<BodyMap primary={['chest', 'triceps']} secondary={['shoulders']} />);
     expect(screen.getByRole('image', { name: 'Muscles worked: chest, triceps; also shoulders' })).toBeTruthy();

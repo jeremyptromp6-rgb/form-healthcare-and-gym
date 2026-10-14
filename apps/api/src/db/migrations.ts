@@ -982,6 +982,11 @@ const V22_PROVIDER_USAGE_EVENTS = `
     SELECT lower(hex(randomblob(16))), user_id, 'food_scan', substr(created_at, 1, 10), created_at, 'used' FROM food_scans;
 `;
 
+/** Body areas the user wants workouts to lean towards (JSON array). NULL = not chosen, treated as full body. */
+const V23_FOCUS_AREAS = `
+  ALTER TABLE profiles ADD COLUMN focus_areas TEXT CHECK (focus_areas IS NULL OR json_valid(focus_areas));
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1005,4 +1010,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 20, name: "pro", up: V20_PRO },
   { version: 21, name: "post_workout_ads", up: V21_POST_WORKOUT_ADS },
   { version: 22, name: "provider_usage_events", up: V22_PROVIDER_USAGE_EVENTS },
+  { version: 23, name: "focus_areas", up: V23_FOCUS_AREAS },
 ];
