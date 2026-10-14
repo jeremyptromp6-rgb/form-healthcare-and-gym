@@ -50,7 +50,7 @@ export default function Onboarding() {
   // Until the user navigates, resume at the server's next unanswered step.
   // The focus question is app-only (the server's steps don't include it): ask it once training is answered.
   const serverNext = me.data ? (me.data.onboarding.nextStep ?? 'review') : null;
-  const step: Step | null = chosenStep ?? (serverNext === 'nutrition' && me.data?.profile?.focusAreas == null ? 'focus' : serverNext);
+  const step: Step | null = chosenStep ?? (serverNext === 'nutrition' && me.data?.profile?.focusAreas == null && !!catalog.data?.focusAreas?.length ? 'focus' : serverNext);
 
   // Each step starts at the top — after the new step has rendered, not before.
   useEffect(() => {

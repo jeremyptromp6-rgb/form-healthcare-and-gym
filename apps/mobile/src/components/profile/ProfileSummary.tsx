@@ -103,7 +103,7 @@ export function ProfileSummary({
 
         {sections.includes('focus') ? (
           <Section title="Focus" onEdit={edit('focus')}>
-            <AppText variant="bodyStrong">{p?.focusAreas?.length ? list(labels(catalog.focusAreas, p.focusAreas)) : 'Full body'}</AppText>
+            <AppText variant="bodyStrong">{p?.focusAreas?.length ? list(labels(catalog.focusAreas ?? [], p.focusAreas)) : 'Full body'}</AppText>
           </Section>
         ) : null}
 

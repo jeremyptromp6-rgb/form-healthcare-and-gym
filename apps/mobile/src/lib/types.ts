@@ -115,7 +115,8 @@ export interface ProfileOptions {
   trainingLocations: (Option & { key: TrainingLocation })[];
   equipment: Option[];
   defaultEquipment: Record<TrainingLocation, string[]>;
-  focusAreas: (Option & { key: FocusArea; description: string; group: 'broad' | 'specific' })[];
+  /** Absent from a server that predates focus areas. */
+  focusAreas?: (Option & { key: FocusArea; description: string; group: 'broad' | 'specific' })[];
   dietaryPreferences: (Option & { kind: 'restriction' | 'style' })[];
   exclusiveDietPatterns: string[];
   allergens: Option[];
@@ -126,7 +127,7 @@ export interface ProfileOptions {
     heightCm: { min: number; max: number };
     weightKg: { min: number; max: number };
     trainingDaysPerWeek: { min: number; max: number };
-    focusAreasMax: number;
+    focusAreasMax?: number;
     displayNameLength: number;
     foodListMax: number;
     customAllergyMax: number;

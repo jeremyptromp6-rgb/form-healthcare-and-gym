@@ -28,7 +28,7 @@ const FOCUS_ICONS: Record<FocusArea, IconName> = {
 
 const apiMessage = (e: { kind: string; message: string }) => (e.kind === 'network' ? "Couldn't save. Check your connection and try again." : e.message);
 
-function FocusTile({ option, selected, disabled, onPress }: { option: ProfileOptions['focusAreas'][number]; selected: boolean; disabled: boolean; onPress: () => void }) {
+function FocusTile({ option, selected, disabled, onPress }: { option: NonNullable<ProfileOptions['focusAreas']>[number]; selected: boolean; disabled: boolean; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="checkbox"
@@ -59,11 +59,12 @@ export function FocusSection({ me, catalog, submitLabel, onSaved }: SectionProps
   const saved = me.profile?.focusAreas ?? [];
   const [selected, setSelected] = useState<string[]>(saved);
   const [error, setError] = useState<string | null>(null);
-  const max = catalog.limits.focusAreasMax;
+  const options = catalog.focusAreas ?? [];
+  const max = catalog.limits.focusAreasMax ?? 3;
   const full = selected.length >= max && !selected.includes('full_body');
   const groups = [
-    { title: 'Whole areas', options: catalog.focusAreas.filter((a) => a.group === 'broad') },
-    { title: 'Specific muscles', options: catalog.focusAreas.filter((a) => a.group === 'specific') },
+    { title: 'Whole areas', options: options.filter((a) => a.group === 'broad') },
+    { title: 'Specific muscles', options: options.filter((a) => a.group === 'specific') },
   ];
 
   const submit = () => {
@@ -73,6 +74,18 @@ export function FocusSection({ me, catalog, submitLabel, onSaved }: SectionProps
     if (areas.length === 0 || (areas.length === saved.length && areas.every((a) => saved.includes(a)))) return onSaved();
     save.mutate({ focusAreas: areas }, { onSuccess: onSaved, onError: (e) => setError(apiMessage(e)) });
   };
+
+  // A server that predates focus areas offers none: say so and let the user carry on.
+  if (options.length === 0) {
+    return (
+      <View style={{ gap: space.lg }}>
+        <AppText variant="caption" color={colors.textMuted}>
+          Choosing a focus is coming in the next update. Your workouts stay full body for now.
+        </AppText>
+        <Button label={submitLabel} onPress={onSaved} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ gap: space.lg }}>

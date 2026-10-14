@@ -48,6 +48,16 @@ describe('FocusSection', () => {
     expect(tile('Full body').props.accessibilityState).toMatchObject({ checked: false });
   });
 
+  it('never crashes on a server that predates focus areas: it says so and lets you continue', async () => {
+    const onSaved = jest.fn();
+    const old = { ...catalog, focusAreas: undefined, limits: { ...catalog.limits, focusAreasMax: undefined } } as unknown as ProfileOptions;
+    await render(<FocusSection me={me(undefined)} catalog={old} submitLabel="Continue" onSaved={onSaved} />);
+    expect(screen.getByText(/coming in the next update/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
+    expect(mockMutate).not.toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalled();
+  });
+
   it('can be skipped in onboarding without saving anything', async () => {
     const onSaved = jest.fn();
     await render(<FocusSection me={me(null)} catalog={catalog} submitLabel="Continue" onSaved={onSaved} />);
