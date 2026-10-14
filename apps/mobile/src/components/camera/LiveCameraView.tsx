@@ -87,8 +87,10 @@ export function LiveCameraView(p: LiveCameraViewProps) {
             const { width, height } = e.nativeEvent.layout;
             setSlot((prev) => (prev && Math.abs(prev.w - width) < 0.5 && Math.abs(prev.h - height) < 0.5 ? prev : { w: width, h: height }));
           }}>
-          <View style={StyleSheet.absoluteFill} accessible={!model.overlay} accessibilityLabel="Camera preview">
-            <View style={feedStyle} testID="camera-feed-box">
+          {/* Never flattened: a wrapper that flips between flattened and real (as `accessible` or the box
+              style change) makes React Native re-parent the camera view, which interrupts the camera. */}
+          <View style={StyleSheet.absoluteFill} collapsable={false} accessible={!model.overlay} accessibilityLabel="Camera preview">
+            <View style={feedStyle} collapsable={false} testID="camera-feed-box">
               {p.feed}
             </View>
             {!model.overlay && !p.paused ? (

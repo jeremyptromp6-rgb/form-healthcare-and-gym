@@ -1,5 +1,8 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import { api } from '@/lib/api';
+import { tokenStore } from '@/lib/tokenStore';
 
 const KEY = 'form.nativeCamera.failed';
 
@@ -22,6 +25,22 @@ export function nativeCameraFailedOnThisBuild(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Sends the operator one short anonymous line on why the native camera handed over (reason, build,
+ * Android version, phone model; no user data, no images). Fire-and-forget: a missing session, no
+ * connection or any error is ignored.
+ */
+export function reportNativeCameraFailure(reason: string): void {
+  if (Platform.OS !== 'android') return;
+  (async () => {
+    const token = await tokenStore.get();
+    if (!token) return;
+    const c = Platform.constants;
+    const device = [c.Brand, c.Model].filter(Boolean).join(' ') || 'unknown';
+    await api.reportCameraFailure(token, { reason: reason.slice(0, 200), build: buildId(), os: `Android ${Platform.Version}`, device: device.slice(0, 60), engine: 'native' });
+  })().catch(() => undefined);
 }
 
 /** Remembers that the native camera failed on this build (reason: fatal:<message> | no_live | no_frame_after_ready). Never shown. */

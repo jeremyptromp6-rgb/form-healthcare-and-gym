@@ -313,6 +313,9 @@ export const api = {
   /** The full export as text (JSON), after re-entering the password. */
   exportData: (token: string, password: string) => request<unknown>('/me/export', { method: 'POST', token, body: { password }, timeoutMs: 60_000 }),
   changePassword: (token: string, currentPassword: string, newPassword: string) => request<{ token: string }>('/auth/password', { method: 'POST', token, body: { currentPassword, newPassword } }),
+  /** One anonymous line on why the native camera handed over to the WebView engine. Fire-and-forget: never throws. */
+  reportCameraFailure: (token: string, body: { reason: string; build: string; os: string; device: string; engine: 'native' }): Promise<void> =>
+    request<void>('/diagnostics/camera', { method: 'POST', token, body, timeoutMs: 5000 }).catch(() => undefined),
   legal: () => request<{ termsUrl: string | null; privacyUrl: string | null }>('/legal'),
   updateSettings: (token: string, patch: Partial<UserSettings>) => request<UserSettings>('/me/settings', { method: 'PATCH', body: patch, token }),
   completeOnboarding: (token: string) => request<OnboardingStatus>('/onboarding/complete', { method: 'POST', token }),

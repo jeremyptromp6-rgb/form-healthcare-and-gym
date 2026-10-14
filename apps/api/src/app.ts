@@ -25,6 +25,7 @@ import { scanRoutes } from "./modules/scan/routes";
 import { progressionRoutes } from "./modules/progression/routes";
 import { questRoutes } from "./modules/quests/routes";
 import { recognitionRoutes } from "./modules/recognition/routes";
+import { cameraReportRoutes, recentCameraReports } from "./modules/system/cameraReports";
 import { clientErrorRoutes } from "./modules/system/clientErrors";
 import { systemRoutes } from "./modules/system/routes";
 import { userRoutes } from "./modules/users/routes";
@@ -143,6 +144,8 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
       backup: ctx.config.backup === "litestream" ? "on" : "off",
       features: { foodScan: features.food_scan.available, aiCoach: features.ai_coach.available, cameraVerification: features.camera_verification.available },
       foodRecognition: food ? { state: food.state, provider: food.provider, lastFailure: lastRecognitionFailure(ctx) } : null,
+      // Why phones' native camera handed over to the WebView engine: anonymous technical lines, newest first, at most 20.
+      cameraReports: recentCameraReports(ctx),
     };
   });
   await app.register(async (pub) => authRoutes(pub, ctx));
@@ -171,6 +174,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     reportRoutes(secured, ctx);
     adRoutes(secured, ctx);
     systemRoutes(secured, ctx);
+    cameraReportRoutes(secured, ctx);
   });
 
   return { app, ctx, routes };

@@ -1,6 +1,7 @@
 import { fromMediaPipePose, LivePoseSession } from '@form/domain';
 import { act, render, screen } from '@testing-library/react-native';
 import { useCameraPermissions } from 'expo-camera';
+import { Platform } from 'react-native';
 import { MODEL_BUDGET_MS, POSE_CONFIDENCE } from '@/lib/pose/poseModels';
 import { config } from '@/lib/config';
 import type { LiveReadout, PoseDiag } from '@/lib/pose/status';
@@ -50,6 +51,11 @@ jest.mock('expo-constants', () => ({
     },
   },
 }));
+// The anonymous handover report: a signed-in token and the API call, recorded.
+let mockToken: string | null = 'tok';
+const mockReport = jest.fn(async (_token: string, _body: object) => undefined);
+jest.mock('@/lib/tokenStore', () => ({ tokenStore: { get: async () => mockToken } }));
+jest.mock('@/lib/api', () => ({ ...jest.requireActual('@/lib/api'), api: { reportCameraFailure: (t: string, b: object) => mockReport(t, b) } }));
 // The WebView engine, for the fallback: it records its message handler.
 const mockWeb: { onMessage: ((e: { nativeEvent: { data: string } }) => void) | null; inject: jest.Mock } = { onMessage: null, inject: jest.fn() };
 jest.mock('react-native-webview', () => {
@@ -107,6 +113,8 @@ beforeEach(() => {
   mockMounts = 0;
   mockStore.clear();
   mockBuildCode = 7;
+  mockToken = 'tok';
+  mockReport.mockClear();
   mockWeb.onMessage = null;
   mockWeb.inject.mockClear();
   permission.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
@@ -354,6 +362,41 @@ describe('native pose feed', () => {
       await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
       await fire('onPose', { kind: 'failed', fatal: true, message: 'no camerax' });
       expect(storedReason()).toMatchObject({ reason: 'fatal:no camerax', build: '0.1.0+7' });
+    });
+
+    describe('anonymous handover report', () => {
+      beforeEach(() => {
+        jest.replaceProperty(Platform, 'OS', 'android');
+        jest.spyOn(Platform, 'Version', 'get').mockReturnValue(35);
+        jest.spyOn(Platform, 'constants', 'get').mockReturnValue({ Brand: 'google', Model: 'Pixel 9' } as typeof Platform.constants);
+      });
+      afterEach(() => jest.restoreAllMocks());
+
+      it('sends the reason, build, OS and phone model once, with no user data', async () => {
+        const { session } = fakeSession();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+        await fire('onPose', { kind: 'failed', fatal: true, message: 'no camerax' });
+        expect(mockReport).toHaveBeenCalledTimes(1);
+        expect(mockReport).toHaveBeenCalledWith('tok', { reason: 'fatal:no camerax', build: '0.1.0+7', os: 'Android 35', device: 'google Pixel 9', engine: 'native' });
+      });
+
+      it('sends nothing without a session', async () => {
+        mockToken = null;
+        const { session } = fakeSession();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+        await fire('onPose', { kind: 'failed', fatal: true, message: 'x' });
+        expect(mockReport).not.toHaveBeenCalled();
+        expect(screen.getByTestId('camera-view')).toBeTruthy();
+      });
+
+      it('a failing send is ignored', async () => {
+        mockReport.mockRejectedValueOnce(new Error('offline'));
+        const { session } = fakeSession();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
+        await fire('onPose', { kind: 'failed', fatal: true, message: 'x' });
+        expect(mockReport).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('camera-view')).toBeTruthy();
+      });
     });
 
     it('a camera that never goes live is remembered as no_live', async () => {

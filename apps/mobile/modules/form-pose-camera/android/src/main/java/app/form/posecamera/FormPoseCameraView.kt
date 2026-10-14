@@ -141,18 +141,27 @@ class FormPoseCameraView(
 
     // A view that is detached but not destroyed must never keep the camera running; the session key is
     // kept so that re-attaching restarts it.
+    // React Native can detach and re-attach this view while re-parenting it (e.g. when a wrapper view
+    // is flattened or un-flattened on a re-render). Stopping right away turned every such move into a
+    // full restart (camera, model download, warm-up), so a detach only stops the session if the view
+    // stays detached; a re-attach within the grace period keeps the running session.
+    private val detachedStop = Runnable { if (!isAttachedToWindow && (engine != null || cameraController != null)) stopSession() }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        if (engine != null || cameraController != null) stopSession()
+        mainHandler.removeCallbacks(detachedStop)
+        mainHandler.postDelayed(detachedStop, DETACH_GRACE_MS)
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        mainHandler.removeCallbacks(detachedStop)
         if (sessionKey != null && engine == null && cameraController == null) startSession()
     }
 
     /** Called when React Native drops the view (OnViewDestroys). */
     fun cleanup() {
+        mainHandler.removeCallbacks(detachedStop)
         stopSession()
         sessionKey = null
     }
@@ -362,6 +371,7 @@ class FormPoseCameraView(
 
     private companion object {
         const val DIAG_PERIOD_MS = 1000L
+        const val DETACH_GRACE_MS = 2000L
         const val MIN_FRAME_EVENT_NS = 24_000_000L
         val NO_LANDMARKS = FloatArray(0)
 

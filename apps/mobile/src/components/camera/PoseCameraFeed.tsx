@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject
 import { StyleSheet } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { config } from '@/lib/config';
-import { nativeCameraFailedOnThisBuild, recordNativeCameraFailure } from '@/lib/pose/nativeFallback';
+import { nativeCameraFailedOnThisBuild, recordNativeCameraFailure, reportNativeCameraFailure } from '@/lib/pose/nativeFallback';
 import { nativePoseAvailable } from '@/lib/pose/nativePose';
 import { colors } from '@/theme/tokens';
 import type { PoseCameraFeedProps } from './feedTypes';
@@ -30,8 +30,14 @@ export function PoseCameraFeed(p: PoseCameraFeedProps) {
   useEffect(() => {
     onEngine?.(native ? 'native' : 'webview');
   }, [native, onEngine]);
+  const reported = useRef(false);
   const onFatal = useCallback((reason: string) => {
     recordNativeCameraFailure(reason);
+    // Once per handover, however many fatal events arrive.
+    if (!reported.current) {
+      reported.current = true;
+      reportNativeCameraFailure(reason);
+    }
     setNativeFailed(true);
   }, []);
   return native ? <NativePoseFeed {...p} onFatal={onFatal} /> : <WebViewPoseFeed {...p} />;
