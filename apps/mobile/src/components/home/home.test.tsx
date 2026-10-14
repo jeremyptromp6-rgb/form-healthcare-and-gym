@@ -256,8 +256,8 @@ describe('Home hierarchy and header chips', () => {
     expect(onNavigate).toHaveBeenLastCalledWith('eat');
     await fireEvent.press(screen.getByRole('button', { name: 'Start workout' }));
     expect(onNavigate).toHaveBeenLastCalledWith('train');
-    await fireEvent.press(screen.getByRole('button', { name: '3 day streak. Open progress' }));
-    expect(onNavigate).toHaveBeenLastCalledWith('progress');
+    await fireEvent.press(screen.getByRole('button', { name: '3 day streak. Open streak and season' }));
+    expect(onNavigate).toHaveBeenLastCalledWith('streak');
     expect(screen.getByRole('button', { name: 'Level 2, Rookie. Open progress' })).toBeTruthy();
     // No shortcut tiles duplicating the tab bar.
     expect(screen.queryByRole('button', { name: 'Go to Train' })).toBeNull();

@@ -5,6 +5,7 @@ import type { AppContext } from "../../shared/context";
 import { dateKey } from "../../shared/dates";
 import { userClock } from "../../shared/userClock";
 import { entitlementsFor, proRequired } from "../billing/entitlements";
+import { muscleRanks } from "./muscleRanks";
 import { lockForTier, progressAnalytics } from "./service";
 
 export function analyticsRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -23,5 +24,11 @@ export function analyticsRoutes(app: FastifyInstance, ctx: AppContext): void {
     const clock = userClock(ctx, req.user.sub, q.today);
     const analytics = progressAnalytics(ctx, req.user.sub, clock, { range: q.range as (typeof ANALYTICS_RANGES)[number], exerciseId: q.exercise });
     return { analytics: lockForTier(analytics, e) };
+  });
+
+  /** Muscle ranks (tier per muscle from the last 28 days of hard sets), weakest first. Free for everyone. */
+  app.get("/progress/muscle-ranks", async (req) => {
+    const q = z.object({ today: dateKey.optional() }).strict().parse(req.query);
+    return muscleRanks(ctx, req.user.sub, userClock(ctx, req.user.sub, q.today));
   });
 }

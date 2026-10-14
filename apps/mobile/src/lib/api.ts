@@ -35,6 +35,7 @@ import type {
   ProfileSummaryStats,
   AnalyticsRange,
   ProgressAnalytics,
+  MuscleRanks,
   CoachResponse,
   CoachStatus,
   CoachTopic,
@@ -349,7 +350,7 @@ export const api = {
   workoutDetail: (token: string, id: string) => request<WorkoutSummaryDetail>(`/workouts/${id}`, { token }),
   exerciseDetail: (token: string, id: string) => request<ExerciseDetail>(`/exercises/${id}`, { token }),
   // The API has no date range, only a limit (max 100). 50 covers any training week, so "This week" totals are never undercounted.
-  workouts: (token: string) => request<{ workouts: WorkoutSummary[] }>('/workouts?limit=50', { token }),
+  workouts: (token: string) => request<{ workouts: WorkoutSummary[] }>('/workouts?limit=100', { token }),
   logWorkout: (token: string, body: NewWorkout) => request<WorkoutResult>('/workouts', { method: 'POST', body, token }),
 
   nutritionDay: (token: string, date: string, today: string) => request<NutritionDay>(`/nutrition/days/${date}?today=${today}`, { token }),
@@ -376,6 +377,7 @@ export const api = {
   clearCoachMessages: (token: string) => request<void>('/coach/messages', { token, method: 'DELETE' }),
   progressAnalytics: (token: string, range: AnalyticsRange, today: string, exercise?: string) =>
     request<{ analytics: ProgressAnalytics }>(`/analytics/progress?range=${range}&today=${today}${exercise ? `&exercise=${exercise}` : ''}`, { token }),
+  muscleRanks: (token: string, today: string) => request<MuscleRanks>(`/progress/muscle-ranks?today=${today}`, { token }),
   achievements: (token: string) => request<{ achievements: Achievement[] }>('/achievements', { token }),
   streaks: (token: string) => request<{ today: string; timezone: string; streaks: Streaks }>('/streaks', { token }),
   bodyQuest: (token: string) => request<{ bodyQuest: BodyQuest; insights: BodyQuestInsights | null; insightsLocked: boolean }>('/body-quest', { token }),

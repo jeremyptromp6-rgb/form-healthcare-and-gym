@@ -1,4 +1,4 @@
-import type { AmountBasis, AmountMethod, AmountVia, DayTotals, FoodItem, FoodSource, FoodUnit, ImageQuality, Macros, MealType, NutrientProgress, NutritionTarget, ScanReviewItem, ScanStatus, SetQuality } from '@form/domain';
+import type { AmountBasis, AmountMethod, AmountVia, DayTotals, FoodItem, FoodSource, FoodUnit, ImageQuality, Macros, MealType, NutrientProgress, NutritionTarget, ScanReviewItem, ScanStatus, SetQuality , MuscleRank } from '@form/domain';
 
 export type { FoodItem, MealType, AmountMethod, FoodUnit };
 
@@ -938,3 +938,10 @@ export type PostWorkoutAdDecision =
   | { eligible: false; reason: 'pro_user' | 'workout_not_found' | 'workout_not_recent' | 'already_handled' | 'daily_cap' };
 export type PostWorkoutAdEvent = 'requested' | 'loaded' | 'shown' | 'dismissed' | 'failed';
 
+/** GET /progress/muscle-ranks: a tier per muscle from the last `windowDays` days of hard sets, weakest first. */
+export interface MuscleRanks {
+  windowDays: number;
+  from: string;
+  to: string;
+  ranks: MuscleRank[];
+}

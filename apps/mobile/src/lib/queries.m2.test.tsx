@@ -54,6 +54,6 @@ describe('Train history covers a whole week', () => {
     } finally {
       global.fetch = original;
     }
-    expect(String(fetchMock.mock.calls[0]![0])).toBe('http://api.test/workouts?limit=50');
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('http://api.test/workouts?limit=100');
   });
 });

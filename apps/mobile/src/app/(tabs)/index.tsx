@@ -5,11 +5,12 @@ import { ErrorState, Screen, StateView } from '@/components/ui';
 import { uuid } from '@/lib/dates';
 import { useAddWater, useCoachInsight, useHome, useRefetchOnFocus, useUndoWater } from '@/lib/queries';
 
-const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile'> = {
+const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak'> = {
   train: '/train',
   eat: '/eat',
   progress: '/progress',
   profile: '/profile',
+  streak: '/progress/streak',
 };
 
 /** Home container: fetches the view model, wires actions and navigation. Rendering lives in HomeView. */
@@ -33,7 +34,7 @@ export default function Home() {
   return (
     <HomeView
         vm={home.data}
-        onNavigate={(r) => router.navigate(ROUTES[r])}
+        onNavigate={(r) => router.navigate(ROUTES[r] as Href)}
         onAddWater={(ml) => {
           setWaterError(null);
           // A fresh id per tap: retries of this request dedupe on the server, separate taps don't.

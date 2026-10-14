@@ -58,6 +58,7 @@ export * from "./progression/progressionEngine";
 export * from "./progression/xpEvents";
 export * from "./progression/consistency";
 export * from "./streaks/streakEngine";
+export * from "./streaks/seasons";
 export * from "./records/personalRecords";
 export * from "./quests/quests";
 export * from "./achievements/achievements";
@@ -73,6 +74,7 @@ export * from "./coach/coach";
 export * from "./coach/response";
 export * from "./coach/deterministicCoach";
 export * from "./progressAnalytics/progressAnalytics";
+export * from "./progressAnalytics/muscleRanks";
 export * from "./analytics/analytics";
 export * from "./notifications/notifications";
 

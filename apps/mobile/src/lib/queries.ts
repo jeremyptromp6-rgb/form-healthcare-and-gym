@@ -42,6 +42,7 @@ export const qk = {
   xpEvents: ['xp-events'] as const,
   achievements: ['achievements'] as const,
   streaks: ['streaks'] as const,
+  muscleRanks: (today: string) => ['muscle-ranks', today] as const,
   bodyQuest: ['body-quest'] as const,
   celebrations: ['celebrations'] as const,
   coachStatus: ['coach', 'status'] as const,
@@ -107,6 +108,8 @@ export const useGrocery = () => useAuthedQuery(qk.grocery, api.grocery);
 export const useXpEvents = () => useAuthedQuery(qk.xpEvents, (t) => api.xpEvents(t, 30));
 export const useAchievements = () => useAuthedQuery(qk.achievements, api.achievements);
 export const useStreaks = () => useAuthedQuery(qk.streaks, api.streaks);
+/** Muscle ranks. An older server answers 404: no retries, the screen shows a friendly empty state. */
+export const useMuscleRanks = (today = localDateKey()) => useAuthedQuery(qk.muscleRanks(today), (t) => api.muscleRanks(t, today), { retry: 0 });
 export const useBodyQuest = () => useAuthedQuery(qk.bodyQuest, api.bodyQuest);
 export const useCelebrations = () => useAuthedQuery(qk.celebrations, api.celebrations);
 

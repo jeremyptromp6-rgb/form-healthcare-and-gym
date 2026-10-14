@@ -1,12 +1,14 @@
 import { View, type StyleProp, type ViewStyle } from 'react-native';
+import type { MuscleTier } from '@form/domain';
 import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
-import { ACCENTS, ANATOMY, artPalettes, LIGHT_DIR, STROKE, useArtId, type ArtTone } from '@/theme/artPalette';
+import { ACCENTS, ANATOMY, artPalettes, LIGHT_DIR, METALS, STROKE, useArtId, type ArtTone, type MetalName } from '@/theme/artPalette';
 import { fonts, palettes, scheme } from '@/theme/tokens';
 
 /**
  * An anatomical muscle map, front and back: a stylised grey anatomy figure (neck, hands and feet,
  * a mannequin head, every muscle group segmented) whose worked muscles light up: the main movers in the
- * accent red, the helpers in a softer amber, or a heat scale (e.g. sets per muscle) from amber through coral to deep red. Matches the
+ * accent red, the helpers in a softer amber, a heat scale (e.g. sets per muscle) from amber through coral to deep red, or a rank tier
+ * per muscle (`tiers`: grey for untrained, then bronze, silver, gold, platinum and sapphire metal). Matches the
  * catalogue's muscle groups exactly. `MuscleThumb` shows one group on a body-part silhouette, for filters and
  * lists. Style rules: docs/art-style.md. Budget: 200 SVG elements for the map, 40 for a thumb.
  */
@@ -227,6 +229,13 @@ function heatStops(tone: ArtTone, step: 0 | 1 | 2): [string, string] {
 }
 const stepOf = (level: number): 0 | 1 | 2 => (level >= 0.67 ? 2 : level >= 0.34 ? 1 : 0);
 
+/* ---------------------------------------------------------------- tiers */
+
+/** The metal each rank tier is painted in. Untrained stays the grey of the figure. */
+export const TIER_METAL: Record<MuscleTier, MetalName | null> = { untrained: null, bronze: 'bronze', silver: 'silver', gold: 'gold', platinum: 'platinum', diamond: 'sapphire' };
+type Tiers = Map<string, MuscleTier>;
+const NO_TIERS: Tiers = new Map();
+
 /* --------------------------------------------------------------- pieces */
 
 /** The soft grey-brown lines and shadows need the tone's own palette. */
@@ -235,8 +244,9 @@ function useLook(tone?: ArtTone): { t: ArtTone; base: string } {
   return { t: tone ?? scheme, base };
 }
 
-function Gradients({ t, base, levels, figures }: { t: ArtTone; base: string; levels: Map<string, number>; figures: { cx: number; id: string }[] }) {
+function Gradients({ t, base, levels, tiers, figures }: { t: ArtTone; base: string; levels: Map<string, number>; tiers: Tiers; figures: { cx: number; id: string }[] }) {
   const used = new Set([...levels.values()].map(stepOf));
+  const usedTiers = [...new Set(tiers.values())].filter((x) => TIER_METAL[x]);
   return (
     <Defs>
       {figures.map((f) => (
@@ -257,6 +267,12 @@ function Gradients({ t, base, levels, figures }: { t: ArtTone; base: string; lev
             <Stop offset="1" stopColor={heatStops(t, s)[1]} />
           </LinearGradient>
         ))}
+      {usedTiers.map((x) => (
+        <LinearGradient key={x} id={`${base}t${x}`} {...LIGHT_DIR}>
+          <Stop offset="0" stopColor={METALS[TIER_METAL[x]!].hi} />
+          <Stop offset="1" stopColor={METALS[TIER_METAL[x]!].mid} />
+        </LinearGradient>
+      ))}
     </Defs>
   );
 }
@@ -268,6 +284,7 @@ interface FigureProps {
   base: string;
   skinId: string;
   levels: Map<string, number>;
+  tiers: Tiers;
   /** Parts to draw, and which muscles. A thumb draws a few; the map draws everything. */
   parts: Part[];
   muscles: Muscle[];
@@ -276,7 +293,7 @@ interface FigureProps {
   details: boolean;
 }
 
-function Figure({ cx, view, t, base, skinId, levels, parts, muscles, line, details }: FigureProps) {
+function Figure({ cx, view, t, base, skinId, levels, tiers, parts, muscles, line, details }: FigureProps) {
   const a = artPalettes[t];
   const x = ACCENTS[t];
   const night = t === 'dark';
@@ -296,6 +313,10 @@ function Figure({ cx, view, t, base, skinId, levels, parts, muscles, line, detai
         const level = levels.get(m) ?? 0;
         const shapes = SHAPES[view][m];
         if (!shapes) return null;
+        const tier = tiers.get(m);
+        if (tier && TIER_METAL[tier]) {
+          return <Path key={m} d={shapes.map((d) => both(d, cx)).join(' ')} fill={`url(#${base}t${tier})`} stroke={METALS[TIER_METAL[tier]!].lo} strokeWidth={STROKE.hair} strokeLinejoin="round" />;
+        }
         return (
           <Path
             key={m}
@@ -352,6 +373,7 @@ export function BodyMap({
   primary = [],
   secondary = [],
   heat,
+  tiers,
   height = 200,
   showLabels = true,
   style,
@@ -361,6 +383,8 @@ export function BodyMap({
   primary?: string[];
   secondary?: string[];
   heat?: Partial<Record<Muscle, number>>;
+  /** Rank tier per muscle: each muscle is painted in its tier's metal; untrained or missing stays grey. */
+  tiers?: Partial<Record<Muscle, MuscleTier>>;
   height?: number;
   showLabels?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -369,8 +393,9 @@ export function BodyMap({
 }) {
   const { t, base } = useLook(tone);
   const { levels, s } = levelsOf(primary, secondary, heat);
+  const tierMap: Tiers = tiers ? new Map(Object.entries(tiers) as [string, MuscleTier][]) : NO_TIERS;
   const label =
-    accessibilityLabel ?? (heat ? `Muscles trained: ${[...levels.keys()].map((m) => MUSCLE_LABEL[m as Muscle] ?? m).join(', ') || 'none yet'}` : `Muscles worked: ${primary.join(', ')}${s.length ? `; also ${s.join(', ')}` : ''}`);
+    accessibilityLabel ?? (tiers ? `Muscle ranks: ${MUSCLES.map((m) => `${MUSCLE_LABEL[m]} ${tiers[m] ?? 'untrained'}`).join(', ')}` : heat ? `Muscles trained: ${[...levels.keys()].map((m) => MUSCLE_LABEL[m as Muscle] ?? m).join(', ') || 'none yet'}` : `Muscles worked: ${primary.join(', ')}${s.length ? `; also ${s.join(', ')}` : ''}`);
   // Labels are drawn in viewBox units: sized so they come out at 12px or more at this height.
   const labelSize = Math.min(24, Math.max(15, (12.5 * 205) / height));
   const faint = palettes[t].textFaint;
@@ -380,9 +405,9 @@ export function BodyMap({
   return (
     <View style={[{ height, aspectRatio: 220 / 205 }, style]} accessible accessibilityRole="image" accessibilityLabel={label}>
       <Svg width="100%" height="100%" viewBox="0 0 220 205">
-        <Gradients t={t} base={base} levels={levels} figures={[{ cx: 55, id: `${base}sf` }, { cx: 165, id: `${base}sb` }]} />
-        <Figure cx={55} view="front" t={t} base={base} skinId={`${base}sf`} levels={levels} parts={all} muscles={every} line={FULL_LINE} details />
-        <Figure cx={165} view="back" t={t} base={base} skinId={`${base}sb`} levels={levels} parts={all} muscles={every} line={FULL_LINE} details />
+        <Gradients t={t} base={base} levels={levels} tiers={tierMap} figures={[{ cx: 55, id: `${base}sf` }, { cx: 165, id: `${base}sb` }]} />
+        <Figure cx={55} view="front" t={t} base={base} skinId={`${base}sf`} levels={levels} tiers={tierMap} parts={all} muscles={every} line={FULL_LINE} details />
+        <Figure cx={165} view="back" t={t} base={base} skinId={`${base}sb`} levels={levels} tiers={tierMap} parts={all} muscles={every} line={FULL_LINE} details />
         {showLabels ? (
           <>
             <SvgText x={55} y={202} {...text}>
@@ -409,9 +434,9 @@ export function MuscleThumb({ muscle, size = 56, active = true, intensity = 1, s
   return (
     <View style={[{ width: size, height: size, borderRadius: size / 2, overflow: 'hidden', backgroundColor: pal.cardRaised }, style]} accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden>
       <Svg width="100%" height="100%" viewBox={vb}>
-        <Gradients t={t} base={base} levels={levels} figures={[{ cx: 0, id: `${base}s` }]} />
+        <Gradients t={t} base={base} levels={levels} tiers={NO_TIERS} figures={[{ cx: 0, id: `${base}s` }]} />
         {active ? <Circle cx={px} cy={py} r={th.span * 0.46} fill={pal.primarySoft} /> : null}
-        <Figure cx={0} view={th.view} t={t} base={base} skinId={`${base}s`} levels={levels} parts={th.parts} muscles={[muscle]} line={THUMB_LINE} details={false} />
+        <Figure cx={0} view={th.view} t={t} base={base} skinId={`${base}s`} levels={levels} tiers={NO_TIERS} parts={th.parts} muscles={[muscle]} line={THUMB_LINE} details={false} />
       </Svg>
     </View>
   );

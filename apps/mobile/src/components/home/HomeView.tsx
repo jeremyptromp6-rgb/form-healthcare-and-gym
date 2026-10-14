@@ -18,7 +18,7 @@ import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
-export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile';
+export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak';
 
 export interface HomeViewProps {
   vm: HomeViewModel;
@@ -83,7 +83,7 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
           </Row>
           {vm.progression ? (
             <Row gap={space.sm} style={{ flexWrap: 'wrap' }}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`${vm.progression.streak.current} day streak. Open progress`} onPress={() => onNavigate('progress')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`${vm.progression.streak.current} day streak. Open streak and season`} onPress={() => onNavigate('streak')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
                 <Ionicons name="flame" size={16} color={colors.accent} />
                 <AppText variant="bodyStrong" color={colors.text}>
                   {vm.progression.streak.current}

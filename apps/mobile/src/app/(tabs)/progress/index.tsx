@@ -48,6 +48,7 @@ export default function ProgressScreen() {
               <SectionHeader title="Your training" />
               {workouts.data ? <TrainingCard workouts={workouts.data.workouts} today={today} /> : workouts.isError ? <ErrorState error={workouts.error} onRetry={workouts.refetch} compact /> : <StateView kind="loading" compact />}
               <ExerciseList>
+                <ListRow title="Muscle ranks" subtitle="See which muscles are strong and which to improve" icon="body-outline" iconTint={colors.primary} onPress={() => router.push('/progress/muscles' as Href)} />
                 <ListRow title="Trends" subtitle="Strength, form, consistency, food and more over 7, 30 or 90 days" icon="analytics-outline" iconTint={colors.primary} onPress={() => router.push('/progress/analytics' as Href)} />
                 <ListRow title="Weekly report" subtitle="Your week in numbers, with a coach note — FORM Pro" icon="document-text-outline" iconTint={colors.primary} onPress={() => router.push('/progress/reports' as Href)} />
               </ExerciseList>
@@ -60,7 +61,7 @@ export default function ProgressScreen() {
             ) : null,
 
             <View key="streaks" style={section}>
-              <SectionHeader title="Streaks" />
+              <SectionHeader title="Streaks" action={<SectionAction label="Streak & Season" onPress={() => router.push('/progress/streak' as Href)} />} />
               {streaks.data ? <StreaksGrid streaks={streaks.data.streaks} /> : streaks.isError ? <ErrorState error={streaks.error} onRetry={streaks.refetch} compact /> : <StateView kind="loading" compact />}
             </View>,
 
