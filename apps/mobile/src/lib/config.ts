@@ -83,6 +83,8 @@ export const config = {
   /** Set when this build has no usable API address (e.g. a downloadable APK built without one). */
   apiProblem: api.apiProblem,
   requestTimeoutMs: 15_000,
+  /** How long a read keeps retrying when it gets no response (a waking server, a blip). Off under Jest. */
+  requestRetryMs: process.env.NODE_ENV === 'test' ? 0 : 30_000,
   /**
    * On-device pose model (MediaPipe Pose Landmarker full, ~9 MB, fetched once and cached by the
    * browser; frames never leave the device). Override with EXPO_PUBLIC_POSE_MODEL_URL to self-host.

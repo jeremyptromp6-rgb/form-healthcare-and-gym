@@ -12,7 +12,7 @@ describe('design system', () => {
   it('ErrorState offers a retry for network failures', async () => {
     const onRetry = jest.fn();
     await render(<ErrorState error={new ApiError('network', 'network', 'x', null, true)} onRetry={onRetry} />);
-    expect(screen.getByText("Can't reach FORM")).toBeTruthy();
+    expect(screen.getByText('No internet connection')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Try again' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

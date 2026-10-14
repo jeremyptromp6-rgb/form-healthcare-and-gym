@@ -85,39 +85,66 @@ export function kindForStatus(status: number): ApiErrorKind {
   return 'server';
 }
 
-export async function request<T>(path: string, opts: { method?: string; body?: unknown; token?: string | null; timeoutMs?: number } = {}): Promise<T> {
+/** Wakes a sleeping server early (the app calls it at launch), so the first real request is quick. Never fails. */
+export function wakeServer(): void {
+  if (!config.apiUrl) return;
+  fetch(`${config.apiUrl}/health`).catch(() => undefined);
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * `retryMs`: how long to keep retrying a request that got no response at all. Reads retry by default,
+ * so a server that is waking up or a brief network blip never shows an error; writes don't, unless the
+ * caller opts in (sign-in and sign-up do: repeating them is safe).
+ */
+export async function request<T>(path: string, opts: { method?: string; body?: unknown; token?: string | null; timeoutMs?: number; retryMs?: number } = {}): Promise<T> {
   if (!config.apiUrl) {
     throw new ApiError('unavailable', 'not_configured', "This version of FORM isn't connected to a server yet, so signing in and syncing aren't available.", null, false);
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? config.requestTimeoutMs);
-  let res: Response;
+  const method = opts.method ?? 'GET';
+  const deadline = Date.now() + (opts.retryMs ?? (method === 'GET' ? config.requestRetryMs : 0));
+  let res: Response | undefined;
   let json: any = null;
-  try {
-    res = await fetch(`${config.apiUrl}${path}`, {
-      method: opts.method ?? 'GET',
-      headers: {
-        ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
-        ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: controller.signal,
-    });
-    // The timeout stays armed until the body is fully read, so a stalled body can't hang the caller.
-    if (res.status !== 204) {
-      try {
-        json = await res.json();
-      } catch {
-        if (controller.signal.aborted) throw new Error('timed out');
-        json = null; // not JSON: handled below, by status
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? config.requestTimeoutMs);
+    try {
+      res = await fetch(`${config.apiUrl}${path}`, {
+        method,
+        headers: {
+          ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
+          ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+        },
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: controller.signal,
+      });
+      // The timeout stays armed until the body is fully read, so a stalled body can't hang the caller.
+      json = null;
+      if (res.status !== 204) {
+        try {
+          json = await res.json();
+        } catch {
+          if (controller.signal.aborted) throw new Error('timed out');
+          json = null; // not JSON: handled below, by status
+        }
       }
+      break;
+    } catch {
+      res = undefined;
+      // Keep trying while the budget lasts (a waking server, a blip), backing off 1 s, 2 s, 4 s … up to 8 s.
+      const wait = Math.min(8000, 1000 * 2 ** attempt);
+      if (Date.now() + wait < deadline) {
+        await sleep(wait);
+        continue;
+      }
+      throw new ApiError('network', 'network', "Can't connect. Check your internet connection and try again.", null, true);
+    } finally {
+      clearTimeout(timer);
     }
-  } catch {
-    throw new ApiError('network', 'network', "Can't reach FORM. Check your connection.", null, true);
-  } finally {
-    clearTimeout(timer);
   }
 
+  if (!res) throw new ApiError('network', 'network', "Can't connect. Check your internet connection and try again.", null, true);
   if (res.status === 204) return undefined as T;
   if (res.ok && (json === null || json === undefined)) {
     // Every endpoint answers with JSON or 204; anything else is a broken response, not an empty success.
@@ -133,6 +160,9 @@ export async function request<T>(path: string, opts: { method?: string; body?: u
 }
 
 type AuthResponse = { token: string; user: User };
+// A sleeping free-plan server takes up to about a minute to wake: sign-in waits for it instead of failing.
+const AUTH_TIMEOUT_MS = 75_000;
+const AUTH_RETRY_MS = config.requestRetryMs > 0 ? 60_000 : 0;
 
 const COACH_TIMEOUT_MS = 35_000;
 
@@ -284,8 +314,8 @@ export interface NewWorkout {
 
 /** Typed FORM API. Every authenticated call takes the session token first. */
 export const api = {
-  register: (email: string, password: string) => request<AuthResponse>('/auth/register', { method: 'POST', body: { email, password } }),
-  login: (email: string, password: string) => request<AuthResponse>('/auth/login', { method: 'POST', body: { email, password } }),
+  register: (email: string, password: string) => request<AuthResponse>('/auth/register', { method: 'POST', body: { email, password }, timeoutMs: AUTH_TIMEOUT_MS, retryMs: AUTH_RETRY_MS }),
+  login: (email: string, password: string) => request<AuthResponse>('/auth/login', { method: 'POST', body: { email, password }, timeoutMs: AUTH_TIMEOUT_MS, retryMs: AUTH_RETRY_MS }),
   logoutAll: (token: string) => request<void>('/auth/logout-all', { method: 'POST', token }),
 
   me: (token: string, today: string) => request<Me>(`/me?today=${today}`, { token }),

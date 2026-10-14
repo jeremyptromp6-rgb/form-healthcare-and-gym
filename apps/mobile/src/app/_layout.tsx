@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, StateView } from '@/components/ui';
+import { wakeServer } from '@/lib/api';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { reportCrash } from '@/lib/crashReport';
 import { useMe } from '@/lib/queries';
@@ -85,6 +86,8 @@ export default function RootLayout() {
   const [queryClient] = useState(createQueryClient);
   useEffect(() => bindAppFocus(), []);
   useEffect(() => installFocusRing(), []);
+  // Start waking the server the moment the app opens, so it is ready by the time anyone signs in.
+  useEffect(() => wakeServer(), []);
   // Nunito — soft, rounded and friendly — is the product typeface; if it fails to load, the system font is a fine fallback.
   const [fontsLoaded, fontError] = useFonts({ Nunito_500Medium, Nunito_600SemiBold, Nunito_700Bold, Nunito_800ExtraBold });
   if (!fontsLoaded && !fontError) return <FullScreenLoading />;

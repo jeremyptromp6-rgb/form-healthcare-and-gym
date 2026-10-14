@@ -31,7 +31,7 @@ export default function SignIn() {
       const err = e instanceof ApiError ? e : null;
       setError(
         err?.kind === 'network'
-          ? "Can't reach FORM. Check your connection and that the API is running."
+          ? "No internet connection. Check your connection and try again."
           : err?.code === 'invalid_request'
             ? 'Check your email address and password.'
             : (err?.message ?? 'Something went wrong. Try again.'),

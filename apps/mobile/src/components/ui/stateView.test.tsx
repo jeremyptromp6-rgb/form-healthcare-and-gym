@@ -153,7 +153,7 @@ describe('StateView', () => {
       ['empty', 'Recipe not found', 'notFound'],
       ['empty', 'Exercise not found', 'notFound'],
       ['empty', 'Entry not found', 'notFound'],
-      ['error', "Can't reach FORM", 'offline'],
+      ['error', 'No internet connection', 'offline'],
       ['error', "Couldn't reach FORM's server", 'offline'],
       ['permission', 'Use your camera to scan', 'cameraPermission'],
       ['unavailable', "Food scanning isn't available yet", 'unavailable'],
@@ -180,7 +180,7 @@ describe('StateView', () => {
 describe('ErrorState art', () => {
   it('uses the offline art for a network failure', async () => {
     await render(<ErrorState error={new ApiError('network', 'network', 'x', null, true)} />);
-    expect(screen.getByText("Can't reach FORM")).toBeTruthy();
+    expect(screen.getByText('No internet connection')).toBeTruthy();
     expect(mockArtKinds).toEqual(['offline@88']);
   });
 

@@ -368,7 +368,7 @@ export function StateView({
 /** Maps an API failure to the matching state, offering a retry where one can help. */
 export function ErrorState({ error, onRetry, compact }: { error: ApiError; onRetry?: () => void; compact?: boolean }) {
   const byKind: Partial<Record<ApiError['kind'], { kind: StateKind; title: string; message: string }>> = {
-    network: { kind: 'error', title: "Can't reach FORM", message: 'Check your connection and try again.' },
+    network: { kind: 'error', title: 'No internet connection', message: 'Check your connection and try again.' },
     unavailable: { kind: 'unavailable', title: 'Temporarily unavailable', message: error.message },
     rate_limited: { kind: 'error', title: 'Slow down a little', message: 'Too many requests. Try again in a minute.' },
     forbidden: { kind: 'permission', title: 'Not allowed', message: error.message },

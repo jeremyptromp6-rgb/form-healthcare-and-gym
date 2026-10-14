@@ -7,6 +7,20 @@ describe('request(): response bodies', () => {
     jest.useRealTimers();
   });
 
+  it('retries a request that got no response (a waking server) and succeeds without showing an error', async () => {
+    globalThis.fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: 1 }) });
+    await expect(request('/home', { retryMs: 5000 })).resolves.toEqual({ ok: 1 });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up with a plain "check your internet" message once the retry budget is spent', async () => {
+    globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('Network request failed'));
+    await expect(request('/home', { retryMs: 0 })).rejects.toMatchObject({ kind: 'network', message: expect.stringMatching(/internet/i) });
+  });
+
   it('turns a 200 with a body that is not JSON into a friendly server error', async () => {
     globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => Promise.reject(new SyntaxError('Unexpected token <')) });
     const err = (await request('/home').catch((e: unknown) => e)) as ApiError;
