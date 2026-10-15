@@ -2,8 +2,8 @@ import { summarizeNutritionDay, type DayEntry } from '@form/domain';
 import type { FoodLog, HomeViewModel, NutritionDay, Progress } from '@/lib/types';
 
 /**
- * Sample data for showing the app's real screens without an account: the welcome page's phone
- * previews and the development design preview. Clearly an example person ("Sam"), never a user.
+ * Sample data for showing the app's real screens without an account: the development design
+ * preview (never reachable in production). Clearly an example person ("Sam"), never a user.
  */
 
 export const SAMPLE_NOW = new Date('2026-10-05T12:00:00Z');

@@ -24,8 +24,9 @@ describe("weakMuscleFocus", () => {
 });
 
 describe("Pro lineup", () => {
-  it("leads with the six headline benefits in order, with the new ids present", () => {
-    expect(PREMIUM_FEATURES.filter((f) => f.headline).map((f) => f.id)).toEqual(["FOOD_SCANNER_PREMIUM", "STREAK_SHIELD", "WEAK_MUSCLE_PLANS", "AD_FREE", "ADVANCED_PROGRESS", "MEAL_PLANNER_ADVANCED"]);
-    expect(PREMIUM_FEATURES.slice(0, 6).every((f) => f.headline)).toBe(true);
+  it("leads with the five headline benefits in order (no ads benefit while FORM ships without ads)", () => {
+    expect(PREMIUM_FEATURES.filter((f) => f.headline).map((f) => f.id)).toEqual(["FOOD_SCANNER_PREMIUM", "STREAK_SHIELD", "WEAK_MUSCLE_PLANS", "ADVANCED_PROGRESS", "MEAL_PLANNER_ADVANCED"]);
+    expect(PREMIUM_FEATURES.slice(0, 5).every((f) => f.headline)).toBe(true);
+    expect(PREMIUM_FEATURES.find((f) => f.id === "AD_FREE")).toMatchObject({ unlisted: true });
   });
 });

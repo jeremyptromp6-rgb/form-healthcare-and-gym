@@ -151,7 +151,8 @@ describe("subscription lifecycle (development store)", () => {
       [MONTHLY, "monthly", "$3.99", null],
       [ANNUAL, "annual", "$28.99", null],
     ]);
-    expect(p.features).toHaveLength(13);
+    expect(p.features).toHaveLength(12);
+    expect(p.features.map((x: { id: string }) => x.id)).not.toContain("AD_FREE"); // no ads benefit while FORM ships without ads
     expect(p.manageUrl).toBeNull(); // the sandbox has no store account page
     await app.close();
     const t = await setup({ config: devBilling({ trialDays: 7 }) });
@@ -307,5 +308,19 @@ describe("Pro features use real data", () => {
     await buy(u.auth);
     const r = await json(u.auth, "POST", "/reports/weekly");
     expect((await json(u.auth, "POST", "/reports/weekly")).generatedAt).toBe(r.generatedAt);
+  });
+});
+
+describe("production without a store (BILLING_PROVIDER=none)", () => {
+  it("reports Pro as not purchasable, lists the benefits without an ads benefit, and keeps everyone on Free", async () => {
+    ({ app, ctx } = await makeApp({ clock: new TestClock(new Date("2026-10-05T12:00:00Z")) }));
+    const u = await registerUser(app);
+    const p = await json(u.auth, "GET", "/billing/products?platform=android");
+    expect(p.provider).toMatchObject({ configured: false, environment: null });
+    expect(p.products).toEqual([]);
+    expect(p.features.filter((f: { headline?: boolean }) => f.headline)).toHaveLength(5);
+    expect(p.features.map((f: { id: string }) => f.id)).not.toContain("AD_FREE");
+    expect((await json(u.auth, "GET", "/entitlements")).tier).toBe("free");
+    expect((await call(u.auth, "POST", "/billing/dev/checkout", { productId: "x", storeAccount: randomUUID() })).statusCode).toBe(404);
   });
 });

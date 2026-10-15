@@ -15,7 +15,6 @@ export const PREMIUM_FEATURE_IDS = [
   "FOOD_SCANNER_PREMIUM",
   "STREAK_SHIELD",
   "WEAK_MUSCLE_PLANS",
-  "AD_FREE",
   "ADVANCED_PROGRESS",
   "MEAL_PLANNER_ADVANCED",
   // Also included.
@@ -26,6 +25,8 @@ export const PREMIUM_FEATURE_IDS = [
   "WEEKLY_AI_REPORT",
   "ADVANCED_BODY_QUEST",
   "PERSONALIZED_RECOMMENDATIONS",
+  // Not offered while FORM ships without ads (see PREMIUM_FEATURES).
+  "AD_FREE",
 ] as const;
 export type PremiumFeatureId = (typeof PREMIUM_FEATURE_IDS)[number];
 
@@ -36,15 +37,16 @@ export interface PremiumFeature {
   pro: string;
   /** What Free keeps — shown next to it, so Free is never hidden or made to look broken. */
   free: string;
-  /** One of the six headline benefits; the rest are listed under "Also included". */
+  /** One of the five headline benefits; the rest are listed under "Also included". */
   headline?: boolean;
+  /** Not offered as a benefit (the capability exists but nothing is sold on it yet): left out of the paywall's list. */
+  unlisted?: boolean;
 }
 
 export const PREMIUM_FEATURES: readonly PremiumFeature[] = [
   { id: "FOOD_SCANNER_PREMIUM", title: "Unlimited AI food scans", pro: "Scan every meal: unlimited AI photo scans with labels on your food and a meal summary.", free: "3 AI scans a day. Search, barcode and weighing are always unlimited.", headline: true },
   { id: "STREAK_SHIELD", title: "Streak Shield", pro: "2 streak freezes every month: a missed day won't break your streak.", free: "Your streak resets after a missed training day (planned rest days are always safe).", headline: true },
   { id: "WEAK_MUSCLE_PLANS", title: "Weak-muscle plans", pro: "Your plans automatically focus on your lowest-ranked muscles until they catch up.", free: "Plans follow the focus you choose.", headline: true },
-  { id: "AD_FREE", title: "No ads", pro: "No ads anywhere.", free: "At most one short ad a day, after a finished workout — never during training. Non-personalized unless you opt in.", headline: true },
   { id: "ADVANCED_PROGRESS", title: "Full progress history", pro: "90-day analysis, form and range-of-motion history, a weekly progress report and Body Quest insights.", free: "7- and 30-day progress for strength, consistency, nutrition, weight and XP.", headline: true },
   { id: "MEAL_PLANNER_ADVANCED", title: "Week meal plans & grocery lists", pro: "Week-long plans, a plan for the rest of today from what you have left, and your saved recipes first.", free: "One-day meal plans built around your targets and allergies.", headline: true },
   { id: "AI_COACH_ADVANCED", title: "Advanced AI Coach", pro: "More coaching every day, with your form, range-of-motion and record trends in every answer.", free: "Daily coaching tips and a few coach messages a day." },
@@ -54,6 +56,8 @@ export const PREMIUM_FEATURES: readonly PremiumFeature[] = [
   { id: "WEEKLY_AI_REPORT", title: "Weekly progress report", pro: "A report every week from your real training, food, records, XP and Body Quest, with a coach note.", free: "Reports you already have stay yours." },
   { id: "ADVANCED_BODY_QUEST", title: "Body Quest insights", pro: "How each stat has moved week by week and exactly what moves it next.", free: "Your stage, stats and next goal." },
   { id: "PERSONALIZED_RECOMMENDATIONS", title: "Deeper personalization", pro: "Coaching and plans that use your trends, not just your last session.", free: "Coaching from your latest data." },
+  // Kept for when ads return; unlisted while FORM ships without ads, so the paywall never mentions them.
+  { id: "AD_FREE", title: "No ads", pro: "No ads anywhere.", free: "FORM shows no ads right now.", unlisted: true },
 ];
 
 /** Free-tier allowances. Servers may override them from configuration. */

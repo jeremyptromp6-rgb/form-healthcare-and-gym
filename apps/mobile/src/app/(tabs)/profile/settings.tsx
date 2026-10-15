@@ -263,7 +263,6 @@ function AdsAndAnalytics({ me }: { me: Me }) {
         <AppText variant="caption" color={colors.textMuted}>
           Your profile, photo, weight, workouts, meals, records and XP are visible only to you.
         </AppText>
-        <Toggle label="Personalized ads" description="Off: free-tier ads aren't based on your activity." value={s.personalizedAdsConsent} disabled={update.isPending} onChange={(v) => update.mutate({ personalizedAdsConsent: v })} />
         <Toggle label="Share usage analytics" description="Anonymous app usage only. Never health, body or food data." value={s.analyticsConsent} disabled={update.isPending} onChange={(v) => update.mutate({ analyticsConsent: v })} />
         {update.isError ? <InlineMessage tone="danger">Couldn&apos;t save that setting. Try again.</InlineMessage> : null}
       </Card>

@@ -35,7 +35,10 @@ jest.mock('expo-secure-store', () => ({
   getItemAsync: async (k: string) => mockStore.get(k) ?? null,
   setItemAsync: (k: string, v: string) => mockSet(k, v),
 }));
-jest.mock('@/lib/pro', () => ({ STATE_LABEL: {}, statusLine: () => null, openPaywall: () => mockOpenPaywall(), useBillingCatalog: () => ({ data: mockCatalogData }) }));
+jest.mock('@/lib/pro', () => ({ STATE_LABEL: {}, statusLine: () => null, openPaywall: () => mockOpenPaywall(), useBillingCatalog: () => ({ data: mockCatalogData }),
+  // Mirrors lib/pro.purchaseSupport (the real module pulls in the whole navigation stack).
+  purchaseSupport: (c?: BillingCatalog) => (c?.provider.configured && c.provider.environment === 'development' ? { available: true } : { available: false, reason: 'coming soon' }),
+}));
 jest.mock('@/lib/queries', () => ({
   useMe: () => ({ data: { user: { id: 'u1' }, onboarding: { completed: mockOnboarded } } }),
   useEntitlements: () => ({ data: { tier: mockTier } }),
@@ -128,6 +131,14 @@ describe('FORM Pro welcome', () => {
     mockCatalogData = mockCatalog;
     await view.rerender(<ProWelcomeHost />);
     expect(await screen.findByText('Welcome to FORM')).toBeTruthy();
+  });
+
+  it('never shows while Pro cannot be bought (no store connected: coming soon), and leaves the flag alone', async () => {
+    mockCatalogData = { ...mockCatalog, provider: { configured: false, name: 'Billing', environment: null }, products: [] };
+    await render(<ProWelcomeHost />);
+    await flush();
+    expect(screen.queryByText('Welcome to FORM')).toBeNull();
+    expect(mockSet).not.toHaveBeenCalled();
   });
 
   it('words each plan from the store price', () => {

@@ -62,8 +62,7 @@ services:
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
         value: https://form-api-e68m.onrender.com
-      # Rule-based coaching (no AI provider key needed). Pro purchases stay off until a real store
-      # is connected.
+      # Rule-based coaching (no AI provider key needed).
       - key: COACH_PROVIDER
         value: rules
       # Meal photo scanning with Google Gemini's free tier. Add GEMINI_API_KEY (from Google AI
@@ -72,15 +71,12 @@ services:
         value: gemini
       - key: GEMINI_API_KEY
         sync: false
-      # TESTING ONLY: the labelled sandbox store, so FORM Pro ($3.99/month, $28.99/year) can be seen
-      # and tried on a phone. No real payment is ever taken — and anyone using this server can get
-      # Pro for free, which is fine only while it holds throwaway test data. Before real users: set
-      # BILLING_PROVIDER to none (or a real store) and remove APP_STAGE; the server then refuses the
-      # sandbox store again.
+      # PRODUCTION: the server is live (not in testing) and no store is connected yet, so FORM Pro is
+      # "coming soon" and nobody can get it for free. Both values are explicit on purpose: Render keeps
+      # an old dashboard value for a key that is removed from this file, and the server refuses
+      # BILLING_PROVIDER=development outside APP_STAGE=testing. To sell Pro later, replace "none" with
+      # a real store provider here; never set the development store on this server.
       - key: APP_STAGE
-        value: testing
+        value: live
       - key: BILLING_PROVIDER
-        value: development
-      # Signs sandbox receipts; generated once by Render.
-      - key: BILLING_DEV_SECRET
-        generateValue: true
+        value: none

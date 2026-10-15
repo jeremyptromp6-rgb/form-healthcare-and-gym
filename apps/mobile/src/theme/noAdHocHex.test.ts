@@ -36,7 +36,7 @@ describe('no ad-hoc colours in the UI', () => {
   it('finds the sources', () => {
     expect(sources.length).toBeGreaterThan(10);
     expect(sources).toContain('components/ui/feedback.tsx');
-    expect(sources).toContain('components/welcome/PhonePreview.tsx');
+    expect(sources).toContain('components/welcome/WelcomeView.tsx');
   });
 
   it.each(sources)('%s has no hex or rgba literals', (file) => {

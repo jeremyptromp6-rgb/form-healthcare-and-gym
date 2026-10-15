@@ -759,15 +759,11 @@ verification, rest, set entry, completion, or over the summary. No banners.
 - **Analytics:** `post_workout_ad_eligible|requested|loaded|shown|dismissed|failed|capped`, only
   with analytics consent, props limited to `placement` (+ a short failure code).
 - **App:** `lib/ads/usePostWorkoutAd.ts` (client AdService + state machine from the domain),
-  `lib/ads/provider.ts` (the boundary), `lib/ads/networkProvider.ts` (Google AdMob via
-  `react-native-google-mobile-ads`; the `.web.ts` variant reports unsupported). The SDK is
-  initialised only when an eligible ad is about to load (never at launch or during exercise).
-  Consent goes through Google's UMP first; if ads may not be requested, none is. Requests are
-  non-personalized unless the user opted in, rated PG, and carry no fitness, nutrition or camera data.
-- **Configuration:** development builds only ever use Google's test ads. Release builds: ads are off
-  unless `EXPO_PUBLIC_ADS_MODE=test` (the GitHub test APK) or `=production` with
-  `EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID` / `_IOS` and the app ids `ADMOB_ANDROID_APP_ID` /
-  `ADMOB_IOS_APP_ID` (read by `app.config.ts`; app.json holds Google's sample ids).
+  `lib/ads/provider.ts` (the boundary), `lib/ads/networkProvider.ts` (the build's provider).
+- **Current state: FORM ships without ads.** The provider is never available (`not_configured`), so
+  the hook never calls the server and Done goes straight Home; the build has no ads SDK, plugin or
+  advertising ID. The server code above stays dormant. To bring ads back, add a network SDK, implement
+  `InterstitialAdProvider` in `networkProvider.ts` and add the SDK's config plugin.
 
 ## Build & validation
 

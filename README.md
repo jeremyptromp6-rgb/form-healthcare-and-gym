@@ -71,22 +71,12 @@ Store release, and it talks to the hosted test API (override with the repository
 `EXPO_PUBLIC_API_URL`). The workflow also keeps the APK as a run artifact. `android.versionCode` comes
 from the workflow run number so each build can update the last one.
 
-### Ads configuration
+### Ads
 
-Free-tier users see at most one Google AdMob interstitial after a finished workout (Pro never sees
-ads). These are build-time settings of the app:
-
-- `EXPO_PUBLIC_ADS_MODE`: `test` serves Google's official test ads (labelled "Test Ad"; the APK uses
-  this), `production` serves real ads, anything else turns ads off. Development builds only ever use
-  test ads.
-- Production only: `EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID` / `EXPO_PUBLIC_ADMOB_INTERSTITIAL_IOS` (unit
-  ids) and `ADMOB_ANDROID_APP_ID` / `ADMOB_IOS_APP_ID` (AdMob app ids; `app.config.ts` swaps them into
-  the plugin). Without the app ids the build carries Google's published sample ids, so a test or
-  development build can never serve a real ad. Keep real ids in CI or store secrets, not in the repo.
-- `apps/mobile/app.json` has a **root-level** `react-native-google-mobile-ads` block
-  (`delay_app_measurement_init`) in addition to the plugin entry. Do not remove it: the library's Gradle
-  script reads that root block directly, and the Android build fails without it. JSON has no comments,
-  so this note lives here.
+FORM ships **without ads**: the build contains no ads SDK, no AdMob plugin and no advertising ID. The
+app keeps its ad-provider boundary (`apps/mobile/src/lib/ads`, whose provider is never available) and the
+API keeps its dormant post-workout ad code, so ads can return later by adding a network SDK and
+implementing that provider.
 
 ## Validate
 

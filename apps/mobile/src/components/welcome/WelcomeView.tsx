@@ -8,15 +8,8 @@ import { ExerciseArt } from '@/components/art/ExerciseArt';
 import { MealArt } from '@/components/art/MealArt';
 import { RANK_ORDER, RankEmblem } from '@/components/art/RankEmblem';
 import { FormMark, WelcomeArt } from '@/components/art/SceneArt';
-import { EatDayView } from '@/components/eat/EatDayView';
-import { HomeView } from '@/components/home/HomeView';
-import { LevelHero, RankLadder } from '@/components/progress/ProgressionViews';
-import { AppText, BreathingGlow, Button, Row, Screen, type IconName } from '@/components/ui';
+import { AppText, BreathingGlow, Button, Row, type IconName } from '@/components/ui';
 import { colors, edgeLight, gradients, radius, shadow, space } from '@/theme/tokens';
-import { PhonePreview } from './PhonePreview';
-import { SAMPLE_DAY, SAMPLE_HOME, SAMPLE_NOW, SAMPLE_PROGRESS } from './sampleData';
-
-const noop = () => {};
 
 /** One feature: a picture, a title and a sentence, on a softly tinted card. */
 function Feature({ tint, icon, title, body, art }: { tint: string; icon: IconName; title: string; body: string; art: ReactNode }) {
@@ -65,13 +58,12 @@ function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
 }
 
 /**
- * The front door: what FORM is, what it feels like, and a look at the real app — before anyone is
- * asked for an email. Every claim here is something the app actually does.
+ * The front door: what FORM is and what it feels like, before anyone is asked for an email. Every
+ * claim here is something the app actually does.
  */
 export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
   const { width } = useWindowDimensions();
   const wide = width >= 820;
-  const phoneW = wide ? 250 : Math.min(230, width * 0.6);
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -179,25 +171,6 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
           </View>
         </View>
 
-        {/* A look inside */}
-        <SectionTitle eyebrow="A peek inside" title="See how FORM looks" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.phones, wide && { flexGrow: 1, justifyContent: 'center' }]}>
-          <PhonePreview width={phoneW} caption="Home — your day at a glance">
-            <HomeView vm={SAMPLE_HOME} now={SAMPLE_NOW} onNavigate={noop} onAddWater={noop} onUndoWater={noop} />
-          </PhonePreview>
-          <PhonePreview width={phoneW} caption="Eat — food, water and macros">
-            <Screen title="Eat" subtitle="Monday, October 5">
-              <EatDayView day={SAMPLE_DAY} title="Today" onPrev={noop} onNext={null} onAdd={noop} onOpenLog={noop} onAddWater={noop} onScan={noop} scanAvailable onWeighMeal={noop} showScanInfo={false} onSetUpProfile={noop} />
-            </Screen>
-          </PhonePreview>
-          <PhonePreview width={phoneW} caption="Progress — your level and ranks">
-            <Screen title="Progress" subtitle="Your journey">
-              <LevelHero progress={SAMPLE_PROGRESS} />
-              <RankLadder progress={SAMPLE_PROGRESS} />
-            </Screen>
-          </PhonePreview>
-        </ScrollView>
-
         {/* Promises */}
         <View style={[styles.band, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}>
           <SectionTitle eyebrow="Private by design" title="Your data stays yours" />
@@ -243,6 +216,5 @@ const styles = StyleSheet.create({
   featureIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   band: { borderRadius: radius.xl, borderWidth: 1, padding: space.xl, gap: space.lg, alignItems: 'center', ...shadow.card, ...edgeLight },
   ranks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: space.sm },
-  phones: { gap: space.lg, paddingHorizontal: space.xs, paddingVertical: space.sm },
   closing: { borderRadius: radius.xl, padding: space.xl, gap: space.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border, ...edgeLight },
 });

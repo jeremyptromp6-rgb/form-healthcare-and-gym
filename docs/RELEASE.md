@@ -70,7 +70,7 @@ need the operator (store, legal, providers, infrastructure) or new native work. 
 | AI provider | Coaching facts + chat text, only with `aiCoachConsent` | Provider's retention terms | — |
 | Meal recognition | Meal photo (EXIF stripped), only with `foodScanConsent` | Provider's retention terms | — |
 | Camera | Nothing leaves the device but joint angles of verified sets | — | — |
-| Ads (Google AdMob + UMP consent) | Device and advertising identifiers go to Google when an ad is requested; requests are non-personalised unless the user opted in (Google's UMP form asks where the user's region requires it). The SDK only initialises after an eligible post-workout ad (never at launch, during a workout or a camera session). No health, fitness, nutrition or camera data is sent; the ad request carries no keywords or content URL. | Google's retention terms | — (the user can decline personalised ads; Pro removes ads) |
+| Ads | None. The build contains no ads SDK and no advertising identifier; nothing is sent to an ad network, and there is no ad consent form. (If ads return, add the network here and answer the store privacy forms again.) | — | — |
 | Exports | JSON file handed to the user's chosen destination | User's | User |
 
 ## Operations runbook
@@ -178,7 +178,7 @@ Actions → "Keep API awake" (Run workflow to test).
 2. **Q-03** Publish a privacy policy and terms; set `LEGAL_PRIVACY_URL` and `LEGAL_TERMS_URL`.
 3. **Q-04** EAS project (or equivalent), store signing, store listings (including the camera/photo
    permission texts already in `app.json` and the data-safety / privacy-nutrition answers from the
-   inventory above, which now includes AdMob). The GitHub test APK is development-key signed and is
+   inventory above; there is no ads SDK or advertising ID). The GitHub test APK is development-key signed and is
    not a store build.
 4. Production infrastructure: TLS, a persistent disk for the database, scheduled backups copied
    off-machine, scheduled reconciliation, log retention, alerting on `/health`, backup and reconcile

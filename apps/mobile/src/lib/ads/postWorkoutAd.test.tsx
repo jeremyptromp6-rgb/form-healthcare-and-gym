@@ -124,6 +124,17 @@ describe('usePostWorkoutAd', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('the build\'s own provider (no ads shipped): never asks the server, Done goes straight Home', async () => {
+    const { result } = await renderHook(() => usePostWorkoutAd('w1'));
+    await flush();
+    expect(result.current.phase).toBe('NOT_CONFIGURED');
+    expect(result.current.adReady).toBe(false);
+    expect(mockDecide).not.toHaveBeenCalled();
+    const next = jest.fn();
+    await act(() => result.current.finish(next));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
   it('daily cap reached: no load, straight Home', async () => {
     mockDecide.mockResolvedValue({ eligible: false, reason: 'daily_cap' });
     const f = fakeProvider();

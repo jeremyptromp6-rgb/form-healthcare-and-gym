@@ -1,9 +1,7 @@
 import { act, render } from '@testing-library/react-native';
 import { Animated } from 'react-native';
 import { HomeView } from '@/components/home/HomeView';
-import { LevelHero } from '@/components/progress/ProgressionViews';
-import { PhonePreview } from './PhonePreview';
-import { SAMPLE_HOME, SAMPLE_NOW, SAMPLE_PROGRESS } from './sampleData';
+import { SAMPLE_HOME, SAMPLE_NOW } from './sampleData';
 import { WelcomeView } from './WelcomeView';
 
 // Motion on (jest otherwise runs with reduced motion): the gate is the only thing mocked, and it
@@ -42,21 +40,6 @@ describe('motion budget', () => {
     } finally {
       jest.useRealTimers();
     }
-  });
-
-  it('the same Home inside a phone preview stands still', async () => {
-    await render(<PhonePreview caption="Home">{home}</PhonePreview>);
-    expect(loops).not.toHaveBeenCalled();
-    expect(intervals).not.toHaveBeenCalled();
-  });
-
-  it('the Level hero inside a phone preview stands still', async () => {
-    await render(
-      <PhonePreview caption="Progress">
-        <LevelHero progress={SAMPLE_PROGRESS} />
-      </PhonePreview>,
-    );
-    expect(loops).not.toHaveBeenCalled();
   });
 
   it('the Welcome screen runs one hero glow and one Pip bob (at most 3 loops, 1 setState animation)', async () => {

@@ -112,7 +112,10 @@ describe('paywall', () => {
     await renderPaywall({ catalog: none, support });
     expect(screen.queryByRole('button', { name: /Subscribe/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Restore purchases' })).toBeNull();
-    expect(screen.getByText(/can't be purchased in this build yet\. Nothing will be charged/)).toBeTruthy();
+    expect(screen.getByText('Coming soon')).toBeTruthy();
+    expect(screen.getByText('What FORM Pro will include')).toBeTruthy();
+    expect(screen.getByText(/FORM Pro is coming soon\. It isn't on sale yet, and nothing will be charged/)).toBeTruthy();
+    expect(screen.queryByText(/\bads?\b/i)).toBeNull();
     // A real store provider without a store client in this build is unavailable too — honestly.
     expect(purchaseSupport(catalog({ provider: { configured: true, name: 'App Store', environment: 'production' } }))).toEqual({ available: false, reason: expect.stringContaining("aren't connected in this build") });
   });

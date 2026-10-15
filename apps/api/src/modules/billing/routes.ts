@@ -48,7 +48,7 @@ export function billingRoutes(app: FastifyInstance, ctx: AppContext): void {
     return {
       provider: { configured: status.state === "ready", name: status.provider, environment: p.environment },
       products: products?.ok ? products.value.filter((x) => x.price !== null) : [],
-      features: PREMIUM_FEATURES,
+      features: PREMIUM_FEATURES.filter((f) => !f.unlisted),
       manageUrl: p.environment === "development" ? null : (p.manageUrl(q.platform) ?? STORE_MANAGE_URL[q.platform]),
       legal: ctx.config.legal,
     };

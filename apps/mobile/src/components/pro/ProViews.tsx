@@ -106,7 +106,7 @@ function FeatureRow({ f, highlighted, compare }: { f: PremiumFeature; highlighte
 export function PaywallView(p: PaywallViewProps) {
   const { catalog, entitlements: e } = p;
   const pro = e.tier === 'pro';
-  // The feature that brought the user here leads; then the six headline benefits; the rest are "Also included".
+  // The feature that brought the user here leads; then the headline benefits; the rest are "Also included".
   const { headline, also } = splitFeatures(catalog.features);
   const lead = [...headline, ...also].find((f) => f.id === p.feature) ?? null;
   const headlineRows = headline.filter((f) => f !== lead);
@@ -117,13 +117,18 @@ export function PaywallView(p: PaywallViewProps) {
   const dev = catalog.provider.environment === 'development';
   const status = statusLine(e);
   const legal = catalog.legal;
+  // No store is connected: say so plainly, show what Pro will include, and offer nothing to buy.
+  const comingSoon = !pro && !p.support.available;
 
   return (
     <View style={{ gap: space.lg }}>
       <View style={{ gap: space.sm }}>
-        <AppText variant="overline" color={colors.primary}>
-          FORM Pro
-        </AppText>
+        <Row gap={space.sm}>
+          <AppText variant="overline" color={colors.primary}>
+            FORM Pro
+          </AppText>
+          {comingSoon ? <Badge label="Coming soon" tone="primary" /> : null}
+        </Row>
         <AppText variant="title" header>
           Training that adapts to you.
         </AppText>
@@ -156,7 +161,7 @@ export function PaywallView(p: PaywallViewProps) {
 
       <View style={{ gap: space.xs }} accessibilityRole="list">
         <AppText variant="label" color={colors.textMuted}>
-          What you get with Pro
+          {comingSoon ? 'What FORM Pro will include' : 'What you get with Pro'}
         </AppText>
         {lead ? <FeatureRow f={lead} highlighted compare={headline.includes(lead)} /> : null}
         {headlineRows.map((f) => (

@@ -1,7 +1,7 @@
 import { useIsFocused } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
-import { useBillingCatalog } from './pro';
+import { purchaseSupport, useBillingCatalog } from './pro';
 import { useActiveSession, useCelebrations, useEntitlements, useMe } from './queries';
 import type { BillingCatalog } from './types';
 
@@ -43,6 +43,8 @@ export function resetProWelcomeMemory(): void {
  * may take over Home: the account must have finished onboarding and be on the free plan, Home must
  * be the screen in front, no workout may be open, and no celebration may be waiting. If prices
  * can't be loaded it stays away (and tries again next time) rather than show a plan with no price.
+ * It also stays away while Pro can't be bought (no store connected: "coming soon"), so it never
+ * offers plans that don't exist.
  */
 export function useProWelcome(): { visible: boolean; catalog: BillingCatalog | null; dismiss: () => void } {
   const me = useMe();
@@ -74,6 +76,8 @@ export function useProWelcome(): { visible: boolean; catalog: BillingCatalog | n
     !!me.data?.onboarding.completed &&
     entitlements.data?.tier === 'free' &&
     !!catalog.data &&
+    purchaseSupport(catalog.data).available &&
+    catalog.data.products.some((p) => p.price) &&
     // Celebrations first: they are earned moments, the offer can wait. If the feed can't load, don't hold the offer back.
     (celebrations.isError || (celebrations.isSuccess && celebrations.data.celebrations.length === 0)) &&
     // Never over a workout: wait until we know there isn't one open.
