@@ -23,7 +23,7 @@ export function recognitionRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.get("/streaks", async (req) => {
     const clock = clockFor(req);
-    return { today: clock.today, timezone: clock.timezone, streaks: computeStreaks(ctx.db, req.user.sub, clock.today) };
+    return { today: clock.today, timezone: clock.timezone, streaks: computeStreaks(ctx.db, req.user.sub, clock.today, ctx.now()) };
   });
 
   app.get("/body-quest", async (req) => {

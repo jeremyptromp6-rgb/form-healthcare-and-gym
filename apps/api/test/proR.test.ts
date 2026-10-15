@@ -151,7 +151,7 @@ describe("subscription lifecycle (development store)", () => {
       [MONTHLY, "monthly", "$3.99", null],
       [ANNUAL, "annual", "$28.99", null],
     ]);
-    expect(p.features).toHaveLength(11);
+    expect(p.features).toHaveLength(13);
     expect(p.manageUrl).toBeNull(); // the sandbox has no store account page
     await app.close();
     const t = await setup({ config: devBilling({ trialDays: 7 }) });

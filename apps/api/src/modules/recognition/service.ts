@@ -12,13 +12,15 @@ import {
   weeklyStreak,
   weeksMeetingPlan,
   weekStart,
-  workoutStreak,
+  resolveEntitlements,
+  workoutStreakWithFreezes,
   XP_RULES,
   type AchievementMetrics,
   type AchievementStatus,
   type BodyQuestInput,
   type BodyQuestResult,
   type BodyQuestStage,
+  type StreakFreezes,
   type StreakState,
   type StreakType,
   type WeeklyStreakState,
@@ -27,6 +29,7 @@ import type { Db } from "../../db";
 import { transaction } from "../../db";
 import type { AppContext } from "../../shared/context";
 import type { UserClock } from "../../shared/userClock";
+import { loadSubscription } from "../billing/entitlements";
 import { hasAnyTarget, targetOn } from "../nutrition/targets";
 import { awardAchievementXp, emitDomainEvent, settleProgression } from "../progression/service";
 import { syncQuests } from "../quests/service";
@@ -72,17 +75,37 @@ function dailyQuestDays(db: Db, userId: string): string[] {
 
 // ---- Streaks -----------------------------------------------------------------------------------
 
+/** The Pro feature id of the Streak Shield (streak freezes). */
+const STREAK_SHIELD = "STREAK_SHIELD";
+
+/** What the Streak Shield may do for this user now: Pro only, and only for days from when their subscription began. */
+function shieldFor(db: Db, userId: string, now: Date): { enabled: boolean; eligibleFrom: string | null } {
+  const enabled = (resolveEntitlements(loadSubscription(db, userId), now).features as readonly string[]).includes(STREAK_SHIELD);
+  if (!enabled) return { enabled: false, eligibleFrom: null };
+  const row = db.prepare("SELECT substr(created_at, 1, 10) AS d FROM subscriptions WHERE user_id = ?").get(userId) as { d: string } | undefined;
+  return { enabled, eligibleFrom: row?.d ?? null };
+}
+
+/** The freeze summary the clients see (the engine's bookkeeping minus what only the server persists). */
+export type StreakFreezeSummary = Omit<StreakFreezes, "newlyFrozen">;
+
 export interface Streaks {
-  workout: StreakState & { plannedRestDays: number };
+  workout: StreakState & { plannedRestDays: number; freezes: StreakFreezeSummary };
   nutrition: StreakState & { available: boolean };
   quest: StreakState;
   weekly: WeeklyStreakState & { target: number };
 }
 
-export function computeStreaks(db: Db, userId: string, today: string): Streaks {
+export function computeStreaks(db: Db, userId: string, today: string, now: Date = new Date()): Streaks {
   const h = trainingHistory(db, userId);
+  // Used freezes are persisted, so they stay stable; new ones (Pro only) are decided and saved here.
+  const shield = shieldFor(db, userId, now);
+  const frozenDates = (db.prepare("SELECT local_date AS d FROM streak_freezes WHERE user_id = ? ORDER BY local_date").all(userId) as { d: string }[]).map((r) => r.d);
+  const { streak, freezes } = workoutStreakWithFreezes(h, today, { ...shield, frozenDates });
+  for (const d of freezes.newlyFrozen) db.prepare("INSERT OR IGNORE INTO streak_freezes (user_id, local_date, created_at) VALUES (?, ?, ?)").run(userId, d, now.toISOString());
+  const { newlyFrozen: _saved, ...summary } = freezes;
   return {
-    workout: { ...workoutStreak(h, today), plannedRestDays: plannedRestDays(h.trainingDaysPerWeek) },
+    workout: { ...streak, plannedRestDays: plannedRestDays(h.trainingDaysPerWeek), freezes: summary },
     nutrition: { ...consecutiveDayStreak(onTrackNutritionDays(db, userId), today), available: hasAnyTarget(db, userId) },
     quest: consecutiveDayStreak(dailyQuestDays(db, userId), today),
     weekly: { ...weeklyStreak(weeksMeetingPlan(h), today), target: Math.min(6, Math.max(1, h.trainingDaysPerWeek ?? 3)) },
@@ -344,7 +367,7 @@ export function syncDerived(db: Db, userId: string, today: string, now: Date): v
   transaction(db, () => {
     settleProgression(db, userId, today, now);
     syncAchievements(db, userId, today, now);
-    emitStreakMilestones(db, userId, computeStreaks(db, userId, today), now);
+    emitStreakMilestones(db, userId, computeStreaks(db, userId, today, now), now);
     settleBodyQuest(db, userId, today, now);
   });
 }
@@ -353,7 +376,7 @@ export function syncDerived(db: Db, userId: string, today: string, now: Date): v
 export function recognitionSummary(db: Db, userId: string, today: string, now: Date) {
   const body = bodyQuestView(db, userId, today, now);
   const achievements = syncAchievements(db, userId, today, now);
-  const streaks = computeStreaks(db, userId, today);
+  const streaks = computeStreaks(db, userId, today, now);
   const unlocked = achievements.filter((a) => a.state === "unlocked").sort((a, b) => (b.unlockedAt ?? "").localeCompare(a.unlockedAt ?? ""));
   const nextUp = achievements.filter((a) => a.state !== "unlocked").sort((a, b) => b.progress / b.target - a.progress / a.target)[0] ?? null;
   return {

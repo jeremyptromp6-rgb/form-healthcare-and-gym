@@ -1,5 +1,7 @@
 import { addDays } from "../shared/dates";
+import type { FocusArea } from "../users/profileOptions";
 import { EXERCISE_BY_ID, type MuscleGroup } from "../workouts/exercises";
+import { FOCUS_MUSCLES } from "../workouts/generator";
 
 /**
  * Muscle ranks — which muscles are well trained and which need attention, from the user's own
@@ -100,4 +102,37 @@ export function computeMuscleRanks(sets: readonly RankSet[]): MuscleRank[] {
   return MUSCLE_RANK_MUSCLES.map((muscle, order) => ({ muscle, order, sets: round1(weighted[muscle]), ...rankFor(weighted[muscle]) }))
     .sort((a, b) => score(a) - score(b) || a.sets - b.sets || a.order - b.order)
     .map(({ order: _order, ...r }) => r);
+}
+
+// ---- Weak-muscle plans (FORM Pro) ---------------------------------------------------------
+
+/** The plan focus area that trains each muscle; traps and forearms have none, so they never steer a plan. */
+const WEAK_MUSCLE_AREA: Partial<Record<MuscleGroup, FocusArea>> = {
+  chest: "chest", back: "back", lats: "back", shoulders: "shoulders", biceps: "arms", triceps: "arms", core: "core", glutes: "glutes", quads: "legs", hamstrings: "legs", calves: "legs",
+};
+/** How many of the lowest-ranked muscles lean a plan when the user chose no focus of their own. */
+export const WEAK_MUSCLES_MAX = 3;
+
+export interface WeakMuscleFocus {
+  /** The focus areas to plan with: the user's own first, then at most one weak area (or up to three weak areas when they chose none). */
+  focusAreas: FocusArea[];
+  /** The weak muscles behind the added areas, weakest first. */
+  muscles: MuscleGroup[];
+}
+
+/**
+ * Plan focus from the user's own ranks (weakest first). With no own focus ("full body" counts as none),
+ * the 3 lowest-ranked muscles that a focus area can train; with one, theirs stays first and a single
+ * weak muscle outside it is added. Null when nothing has been trained in the window (a new user keeps
+ * the usual plan) or when the user's focus already covers the weak muscles.
+ */
+export function weakMuscleFocus(ranks: readonly MuscleRank[], userFocus: readonly FocusArea[] | null | undefined): WeakMuscleFocus | null {
+  if (!ranks.some((r) => r.sets > 0)) return null;
+  const own = (userFocus ?? []).filter((a) => FOCUS_MUSCLES[a]?.length > 0);
+  const covered = new Set(own.flatMap((a) => FOCUS_MUSCLES[a]));
+  const weak = ranks.filter((r) => WEAK_MUSCLE_AREA[r.muscle] && !covered.has(r.muscle)).map((r) => r.muscle);
+  const muscles = weak.slice(0, own.length > 0 ? 1 : WEAK_MUSCLES_MAX);
+  if (muscles.length === 0) return null;
+  const added = muscles.map((m) => WEAK_MUSCLE_AREA[m]!);
+  return { focusAreas: [...new Set([...own, ...added])], muscles };
 }

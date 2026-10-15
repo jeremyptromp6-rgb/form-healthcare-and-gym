@@ -73,7 +73,7 @@ describe("observability", () => {
   it("reports health with the schema version, and 503 when the database is gone", async () => {
     await loggedApp();
     const ok = await app.inject({ method: "GET", url: "/health" });
-    expect(ok.json()).toEqual({ ok: true, schemaVersion: 24 });
+    expect(ok.json()).toEqual({ ok: true, schemaVersion: 25 });
     ctx.db.close();
     const down = await app.inject({ method: "GET", url: "/health" });
     expect(down.statusCode).toBe(503);

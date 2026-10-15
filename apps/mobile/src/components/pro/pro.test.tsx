@@ -81,6 +81,22 @@ describe('paywall', () => {
     expect(screen.getByText(/you keep Pro until the end of the period you paid for/)).toBeTruthy();
   });
 
+  it('leads with the headline benefits as a Free-vs-Pro comparison, and lists the rest under Also included', async () => {
+    const c = catalog();
+    c.features = [
+      { id: 'FOOD_SCANNER_PREMIUM', title: 'Unlimited AI food scans', pro: 'Scan every meal.', free: '3 AI scans a day.', headline: true },
+      { id: 'STREAK_SHIELD', title: 'Streak Shield', pro: '2 streak freezes every month.', free: 'Your streak resets after a missed day.', headline: true },
+      { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.' },
+    ];
+    await renderPaywall({ catalog: c });
+    expect(screen.getByText('What you get with Pro')).toBeTruthy();
+    expect(screen.getByText('Pro: Scan every meal.')).toBeTruthy();
+    expect(screen.getByText('Free: 3 AI scans a day.')).toBeTruthy();
+    expect(screen.getByText('Also included')).toBeTruthy();
+    expect(screen.getByText('Progress when earned.')).toBeTruthy(); // not a comparison row
+    expect(screen.queryByText('Pro: Progress when earned.')).toBeNull();
+  });
+
   it('offers a trial only when the store has one', async () => {
     const withTrial = catalog();
     withTrial.products = withTrial.products.map((x) => ({ ...x, trialDays: 7 }));

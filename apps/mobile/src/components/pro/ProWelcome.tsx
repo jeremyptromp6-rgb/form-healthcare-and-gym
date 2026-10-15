@@ -6,10 +6,7 @@ import { openPaywall } from '@/lib/pro';
 import { useProWelcome } from '@/lib/proWelcome';
 import type { BillingCatalog, BillingProduct } from '@/lib/types';
 import { colors, radius, space } from '@/theme/tokens';
-import { annualSavingsPercent } from './ProViews';
-
-/** How many of Pro's features the welcome lists; the plans screen shows them all. */
-const FEATURES_SHOWN = 4;
+import { annualSavingsPercent, splitFeatures } from './ProViews';
 
 const perPeriod = (p: BillingProduct) => (p.plan === 'annual' ? 'year' : 'month');
 
@@ -29,7 +26,8 @@ export interface ProWelcomeViewProps {
  * icon, a text button, the back button and a tap outside the card all just close it.
  */
 export function ProWelcomeView({ catalog, onSeePlans, onClose }: ProWelcomeViewProps) {
-  const features = catalog.features.slice(0, FEATURES_SHOWN);
+  // The six headline benefits; the plans screen shows the rest and the Free comparison.
+  const { headline: features, also } = splitFeatures(catalog.features);
   const plans = catalog.products.filter((p) => p.price);
   const savings = annualSavingsPercent(catalog.products);
   const trial = plans.find((p) => p.trialDays)?.trialDays ?? null;
@@ -70,9 +68,9 @@ export function ProWelcomeView({ catalog, onSeePlans, onClose }: ProWelcomeViewP
                   </View>
                 </Row>
               ))}
-              {catalog.features.length > features.length ? (
+              {also.length ? (
                 <AppText variant="caption" color={colors.textFaint}>
-                  {`And ${catalog.features.length - features.length} more on the plans screen.`}
+                  {`And ${also.length} more, plus what Free keeps, on the plans screen.`}
                 </AppText>
               ) : null}
             </View>

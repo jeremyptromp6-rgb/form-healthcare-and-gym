@@ -387,7 +387,7 @@ function computeAnalytics(ctx: AppContext, userId: string, clock: UserClock, q: 
   const bqChart = chartModel({ id: "body_quest", title: "Body Quest overall", spec: METRICS.body_quest, kind: "line", range: r, granularity: "week", points: d.snapshots.filter((s) => s.overall !== null).map((s) => ({ date: s.asOf, value: s.overall! })), how: "last" });
   const stageChanges = d.snapshots.slice(1).flatMap((s, i) => (s.stage !== d.snapshots[i]!.stage ? [{ weekStart: s.week, from: d.snapshots[i]!.stage, to: s.stage }] : []));
 
-  const streaks = computeStreaks(db, userId, today);
+  const streaks = computeStreaks(db, userId, today, ctx.now());
 
   // Summaries where the range supports them.
   const summarize = (gran: Granularity): PeriodSummary[] =>

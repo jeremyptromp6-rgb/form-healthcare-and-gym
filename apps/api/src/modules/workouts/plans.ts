@@ -5,6 +5,7 @@ import {
   daysBetween,
   goalOn,
   ruleBasedGenerator,
+  weakMuscleFocus,
   type AdaptiveInput,
   type ExercisePerformance,
   type ExerciseSession,
@@ -17,6 +18,7 @@ import type { AppContext } from "../../shared/context";
 import type { UserClock } from "../../shared/userClock";
 import { loadGoalHistory, loadProfile } from "../users/repo";
 import { can } from "../billing/entitlements";
+import { muscleRanks } from "../analytics/muscleRanks";
 
 /** Free: the rule-based generator. */
 export const activeGenerator: WorkoutGenerator = ruleBasedGenerator;
@@ -117,13 +119,16 @@ export function generationInput(ctx: AppContext, userId: string, clock: UserCloc
     .prepare("SELECT local_date AS d, pain_level AS pain FROM workouts WHERE user_id = ? AND local_date < ? ORDER BY local_date DESC LIMIT 60")
     .all(userId, clock.today) as { d: string; pain: string }[];
   const last = recent[0]?.d ?? null;
+  // FORM Pro: lean the plan towards the lowest-ranked muscles (the user's own focus stays first).
+  const weak = can(ctx, userId, "WEAK_MUSCLE_PLANS") ? weakMuscleFocus(muscleRanks(ctx, userId, clock).ranks, profile?.focusAreas) : null;
   return {
     date: clock.today,
     goal: goalOn(loadGoalHistory(db, userId), clock.today) ?? profile?.primaryGoal ?? null,
     experience: profile?.experience ?? null,
     equipment: profile?.equipment ?? ["bodyweight"],
     trainingDaysPerWeek: profile?.trainingDaysPerWeek ?? null,
-    focusAreas: profile?.focusAreas ?? null,
+    focusAreas: weak?.focusAreas ?? profile?.focusAreas ?? null,
+    weakMuscles: weak?.muscles ?? null,
     // Sessions before today, so the plan stays the same all day.
     sessionsThisWeek: new Set(recent.filter((r) => r.d >= clock.weekStart).map((r) => r.d)).size,
     daysSinceLastWorkout: last ? daysBetween(last, clock.today) : null,

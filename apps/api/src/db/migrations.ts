@@ -999,6 +999,20 @@ const V24_WARMUP_NOTES = `
   ALTER TABLE workouts ADD COLUMN notes TEXT;
 `;
 
+/**
+ * Streak Shield (Pro): the days a streak freeze covered. One row per frozen local date, written the first
+ * time a missed day is frozen and never changed after, so used freezes (and the monthly count) stay stable
+ * even if the workout history is later edited. A frozen day is never a training day.
+ */
+const V25_STREAK_FREEZES = `
+  CREATE TABLE streak_freezes (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    local_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, local_date)
+  );
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1024,4 +1038,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 22, name: "provider_usage_events", up: V22_PROVIDER_USAGE_EVENTS },
   { version: 23, name: "focus_areas", up: V23_FOCUS_AREAS },
   { version: 24, name: "warmup_notes", up: V24_WARMUP_NOTES },
+  { version: 25, name: "streak_freezes", up: V25_STREAK_FREEZES },
 ];

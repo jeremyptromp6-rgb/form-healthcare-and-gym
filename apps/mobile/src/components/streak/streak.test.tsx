@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import type { Streaks } from '@/lib/types';
-import { dayLabel, longDate, restLine, SeasonCalendar, StreakHero, StreakSeasonView } from './StreakViews';
+import { dayLabel, longDate, restLine, SeasonCalendar, shieldLine, StreakHero, StreakSeasonView } from './StreakViews';
 import { seasonProgress } from '@form/domain';
 
 const TODAY = '2026-10-14'; // a Wednesday, in season 4
@@ -39,6 +39,41 @@ describe('StreakHero', () => {
     expect(screen.getByText('5')).toBeTruthy();
     expect(screen.getByText('Best 12')).toBeTruthy();
     expect(screen.getByText('2 rest days allowed')).toBeTruthy();
+  });
+});
+
+describe('Streak Shield', () => {
+  const pro = { enabled: true, perMonth: 2, usedThisMonth: 1, freezesLeft: 1, frozenDates: ['2026-10-12'] };
+  const free = { enabled: false, perMonth: 2, usedThisMonth: 0, freezesLeft: 0, frozenDates: [] };
+
+  it('words the shield for Pro and Free, and says nothing for an older server', () => {
+    expect(shieldLine(pro)).toEqual({ text: '1 freeze left this month', pro: true });
+    expect(shieldLine({ ...pro, freezesLeft: 2 })?.text).toBe('2 freezes left this month');
+    expect(shieldLine(free)).toMatchObject({ pro: false, text: expect.stringMatching(/FORM Pro.*2 freezes a month/) });
+    expect(shieldLine(undefined)).toBeNull();
+  });
+
+  it('shows the freezes left on the hero for Pro', async () => {
+    await render(<StreakHero streak={{ ...workout, freezes: pro }} />);
+    expect(screen.getByText('1 freeze left this month')).toBeTruthy();
+  });
+
+  it('shows an upsell line on the hero for Free', async () => {
+    await render(<StreakHero streak={{ ...workout, freezes: free }} />);
+    expect(screen.getByText(/Streak Shield \(FORM Pro\)/)).toBeTruthy();
+  });
+
+  it('shows nothing on the hero without shield data', async () => {
+    await render(<StreakHero streak={workout} />);
+    expect(screen.queryByText(/freeze/)).toBeNull();
+  });
+
+  it('marks a frozen day in the calendar as frozen, never as trained', async () => {
+    expect(dayLabel('2026-10-12', TODAY, false, true)).toBe('Monday 12 October 2026, frozen');
+    expect(dayLabel('2026-10-12', TODAY, true, true)).toBe('Monday 12 October 2026, trained');
+    await render(<SeasonCalendar progress={seasonProgress([], TODAY)} today={TODAY} trainedDates={['2026-10-14']} frozenDates={['2026-10-12']} />);
+    expect(screen.getByLabelText('Monday 12 October 2026, frozen')).toBeTruthy();
+    expect(screen.getByLabelText('Tuesday 13 October 2026, no workout')).toBeTruthy();
   });
 });
 

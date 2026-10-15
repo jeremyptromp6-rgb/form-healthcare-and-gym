@@ -16,7 +16,8 @@ const mockCatalog: BillingCatalog = {
     { id: 'form_pro_annual', plan: 'annual', title: 'Yearly', period: 'P1Y', price: { amount: 28.99, currency: 'USD', display: '$28.99' }, trialDays: null, environment: 'development' },
   ],
   features: [
-    { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.' },
+    { id: 'STREAK_SHIELD', title: 'Streak Shield', pro: '2 streak freezes every month.', free: 'Your streak resets after a missed day.', headline: true },
+    { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.', headline: true },
     { id: 'WEEKLY_AI_REPORT', title: 'Weekly progress report', pro: 'A report every week.', free: 'Reports you have stay yours.' },
   ],
   manageUrl: null,
@@ -60,6 +61,9 @@ describe('FORM Pro welcome', () => {
     const first = await render(<ProWelcomeHost />);
     expect(await screen.findByText('Welcome to FORM')).toBeTruthy();
     expect(screen.getByText('Adaptive training')).toBeTruthy();
+    expect(screen.getByText('Streak Shield')).toBeTruthy();
+    expect(screen.queryByText('Weekly progress report')).toBeNull(); // not a headline benefit
+    expect(screen.getByText(/And 1 more, plus what Free keeps/)).toBeTruthy();
     expect(screen.getByText('Monthly · $3.99/month')).toBeTruthy();
     expect(screen.getByText('Yearly · $28.99/year')).toBeTruthy();
     expect(mockStore.get('form.proWelcome.u1')).toBe('1');

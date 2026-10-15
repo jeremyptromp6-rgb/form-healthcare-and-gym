@@ -552,8 +552,17 @@ export interface StreakState {
   startDate: string | null;
 }
 
+/** Pro Streak Shield: freezes cover a missed day that would break the streak. Absent from older servers. */
+export interface StreakFreezes {
+  enabled: boolean;
+  perMonth: number;
+  usedThisMonth: number;
+  freezesLeft: number;
+  frozenDates: string[];
+}
+
 export interface Streaks {
-  workout: StreakState & { plannedRestDays: number };
+  workout: StreakState & { plannedRestDays: number; freezes?: StreakFreezes };
   nutrition: StreakState & { available: boolean };
   quest: StreakState;
   weekly: { current: number; longest: number; metThisWeek: boolean; startWeek: string | null; target: number };
@@ -729,7 +738,9 @@ export type PremiumFeatureId =
   | 'WEEKLY_AI_REPORT'
   | 'ADVANCED_BODY_QUEST'
   | 'PERSONALIZED_RECOMMENDATIONS'
-  | 'AD_FREE';
+  | 'AD_FREE'
+  | 'STREAK_SHIELD'
+  | 'WEAK_MUSCLE_PLANS';
 
 export type SubscriptionState = 'FREE' | 'PRO_TRIAL' | 'PRO_ACTIVE' | 'PRO_CANCELLED' | 'PRO_GRACE_PERIOD' | 'PRO_BILLING_ISSUE' | 'PRO_EXPIRED';
 
@@ -753,6 +764,8 @@ export interface PremiumFeature {
   title: string;
   pro: string;
   free: string;
+  /** One of the six headline benefits; the rest are listed under "Also included". Missing on older servers. */
+  headline?: boolean;
 }
 
 export interface BillingProduct {

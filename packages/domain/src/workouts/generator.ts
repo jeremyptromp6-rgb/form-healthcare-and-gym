@@ -25,6 +25,8 @@ export interface GenerationInput {
   trainingDaysPerWeek: number | null;
   /** Body areas to lean towards (up to 3). Missing, empty or "full body" = no lean. */
   focusAreas?: FocusArea[] | null;
+  /** Lowest-ranked muscles the plan was leaned towards for FORM Pro (already folded into `focusAreas`); named in a plan note. */
+  weakMuscles?: MuscleGroup[] | null;
   /** Sessions already completed this week (rotates upper/lower splits). */
   sessionsThisWeek: number;
   daysSinceLastWorkout: number | null;
@@ -336,6 +338,7 @@ export const ruleBasedGenerator: WorkoutGenerator = {
     // Name the chosen areas only when this session actually leans on them.
     const leaning = focusMuscles.size > 0 ? areas.filter((a) => FOCUS_MUSCLES[a].some((m) => focusMuscles.has(m))).map((a) => FOCUS_LABEL.get(a)!) : [];
     if (leaning.length > 0) notes.push(`Leaning on your focus today: ${leaning.join(", ")}. The rest of the body still gets work, so nothing falls behind.`);
+    if (input.weakMuscles?.length) notes.push(`Weak-muscle focus: ${input.weakMuscles.map((m) => m[0]!.toUpperCase() + m.slice(1)).join(", ")}.`);
 
     return {
       generator: { id: this.id, version: this.version },

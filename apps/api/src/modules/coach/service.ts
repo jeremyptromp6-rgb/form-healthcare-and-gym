@@ -162,7 +162,7 @@ export function loadCoachContext(ctx: AppContext, userId: string, clock: UserClo
   const progress = computeUserProgress(db, userId, today, now);
   const bq = bodyQuestView(db, userId, today, now);
   const achievements = syncAchievements(db, userId, today, now);
-  const streaks = computeStreaks(db, userId, today);
+  const streaks = computeStreaks(db, userId, today, now);
   const monthAgo = addDays(today, -29);
   const unlocked = achievements.filter((a) => a.state === "unlocked").sort((a, b) => (b.unlockedAt ?? "").localeCompare(a.unlockedAt ?? ""));
   const next = achievements.filter((a) => a.state !== "unlocked").sort((a, b) => b.progress / b.target - a.progress / a.target)[0];

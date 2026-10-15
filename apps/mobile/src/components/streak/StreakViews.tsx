@@ -25,9 +25,17 @@ export function restLine(s: Pick<Streaks['workout'], 'current' | 'activeToday' |
   return `${n} rest ${plural(n, 'day', 'days')} left before it breaks.`;
 }
 
+/** The Streak Shield line: Pro sees the freezes left this month, Free sees what Pro adds. Nothing for an older server. */
+export function shieldLine(f: Streaks['workout']['freezes']): { text: string; pro: boolean } | null {
+  if (!f) return null;
+  if (!f.enabled) return { text: `Streak Shield (FORM Pro): ${f.perMonth} freezes a month cover a missed day.`, pro: false };
+  return { text: `${f.freezesLeft} ${plural(f.freezesLeft, 'freeze', 'freezes')} left this month`, pro: true };
+}
+
 /** The big streak number with the flame, the best streak and the rest-day protection. */
 export function StreakHero({ streak }: { streak: Streaks['workout'] }) {
   const lit = streak.current > 0;
+  const shield = shieldLine(streak.freezes);
   return (
     <Card style={styles.hero}>
       <FlameArt lit={lit} size={132} />
@@ -46,6 +54,14 @@ export function StreakHero({ streak }: { streak: Streaks['workout'] }) {
       <AppText variant="caption" color={colors.textMuted} style={{ textAlign: 'center' }}>
         {restLine(streak)}
       </AppText>
+      {shield ? (
+        <Row gap={space.xs} style={{ justifyContent: 'center' }}>
+          <Ionicons name="snow" size={14} color={shield.pro ? colors.water : colors.textFaint} />
+          <AppText variant="caption" color={shield.pro ? colors.textMuted : colors.textFaint} style={{ textAlign: 'center', flexShrink: 1 }}>
+            {shield.text}
+          </AppText>
+        </Row>
+      ) : null}
     </Card>
   );
 }
@@ -96,17 +112,18 @@ export function longDate(key: string): string {
 }
 
 /** The accessibility label of one calendar day. */
-export function dayLabel(key: string, today: string, trained: boolean): string {
-  const state = key > today ? 'upcoming' : trained ? 'trained' : 'no workout';
+export function dayLabel(key: string, today: string, trained: boolean, frozen = false): string {
+  const state = key > today ? 'upcoming' : trained ? 'trained' : frozen ? 'frozen' : 'no workout';
   return `${longDate(key)}${key === today ? ', today' : ''}, ${state}`;
 }
 
 /** The season's three months, one at a time (arrows or a swipe), Monday first. */
-export function SeasonCalendar({ progress: p, today, trainedDates }: { progress: SeasonProgress; today: string; trainedDates: readonly string[] }) {
+export function SeasonCalendar({ progress: p, today, trainedDates, frozenDates = [] }: { progress: SeasonProgress; today: string; trainedDates: readonly string[]; frozenDates?: readonly string[] }) {
   const months = seasonMonths(p.season);
   const todayMonth = months.findIndex((m) => m.slice(0, 7) === today.slice(0, 7));
   const [index, setIndex] = useState(todayMonth >= 0 ? todayMonth : 0);
   const trained = useMemo(() => new Set(trainedDates), [trainedDates]);
+  const frozen = useMemo(() => new Set(frozenDates), [frozenDates]);
   const grid = monthGrid(months[index]!);
   const last = months.length - 1;
 
@@ -147,16 +164,19 @@ export function SeasonCalendar({ progress: p, today, trainedDates }: { progress:
             {week.map((key, di) => {
               if (!key) return <View key={di} style={styles.cell} />;
               const done = trained.has(key);
+              const ice = !done && frozen.has(key);
               const isToday = key === today;
               const future = key > today;
               return (
                 <View key={di} style={styles.cell}>
                   <View
                     accessible
-                    accessibilityLabel={dayLabel(key, today, done)}
-                    style={[styles.day, done && styles.dayDone, isToday && styles.dayToday, future && { opacity: 0.35 }]}>
+                    accessibilityLabel={dayLabel(key, today, done, ice)}
+                    style={[styles.day, done && styles.dayDone, ice && styles.dayFrozen, isToday && styles.dayToday, future && { opacity: 0.35 }]}>
                     {done ? (
                       <Ionicons name="flame" size={16} color={colors.onPrimary} />
+                    ) : ice ? (
+                      <Ionicons name="snow" size={16} color={colors.water} />
                     ) : (
                       <AppText variant="label" color={isToday ? colors.text : colors.textMuted}>
                         {String(Number(key.slice(8, 10)))}
@@ -181,7 +201,7 @@ export function StreakSeasonView({ streaks, today, workouts }: { streaks: Streak
     <View style={{ gap: space.lg }}>
       <StreakHero streak={streaks.workout} />
       <SeasonTrack progress={progress} />
-      <SeasonCalendar progress={progress} today={today} trainedDates={trainedDates} />
+      <SeasonCalendar progress={progress} today={today} trainedDates={trainedDates} frozenDates={streaks.workout.freezes?.frozenDates} />
     </View>
   );
 }
@@ -195,5 +215,6 @@ const styles = StyleSheet.create({
   cell: { flex: 1, alignItems: 'center' },
   day: { width: 38, height: 38, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   dayDone: { backgroundColor: colors.accent },
+  dayFrozen: { backgroundColor: 'rgba(62, 134, 176, 0.18)', borderColor: colors.water },
   dayToday: { borderColor: colors.primary },
 });

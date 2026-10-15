@@ -76,17 +76,27 @@ const SIMULATIONS: { event: string; label: string }[] = [
   { event: 'refund', label: 'Refund' },
 ];
 
-function FeatureRow({ f, highlighted }: { f: PremiumFeature; highlighted: boolean }) {
+/** How many benefits lead the list when the server does not say which are the headline ones. */
+const HEADLINE_FALLBACK = 6;
+
+/** The headline benefits first (the server flags them; older servers lead with the first six), then the rest. */
+export function splitFeatures(features: PremiumFeature[]): { headline: PremiumFeature[]; also: PremiumFeature[] } {
+  const flagged = features.filter((f) => f.headline);
+  const headline = flagged.length ? flagged : features.slice(0, HEADLINE_FALLBACK);
+  return { headline, also: features.filter((f) => !headline.includes(f)) };
+}
+
+function FeatureRow({ f, highlighted, compare }: { f: PremiumFeature; highlighted: boolean; compare?: boolean }) {
   return (
     <Row gap={space.md} style={{ alignItems: 'flex-start', padding: space.sm, borderRadius: radius.md, backgroundColor: highlighted ? colors.primarySoft : 'transparent' }}>
       <Ionicons name="checkmark-circle" size={20} color={colors.primary} style={{ marginTop: 2 }} />
       <View style={{ flex: 1, gap: 2 }}>
         <AppText variant="bodyStrong">{f.title}</AppText>
-        <AppText variant="caption" color={colors.textMuted}>
-          {f.pro}
+        <AppText variant="caption" color={compare ? colors.text : colors.textMuted}>
+          {compare ? `Pro: ${f.pro}` : f.pro}
         </AppText>
         <AppText variant="caption" color={colors.textFaint}>
-          Free: {f.free}
+          {`Free: ${f.free}`}
         </AppText>
       </View>
     </Row>
@@ -96,7 +106,11 @@ function FeatureRow({ f, highlighted }: { f: PremiumFeature; highlighted: boolea
 export function PaywallView(p: PaywallViewProps) {
   const { catalog, entitlements: e } = p;
   const pro = e.tier === 'pro';
-  const features = [...catalog.features].sort((a, b) => Number(b.id === p.feature) - Number(a.id === p.feature));
+  // The feature that brought the user here leads; then the six headline benefits; the rest are "Also included".
+  const { headline, also } = splitFeatures(catalog.features);
+  const lead = [...headline, ...also].find((f) => f.id === p.feature) ?? null;
+  const headlineRows = headline.filter((f) => f !== lead);
+  const alsoRows = also.filter((f) => f !== lead);
   const products = catalog.products;
   const selected = products.find((x) => x.plan === p.plan) ?? products[0] ?? null;
   const savings = annualSavingsPercent(products);
@@ -141,8 +155,20 @@ export function PaywallView(p: PaywallViewProps) {
       ) : null}
 
       <View style={{ gap: space.xs }} accessibilityRole="list">
-        {features.map((f) => (
-          <FeatureRow key={f.id} f={f} highlighted={f.id === p.feature} />
+        <AppText variant="label" color={colors.textMuted}>
+          What you get with Pro
+        </AppText>
+        {lead ? <FeatureRow f={lead} highlighted compare={headline.includes(lead)} /> : null}
+        {headlineRows.map((f) => (
+          <FeatureRow key={f.id} f={f} highlighted={false} compare />
+        ))}
+        {alsoRows.length ? (
+          <AppText variant="label" color={colors.textMuted} style={{ marginTop: space.sm }}>
+            Also included
+          </AppText>
+        ) : null}
+        {alsoRows.map((f) => (
+          <FeatureRow key={f.id} f={f} highlighted={false} />
         ))}
       </View>
 
