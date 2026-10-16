@@ -47,6 +47,9 @@ export default function SettingsScreen() {
             <ListRow title="Privacy center" subtitle="See what's stored, download it, or delete your account" icon="shield-checkmark-outline" onPress={() => router.push('/profile/privacy' as Href)} />
           </Card>
           <LegalLinks />
+          <Card style={{ paddingVertical: space.xs }}>
+            <ListRow title="Photo credits" subtitle="Who took the food photos, and their licences" icon="images-outline" onPress={() => router.push('/profile/photo-credits' as Href)} />
+          </Card>
 
           <Button label="Sign out" icon="log-out-outline" variant="secondary" onPress={signOut} />
           <Button

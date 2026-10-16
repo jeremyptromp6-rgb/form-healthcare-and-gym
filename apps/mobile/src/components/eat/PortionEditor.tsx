@@ -1,7 +1,7 @@
-import { foodCategory, presentAmount, unitSymbol, type ScaleProvider } from '@form/domain';
+import { presentAmount, unitSymbol, type ScaleProvider } from '@form/domain';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { FoodArt } from '@/components/art/FoodArt';
+import { FoodThumb } from '@/components/eat/FoodThumb';
 import { AppText, Badge, Button, Card, Field, InlineMessage, Row, Segmented } from '@/components/ui';
 import type { WeightSource } from '@/lib/api';
 import { allowedMethods, defaultMethod, MEAL_LABEL, MEALS, METHOD_LABEL, previewPortion, readAmount, unitOptions, type UnitGroup, type UnitOption } from '@/lib/eat';
@@ -142,7 +142,7 @@ export function PortionEditor({ food, initial, submitLabel, busy, error, onSubmi
   return (
     <Card style={{ gap: space.lg }}>
       <Row gap={space.md}>
-        <FoodArt category={foodCategory(food)} size={56} />
+        <FoodThumb food={food} size={56} />
         <View style={{ flex: 1, gap: 2 }}>
           <AppText variant="heading" header>
             {food.name}

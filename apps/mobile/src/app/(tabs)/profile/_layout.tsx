@@ -15,6 +15,7 @@ export default function ProfileStack() {
       <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
       <Stack.Screen name="security" options={{ title: 'Account & security' }} />
       <Stack.Screen name="privacy" options={{ title: 'Privacy center' }} />
+      <Stack.Screen name="photo-credits" options={{ title: 'Photo credits' }} />
     </Stack>
   );
 }
