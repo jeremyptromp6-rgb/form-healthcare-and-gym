@@ -116,3 +116,41 @@ describe('YourRankView', () => {
     expect(screen.getByLabelText(/^XP over time:/)).toBeTruthy();
   });
 });
+
+describe('endless Champion levels', () => {
+  const champLadder = [...ladder, { name: 'Champion', minLevel: 60, xpRequired: 45_000 }];
+  const champ = (over: Partial<Progress>) => progress({ rank: 'Champion', rankLadder: champLadder, prestigeAtXp: 98_500, ...over });
+  const shows = async (p: Progress) => {
+    await render(<YourRankView progress={p} standing={{ kind: 'unsupported' }} events={[]} eventsState="ok" today={TODAY} />);
+  };
+
+  it('below the top Champion rank still counts down to Champion 1', async () => {
+    await shows(champ({ totalXp: 60_000, level: 70, prestige: null }));
+    expect(screen.getByText('38,500 XP to Champion 1')).toBeTruthy();
+    expect(screen.getByText('15,000 / 53,500 XP')).toBeTruthy();
+  });
+
+  it('is Champion 1 exactly at the top, with the bar to Champion 2', async () => {
+    await shows(champ({ totalXp: 98_500, level: 100, prestige: 1, xpIntoStep: 0, xpForStep: 3000 }));
+    expect(screen.getAllByText('Champion 1').length).toBeGreaterThan(0);
+    expect(screen.getByText('3,000 XP to Champion 2')).toBeTruthy();
+    expect(screen.getByLabelText('Champion 1 rank')).toBeTruthy();
+    expect(screen.queryByText(/Top rank reached/)).toBeNull();
+  });
+
+  it('keeps counting past Champion 1', async () => {
+    await shows(champ({ totalXp: 98_500 + 7 * 3000 + 600, level: 100, prestige: 8, xpIntoStep: 600, xpForStep: 3000 }));
+    expect(screen.getAllByText('Champion 8').length).toBeGreaterThan(0);
+    expect(screen.getByText('600 / 3,000 XP')).toBeTruthy();
+    expect(screen.getByText('2,400 XP to Champion 9')).toBeTruthy();
+  });
+});
+
+describe('Your Rank leaderboard link', () => {
+  it('opens the leaderboards from the standing section when a handler is given', async () => {
+    const onOpenLeaderboard = jest.fn();
+    await render(<YourRankView progress={progress()} standing={{ kind: 'unsupported' }} events={[]} eventsState="ok" today={TODAY} onOpenLeaderboard={onOpenLeaderboard} />);
+    await fireEvent.press(screen.getByText('Leaderboards'));
+    expect(onOpenLeaderboard).toHaveBeenCalledTimes(1);
+  });
+});

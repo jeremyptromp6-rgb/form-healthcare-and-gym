@@ -54,7 +54,7 @@ describe("workout XP through the ledger", () => {
     for (let i = 0; i < 3; i++) await post(u.auth, "/workouts", workout("2026-09-28")); // 35 + 35 + 35 → past 100
     const p = await get(u.auth, "/progress");
     // 105 from workouts + 20 from the First Workout achievement.
-    expect(p).toMatchObject({ level: 2, rank: "Rookie", totalXp: 125, xpIntoLevel: 25, xpForNextLevel: xpRequiredForLevel(3) - xpRequiredForLevel(2) });
+    expect(p).toMatchObject({ level: 2, rank: "Rookie", totalXp: 125, xpIntoLevel: 25, xpForNextLevel: xpRequiredForLevel(3) - xpRequiredForLevel(2), prestige: null, xpIntoStep: 25, xpForStep: xpRequiredForLevel(3) - xpRequiredForLevel(2), prestigeAtXp: xpRequiredForLevel(100) });
     expect(p.recentLevelUp).toMatchObject({ level: 2, rank: "Rookie" });
     expect(p.rankLadder.map((r: { name: string }) => r.name)).toEqual(["Rookie", "Starter", "Athlete", "Iron", "Elite", "Master", "Champion"]);
   });

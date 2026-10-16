@@ -19,6 +19,7 @@ import { privacyRoutes } from "./modules/privacy/routes";
 import { authenticate, authRoutes, sessionRoutes } from "./modules/auth/routes";
 import { coachRoutes } from "./modules/coach/routes";
 import { homeRoutes } from "./modules/home/routes";
+import { leaderboardRoutes } from "./modules/leaderboard/routes";
 import { nutritionRoutes } from "./modules/nutrition/routes";
 import { mealRoutes } from "./modules/meals/routes";
 import { scanRoutes } from "./modules/scan/routes";
@@ -163,6 +164,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     scanRoutes(secured, ctx);
     mealRoutes(secured, ctx);
     progressionRoutes(secured, ctx);
+    leaderboardRoutes(secured, ctx);
     questRoutes(secured, ctx);
     recognitionRoutes(secured, ctx);
     analyticsRoutes(secured, ctx);

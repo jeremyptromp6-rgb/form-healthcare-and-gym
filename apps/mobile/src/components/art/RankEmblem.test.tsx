@@ -101,3 +101,22 @@ describe('RankEmblem', () => {
     });
   });
 });
+
+describe('RankEmblem prestige chip', () => {
+  it('shows the Champion number without adding SVG elements', async () => {
+    await render(<RankEmblem rank="Champion" />);
+    const plain = countSvg().total;
+    const { unmount } = await render(<RankEmblem rank="Champion" prestige={7} />);
+    expect(countSvg().total).toBeLessThanOrEqual(40);
+    expect(countSvg().total).toBe(plain);
+    expect(screen.getByLabelText('Champion 7 rank')).toBeTruthy();
+    expect(screen.getByText('7', { includeHiddenElements: true })).toBeTruthy();
+    await unmount();
+  });
+
+  it('ignores prestige on other ranks and on a locked shield', async () => {
+    await render(<RankEmblem rank="Iron" prestige={3} />);
+    expect(screen.getByLabelText('Iron rank')).toBeTruthy();
+    expect(screen.queryByText('3', { includeHiddenElements: true })).toBeNull();
+  });
+});

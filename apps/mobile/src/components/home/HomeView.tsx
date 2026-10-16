@@ -13,6 +13,7 @@ import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
 import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
 import { accuracyLine, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
+import { rankLabel, stepProgress } from '@/lib/prestige';
 import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress } from '@/lib/types';
 import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { imagery } from '@/theme/imagery';
@@ -504,13 +505,14 @@ function Quests({ daily, weekly }: { daily: QuestProgress[]; weekly: QuestProgre
 }
 
 function Level({ p, onOpenRank }: { p: NonNullable<HomeViewModel['progression']>; onOpenRank: () => void }) {
+  const step = stepProgress(p);
   return (
     <Card style={{ gap: space.sm }}>
       <Row gap={space.md}>
-        <RankEmblem rank={p.rank} size={44} />
+        <RankEmblem rank={p.rank} size={44} prestige={p.prestige} />
         <View style={{ flex: 1 }}>
           <AppText variant="heading">
-            Level {p.level} · {p.rank}
+            Level {p.level} · {rankLabel(p.rank, p.prestige)}
           </AppText>
           <AppText variant="label" color={colors.textMuted} style={{ fontVariant: ['tabular-nums'] }}>
             {levelLine(p)}
@@ -518,11 +520,11 @@ function Level({ p, onOpenRank }: { p: NonNullable<HomeViewModel['progression']>
         </View>
         <Badge label={`Best ${p.streak.longest}`} tone="accent" icon="flame" />
       </Row>
-      <ProgressBar value={p.fractionToNext} height={6} label={`Progress to level ${p.level + 1}`} />
+      <ProgressBar value={step.fraction} height={6} label={`Progress to ${step.nextName ?? `level ${p.level + 1}`}`} />
       <AppText variant="caption" color={colors.textMuted}>
-        {p.xpForNextLevel === 0
+        {step.nextName === null
           ? 'Max level reached'
-          : `${(p.xpForNextLevel - p.xpIntoLevel).toLocaleString()} XP to level ${p.level + 1}${p.nextRank ? ` · ${p.nextRank.name} at level ${p.nextRank.minLevel}` : ''}`}
+          : `${step.toNext.toLocaleString()} XP to ${step.nextName}${p.prestige == null && p.nextRank ? ` · ${p.nextRank.name} at level ${p.nextRank.minLevel}` : ''}`}
       </AppText>
       {p.provisionalXp > 0 ? (
         <AppText variant="caption" color={colors.textFaint}>

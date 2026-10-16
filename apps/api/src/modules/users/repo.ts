@@ -213,6 +213,7 @@ interface SettingsRow {
   ai_coach_consent: number;
   coach_keep_history: number;
   food_scan_consent: number;
+  leaderboard_opt_in: number;
 }
 
 export function loadSettings(db: Db, userId: string): UserSettings {
@@ -229,16 +230,17 @@ export function loadSettings(db: Db, userId: string): UserSettings {
     aiCoachConsent: r.ai_coach_consent === 1,
     coachKeepHistory: r.coach_keep_history === 1,
     foodScanConsent: r.food_scan_consent === 1,
+    leaderboardOptIn: r.leaderboard_opt_in === 1,
   };
 }
 
 export function saveSettings(db: Db, userId: string, s: UserSettings, now: Date): void {
   db.prepare(
-    `INSERT INTO user_settings (user_id, units, timezone, timezone_auto, date_format, personalized_ads_consent, analytics_consent, ai_coach_enabled, ai_coach_consent, coach_keep_history, food_scan_consent, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO user_settings (user_id, units, timezone, timezone_auto, date_format, personalized_ads_consent, analytics_consent, ai_coach_enabled, ai_coach_consent, coach_keep_history, food_scan_consent, leaderboard_opt_in, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET units = excluded.units, timezone = excluded.timezone, timezone_auto = excluded.timezone_auto, date_format = excluded.date_format,
        personalized_ads_consent = excluded.personalized_ads_consent, analytics_consent = excluded.analytics_consent, ai_coach_enabled = excluded.ai_coach_enabled,
-       ai_coach_consent = excluded.ai_coach_consent, coach_keep_history = excluded.coach_keep_history, food_scan_consent = excluded.food_scan_consent, updated_at = excluded.updated_at`,
+       ai_coach_consent = excluded.ai_coach_consent, coach_keep_history = excluded.coach_keep_history, food_scan_consent = excluded.food_scan_consent, leaderboard_opt_in = excluded.leaderboard_opt_in, updated_at = excluded.updated_at`,
   ).run(
     userId,
     s.units,
@@ -251,6 +253,7 @@ export function saveSettings(db: Db, userId: string, s: UserSettings, now: Date)
     Number(s.aiCoachConsent),
     Number(s.coachKeepHistory),
     Number(s.foodScanConsent),
+    Number(s.leaderboardOptIn),
     now.toISOString(),
   );
 }

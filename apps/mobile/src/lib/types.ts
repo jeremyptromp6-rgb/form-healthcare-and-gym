@@ -23,6 +23,13 @@ export interface Progress {
   xpIntoLevel: number;
   xpForNextLevel: number;
   fractionToNext: number;
+  /** Endless Champion level: Champion N once at the max level, null below it. Absent on older servers. */
+  prestige?: number | null;
+  /** Progress inside the current step (the level below the top, the Champion step at it). */
+  xpIntoStep?: number;
+  xpForStep?: number;
+  /** Active XP at which Champion 1 starts. */
+  prestigeAtXp?: number;
   /** Today's nutrition XP: shown now, settled into the ledger when the day ends. */
   provisionalXp: number;
   rankLadder: { name: string; minLevel: number; xpRequired: number }[];
@@ -175,6 +182,8 @@ export interface UserSettings {
   aiCoachConsent: boolean;
   coachKeepHistory: boolean;
   foodScanConsent: boolean;
+  /** Off by default: shown on the leaderboard by display name instead of "Athlete #code". Older servers omit it. */
+  leaderboardOptIn?: boolean;
 }
 
 export interface Me {
@@ -896,6 +905,10 @@ export interface HomeViewModel {
     xpIntoLevel: number;
     xpForNextLevel: number;
     fractionToNext: number;
+    prestige?: number | null;
+    xpIntoStep?: number;
+    xpForStep?: number;
+    prestigeAtXp?: number;
     provisionalXp: number;
     nextRank: { name: string; minLevel: number } | null;
     streak: Streak;
@@ -967,4 +980,33 @@ export interface MuscleRanks {
 export interface Standing {
   percentile: number | null;
   rankedUsers: number;
+}
+
+/** GET /leaderboard: top 50 by XP earned in the period, plus the caller's own place. Names are opt-in; everyone else is "Athlete #code". */
+export type LeaderboardPeriod = 'today' | 'week' | 'all';
+export interface LeaderboardEntry {
+  /** 1-based; ties share the better place. */
+  position: number;
+  name: string;
+  /** True when the name is the anonymous "Athlete #code". */
+  anonymous: boolean;
+  isYou: boolean;
+  points: number;
+  level: number;
+  rank: string;
+  rankLabel: string;
+  prestige: number | null;
+}
+export interface LeaderboardYou extends Omit<LeaderboardEntry, 'position' | 'isYou'> {
+  /** Null while the caller has no points in the period. */
+  position: number | null;
+  optedIn: boolean;
+}
+export interface Leaderboard {
+  period: LeaderboardPeriod;
+  from: string | null;
+  to: string | null;
+  totalRanked: number;
+  entries: LeaderboardEntry[];
+  you: LeaderboardYou;
 }

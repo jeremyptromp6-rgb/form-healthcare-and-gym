@@ -1,4 +1,4 @@
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Defs, Ellipse, LinearGradient, Path, Stop } from 'react-native-svg';
 import { art, artPalettes, LIGHT_DIR, METALS, METAL_SYMBOL, METAL_TEXT, STROKE, useArtId, type ArtPalette, type ArtTone, type Metal } from '@/theme/artPalette';
 import { scheme } from '@/theme/tokens';
@@ -248,7 +248,37 @@ function Crown({ id, a, locked }: { id: string; a: ArtPalette; locked: boolean }
 /** The keyhole of an unrevealed rank, cut into the clay. */
 const KEYHOLE = `${dot(50, 57, 7)} M46.5 63 L44 79 L56 79 L53.5 63 Z`;
 
-export function RankEmblem({ rank, size = 56, locked, style, tone }: { rank: string; size?: number; locked?: boolean; style?: StyleProp<ViewStyle>; tone?: ArtTone }) {
+/** The small gold number on a prestige Champion's shield: plain views (outside the SVG budget), art colours only. */
+function PrestigeChip({ n, size }: { n: number; size: number }) {
+  const h = Math.max(14, Math.round(size * 0.3));
+  return (
+    <View
+      importantForAccessibility="no-hide-descendants"
+      style={{ position: 'absolute', right: -size * 0.04, bottom: size * 0.02, minWidth: h, height: h, paddingHorizontal: h * 0.25, borderRadius: h / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: METALS.gold.mid, borderWidth: 1, borderColor: METALS.gold.lo }}
+    >
+      <Text allowFontScaling={false} style={{ color: METAL_SYMBOL.gold.ink, fontSize: Math.round(h * 0.6), lineHeight: Math.round(h * 0.78), fontWeight: '800', fontVariant: ['tabular-nums'] }}>
+        {n}
+      </Text>
+    </View>
+  );
+}
+
+export function RankEmblem({
+  rank,
+  size = 56,
+  locked,
+  style,
+  tone,
+  prestige,
+}: {
+  rank: string;
+  size?: number;
+  locked?: boolean;
+  style?: StyleProp<ViewStyle>;
+  tone?: ArtTone;
+  /** Endless Champion level (Champion 1, 2, …): adds a small number chip. */
+  prestige?: number | null;
+}) {
   const name: RankName = (rank as RankName) in LOOKS ? (rank as RankName) : 'Rookie';
   const look = LOOKS[name];
   const a = tone ? artPalettes[tone] : art;
@@ -261,12 +291,13 @@ export function RankEmblem({ rank, size = 56, locked, style, tone }: { rank: str
   const { d: symD, stroked } = symbolPath(look);
   const frameEdge = isLocked ? clay.edge : metal.lo;
   const champion = name === 'Champion';
+  const prestigeN = champion && !isLocked && prestige != null && prestige > 0 ? prestige : null;
   // The shield's thickness: its shaded metal, or in the evening a warm rim light on the lower-right edge.
   const night = (tone ?? scheme) === 'dark';
   const thickness = isLocked ? clay.edge : night ? a.rim : metal.lo;
   const thicknessOpacity = !isLocked && night ? Math.min(1, a.rimOpacity + 0.3) : 1;
   return (
-    <View style={[{ width: size, height: size * 1.08 }, style]} accessible accessibilityRole="image" accessibilityLabel={`${rank} rank${locked ? ', not reached yet' : ''}`}>
+    <View style={[{ width: size, height: size * 1.08 }, style]} accessible accessibilityRole="image" accessibilityLabel={`${prestigeN ? `${rank} ${prestigeN}` : rank} rank${locked ? ', not reached yet' : ''}`}>
       <Svg width="100%" height="100%" viewBox="0 0 100 108">
         <Defs>
           {isLocked ? (
@@ -320,6 +351,7 @@ export function RankEmblem({ rank, size = 56, locked, style, tone }: { rank: str
           </>
         ) : null}
       </Svg>
+      {prestigeN ? <PrestigeChip n={prestigeN} size={size} /> : null}
     </View>
   );
 }

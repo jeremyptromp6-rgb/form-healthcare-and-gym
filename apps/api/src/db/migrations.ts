@@ -1013,6 +1013,15 @@ const V25_STREAK_FREEZES = `
   );
 `;
 
+/**
+ * Leaderboard. Off by default: nobody is shown by name unless they opt in (everyone else appears as an
+ * anonymous "Athlete #code"). The period queries read the XP ledger by local date, so they get an index.
+ */
+const V26_LEADERBOARD = `
+  ALTER TABLE user_settings ADD COLUMN leaderboard_opt_in INTEGER NOT NULL DEFAULT 0 CHECK (leaderboard_opt_in IN (0, 1));
+  CREATE INDEX xp_events_local_date ON xp_events(local_date, user_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1039,4 +1048,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 23, name: "focus_areas", up: V23_FOCUS_AREAS },
   { version: 24, name: "warmup_notes", up: V24_WARMUP_NOTES },
   { version: 25, name: "streak_freezes", up: V25_STREAK_FREEZES },
+  { version: 26, name: "leaderboard", up: V26_LEADERBOARD },
 ];

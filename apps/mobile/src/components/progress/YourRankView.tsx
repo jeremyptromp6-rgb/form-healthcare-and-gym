@@ -4,22 +4,37 @@ import { View } from 'react-native';
 import { rankColor } from '@/components/art/RankEmblem';
 import { Chart } from '@/components/analytics/Chart';
 import { RankEmblem } from '@/components/progress/ProgressionViews';
-import { AppText, BreathingGlow, Button, Card, GradientCard, InlineMessage, ProgressBar, Row, Segmented, SectionHeader } from '@/components/ui';
+import { AppText, BreathingGlow, Button, Card, ExerciseList, GradientCard, InlineMessage, ListRow, ProgressBar, Row, Segmented, SectionHeader } from '@/components/ui';
 import { rankChart, xpChange, xpTimeline, type RankRange } from '@/lib/rankHistory';
+import { rankLabel } from '@/lib/prestige';
 import type { Progress, Standing, XpLedgerEntry } from '@/lib/types';
 import { colors, gradients, space } from '@/theme/tokens';
 
 const fmt = (n: number) => Math.round(n).toLocaleString();
 
 /** Where the user is inside their current rank, from the rank ladder (XP is total active XP, the same number that sets the level). */
-export function rankProgress(p: Pick<Progress, 'totalXp' | 'rank' | 'rankLadder'>) {
+export function rankProgress(p: Pick<Progress, 'totalXp' | 'rank' | 'rankLadder'> & Pick<Progress, 'prestige' | 'xpIntoStep' | 'xpForStep' | 'prestigeAtXp'>) {
   const i = Math.max(0, p.rankLadder.findIndex((r) => r.name === p.rank));
   const current = p.rankLadder[i];
   const next = p.rankLadder[i + 1] ?? null;
   const from = current?.xpRequired ?? 0;
   const into = Math.max(0, p.totalXp - from);
   const span = next ? Math.max(1, next.xpRequired - from) : 0;
-  return { into, span, next, toNext: next ? Math.max(0, next.xpRequired - p.totalXp) : 0, fraction: next ? Math.min(1, into / span) : 1 };
+  return { into, span, next, toNext: next ? Math.max(0, next.xpRequired - p.totalXp) : 0, fraction: next ? Math.min(1, into / span) : 1, endless: endlessStep(p, from, into) };
+}
+
+/** Past the last rank the climb never ends: the run to Champion 1, then each Champion step after it. */
+function endlessStep(p: Pick<Progress, 'totalXp' | 'prestige' | 'xpIntoStep' | 'xpForStep' | 'prestigeAtXp'>, from: number, into: number) {
+  if (p.prestige != null && p.prestige > 0 && (p.xpForStep ?? 0) > 0) {
+    const span = p.xpForStep as number;
+    const done = Math.min(span, Math.max(0, p.xpIntoStep ?? 0));
+    return { name: rankLabel('Champion', p.prestige), nextName: rankLabel('Champion', p.prestige + 1), into: done, span, toNext: span - done, fraction: done / span };
+  }
+  if (p.prestigeAtXp != null && p.prestigeAtXp > from && p.totalXp < p.prestigeAtXp) {
+    const span = p.prestigeAtXp - from;
+    return { name: 'Champion', nextName: rankLabel('Champion', 1), into, span, toNext: p.prestigeAtXp - p.totalXp, fraction: Math.min(1, into / span) };
+  }
+  return null;
 }
 
 export type StandingState = { kind: 'loading' } | { kind: 'unsupported' } | { kind: 'error'; onRetry: () => void } | { kind: 'ok'; standing: Standing };
@@ -32,14 +47,14 @@ export function RankHero({ progress: p }: { progress: Progress }) {
     <GradientCard colorsOverride={gradients.heroMedia} style={{ gap: space.lg, paddingVertical: space.xl, alignItems: 'center' }}>
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 150 }}>
         <BreathingGlow size={170} color={tint} style={{ position: 'absolute' }} />
-        <RankEmblem rank={p.rank} size={120} />
+        <RankEmblem rank={p.rank} size={120} prestige={p.prestige} />
       </View>
       <View style={{ alignItems: 'center', gap: 2 }}>
         <AppText variant="overline" color={tint}>
           Your rank
         </AppText>
         <AppText variant="display" header style={{ textAlign: 'center' }}>
-          {p.rank}
+          {rankLabel(p.rank, p.prestige)}
         </AppText>
         <AppText variant="label" color={colors.textMuted}>
           Level {p.level}
@@ -59,6 +74,21 @@ export function RankHero({ progress: p }: { progress: Progress }) {
             <ProgressBar value={r.fraction} height={10} color={tint} label={`Progress to ${r.next.name}`} />
             <AppText variant="caption" color={colors.textMuted}>
               {`${fmt(r.toNext)} XP to ${r.next.name}`}
+            </AppText>
+          </>
+        ) : r.endless ? (
+          <>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <AppText variant="label" style={{ fontVariant: ['tabular-nums'] }} accessibilityLabel={`${fmt(r.endless.into)} of ${fmt(r.endless.span)} XP in ${r.endless.name}`}>
+                {`${fmt(r.endless.into)} / ${fmt(r.endless.span)} XP`}
+              </AppText>
+              <AppText variant="label" color={colors.textMuted}>
+                {r.endless.name}
+              </AppText>
+            </Row>
+            <ProgressBar value={r.endless.fraction} height={10} color={tint} label={`Progress to ${r.endless.nextName}`} />
+            <AppText variant="caption" color={colors.textMuted}>
+              {`${fmt(r.endless.toNext)} XP to ${r.endless.nextName}`}
             </AppText>
           </>
         ) : (
@@ -176,7 +206,22 @@ export function RankOverTime({ progress: p, events, today }: { progress: Progres
 }
 
 /** Your Rank: the badge, where you stand among FORM users, and the climb over time. */
-export function YourRankView({ progress, standing, events, eventsState, today }: { progress: Progress; standing: StandingState; events: XpLedgerEntry[]; eventsState: 'loading' | 'error' | 'ok'; today: string }) {
+export function YourRankView({
+  progress,
+  standing,
+  events,
+  eventsState,
+  today,
+  onOpenLeaderboard,
+}: {
+  progress: Progress;
+  standing: StandingState;
+  events: XpLedgerEntry[];
+  eventsState: 'loading' | 'error' | 'ok';
+  today: string;
+  /** Opens the leaderboards; the link is hidden when omitted. */
+  onOpenLeaderboard?: () => void;
+}) {
   const section = { gap: space.md } as const;
   return (
     <View style={{ gap: space.lg }}>
@@ -184,6 +229,11 @@ export function YourRankView({ progress, standing, events, eventsState, today }:
       <View style={section}>
         <SectionHeader title="Your standing" />
         <StandingCard state={standing} totalXp={progress.totalXp} />
+        {onOpenLeaderboard ? (
+          <ExerciseList>
+            <ListRow title="Leaderboards" subtitle="See who earned the most XP today, this week or ever" icon="podium-outline" iconTint={colors.primary} onPress={onOpenLeaderboard} />
+          </ExerciseList>
+        ) : null}
       </View>
       <View style={section}>
         <SectionHeader title="Rank over time" />

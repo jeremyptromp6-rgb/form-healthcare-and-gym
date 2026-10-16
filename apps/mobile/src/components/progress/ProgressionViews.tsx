@@ -4,6 +4,7 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { AppText, Badge, BreathingGlow, Card, ExerciseList, GradientCard, IconButton, InlineMessage, ProgressBar, Row } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
 import type { Progress, XpLedgerEntry } from '@/lib/types';
+import { PRESTIGE_LEVEL, rankLabel, stepProgress, type PrestigeFields } from '@/lib/prestige';
 import { RankEmblem, rankColor } from '@/components/art/RankEmblem';
 import { ProgressArt } from '@/components/art/SceneArt';
 import { colors, gradients, radius, space } from '@/theme/tokens';
@@ -12,9 +13,20 @@ export { RankEmblem };
 
 const fmt = (n: number) => Math.round(n).toLocaleString();
 
-/** "LEVEL 13 — 2,450 / 3,000 XP" (or the max-level line). */
-export function levelLine(p: Pick<Progress, 'level' | 'xpIntoLevel' | 'xpForNextLevel'>): string {
+/** "LEVEL 13 — 2,450 / 3,000 XP"; at the top "CHAMPION 3 — 1,200 / 3,000 XP" (or the plain max-level line from an older server). */
+export function levelLine(p: Pick<Progress, 'level' | 'xpIntoLevel' | 'xpForNextLevel'> & Pick<PrestigeFields, 'prestige' | 'xpIntoStep' | 'xpForStep'>): string {
+  const s = stepProgress({ ...p, fractionToNext: 0 });
+  if (p.prestige != null && s.span > 0) return `CHAMPION ${p.prestige} — ${fmt(s.into)} / ${fmt(s.span)} XP`;
   return p.xpForNextLevel === 0 ? `LEVEL ${p.level} — max level` : `LEVEL ${p.level} — ${fmt(p.xpIntoLevel)} / ${fmt(p.xpForNextLevel)} XP`;
+}
+
+/** The line under the level bar: what comes next. */
+export function nextUpLine(p: PrestigeFields & { rankLadder: Progress['rankLadder'] }): string {
+  const s = stepProgress(p);
+  if (p.prestige != null && s.nextName) return `${fmt(s.toNext)} XP to ${s.nextName}`;
+  const next = p.rankLadder.find((r) => r.minLevel > p.level);
+  if (next) return `${next.name} at level ${next.minLevel}`;
+  return p.level < PRESTIGE_LEVEL ? `Champion 1 at level ${PRESTIGE_LEVEL}` : 'Top rank reached';
 }
 
 export function streakCaption(p: Progress): string {
@@ -27,21 +39,22 @@ export function streakCaption(p: Progress): string {
 
 /** The level hero: emblem, rank, LEVEL n — into / span XP, and the bar to the next level. */
 export function LevelHero({ progress: p }: { progress: Progress }) {
-  const next = p.rankLadder.find((r) => r.minLevel > p.level);
+  const step = stepProgress(p);
+  const prestige = p.prestige != null && p.prestige > 0 ? p.prestige : null;
   return (
     <GradientCard colorsOverride={gradients.heroMedia} style={{ gap: space.lg, paddingVertical: space.xl }}>
       <ProgressArt style={{ position: 'absolute', top: 0, right: 0, width: 170, height: 120, opacity: 0.6 }} />
       <Row gap={space.lg}>
         <View style={{ alignItems: 'center', justifyContent: 'center' }}>
           <BreathingGlow size={118} color={rankColor(p.rank)} style={{ position: 'absolute' }} />
-          <RankEmblem rank={p.rank} size={84} />
+          <RankEmblem rank={p.rank} size={84} prestige={prestige} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
           <AppText variant="overline" color={rankColor(p.rank)}>
-            {p.rank}
+            {prestige ? `${p.rank} · Level ${p.level}` : p.rank}
           </AppText>
           <AppText variant="display" header style={{ fontSize: 40, lineHeight: 46 }}>
-            Level {p.level}
+            {prestige ? rankLabel(p.rank, prestige) : `Level ${p.level}`}
           </AppText>
         </View>
       </Row>
@@ -49,10 +62,10 @@ export function LevelHero({ progress: p }: { progress: Progress }) {
         <AppText variant="label" accessibilityLabel={levelLine(p).replace('—', ',')} style={{ fontVariant: ['tabular-nums'] }}>
           {levelLine(p)}
         </AppText>
-        <ProgressBar value={p.fractionToNext} height={10} label={`Progress to level ${p.level + 1}`} />
+        <ProgressBar value={step.fraction} height={10} label={`Progress to ${step.nextName ?? `level ${p.level + 1}`}`} />
         <Row style={{ justifyContent: 'space-between' }}>
           <AppText variant="caption" color={colors.textMuted}>
-            {next ? `${next.name} at level ${next.minLevel}` : 'Top rank reached'}
+            {nextUpLine(p)}
           </AppText>
           <AppText variant="caption" color={colors.textFaint}>
             {fmt(p.lifetimeXp)} XP all time

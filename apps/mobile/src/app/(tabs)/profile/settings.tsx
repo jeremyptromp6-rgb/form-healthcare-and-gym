@@ -263,8 +263,19 @@ function AdsAndAnalytics({ me }: { me: Me }) {
         <AppText variant="caption" color={colors.textMuted}>
           Your profile, photo, weight, workouts, meals, records and XP are visible only to you.
         </AppText>
+        <Toggle
+          label="Show me on the leaderboard with my name"
+          description="Off by default: others see you only as “Athlete #code”. On: your display name (set in Edit profile) and rank are shown. Never your photo, email or any other detail. Names are checked, and you can turn this off any time."
+          value={s.leaderboardOptIn === true}
+          disabled={update.isPending}
+          onChange={(v) => update.mutate({ leaderboardOptIn: v })}
+        />
         <Toggle label="Share usage analytics" description="Anonymous app usage only. Never health, body or food data." value={s.analyticsConsent} disabled={update.isPending} onChange={(v) => update.mutate({ analyticsConsent: v })} />
-        {update.isError ? <InlineMessage tone="danger">Couldn&apos;t save that setting. Try again.</InlineMessage> : null}
+        {update.isError ? (
+          <InlineMessage tone="danger">
+            {update.error.code === 'name_not_allowed' ? `${update.error.message} Change your display name in Edit profile first.` : "Couldn't save that setting. Try again."}
+          </InlineMessage>
+        ) : null}
       </Card>
     </>
   );

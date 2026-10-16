@@ -25,6 +25,7 @@ import { assertPlausibleLocalDate, dateKey } from "../../shared/dates";
 import { assertEntryDate, userClock } from "../../shared/userClock";
 import { progressAnalytics } from "../analytics/service";
 import { clearChat } from "../coach/service";
+import { publicNameProblem } from "../leaderboard/nameFilter";
 import { reconcilePlansWithPreferences } from "../meals/service";
 import { sanitizePhoto } from "./photo";
 import { latestWeight, loadNotifications, loadPreferences, loadProfile, loadSettings, markOnboardingComplete, saveNotifications, saveSettings, upsertWeight, weightHistory } from "./repo";
@@ -78,6 +79,7 @@ const settingsPatch = z
     aiCoachConsent: z.boolean(),
     coachKeepHistory: z.boolean(),
     foodScanConsent: z.boolean(),
+    leaderboardOptIn: z.boolean(),
   })
   .partial()
   .strict();
@@ -98,6 +100,12 @@ const notificationsPatch = z
   .strict();
 
 const WEIGHT_BACKDATE_DAYS = 30;
+
+function assertPublicName(name: string | null | undefined): void {
+  if (!name) return;
+  const problem = publicNameProblem(name, L.displayNameLength);
+  if (problem) throw new HttpError(422, "name_not_allowed", problem, { field: "displayName" });
+}
 
 /** Profile, preferences, personalization, weight, photo, settings, onboarding and account routes — all scoped to the caller. */
 export function userRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -130,6 +138,8 @@ export function userRoutes(app: FastifyInstance, ctx: AppContext): void {
 
   app.patch("/me/profile", async (req) => {
     const { localDate: clientDate, ...patch } = profilePatch.parse(req.body);
+    // The display name can be shown on the leaderboard, so it must be clean whether or not the user has opted in.
+    if (patch.displayName) assertPublicName(patch.displayName);
     // Changes take effect from the user's today. Once their time zone is stored the server decides
     // it; the client's date only stands in before that (and must be plausible).
     const clock = userClock(ctx, req.user.sub);
@@ -223,6 +233,8 @@ export function userRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.patch("/me/settings", async (req) => {
     const patch = settingsPatch.parse(req.body);
     const next = { ...loadSettings(ctx.db, req.user.sub), ...patch };
+    // Being shown by name needs a clean name: refuse to opt in with one that wouldn't be allowed.
+    if (patch.leaderboardOptIn === true) assertPublicName(loadProfile(ctx.db, req.user.sub)?.displayName);
     transaction(ctx.db, () => {
       saveSettings(ctx.db, req.user.sub, next, ctx.now());
       // Turning chat history off removes what's already stored, not just future chats.

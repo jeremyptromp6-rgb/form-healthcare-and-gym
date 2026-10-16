@@ -1,4 +1,5 @@
 import { YourRankView, type StandingState } from '@/components/progress/YourRankView';
+import { router, type Href } from 'expo-router';
 import { ErrorState, Screen, StateView } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
 import { useProgress, useRefetchOnFocus, useStanding, useXpHistory } from '@/lib/queries';
@@ -32,6 +33,7 @@ export default function RankScreen() {
           events={history.data?.events ?? []}
           eventsState={history.data ? 'ok' : history.isError ? 'error' : 'loading'}
           today={today}
+          onOpenLeaderboard={() => router.push('/progress/leaderboard' as Href)}
         />
       ) : null}
     </Screen>

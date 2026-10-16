@@ -6,6 +6,7 @@ import {
   daysUntilReset,
   isRecoveryDay,
   lifetimeXpFrom,
+  MAX_LEVEL,
   nutritionDayXp,
   progressFromXp,
   RANKS,
@@ -342,6 +343,8 @@ export function computeUserProgress(db: Db, userId: string, today: string, now: 
 
   return {
     ...progressFromXp(active),
+    /** Active XP at which Champion 1 starts (the max level); the endless Champion N steps follow from here. */
+    prestigeAtXp: xpRequiredForLevel(MAX_LEVEL),
     /** XP earned across all time, including before any reset. */
     lifetimeXp: lifetimeXpFrom(all) + provisional,
     provisionalXp: provisional,

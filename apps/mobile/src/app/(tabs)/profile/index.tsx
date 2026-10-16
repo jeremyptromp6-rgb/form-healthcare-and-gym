@@ -9,6 +9,7 @@ import { RankEmblem, rankColor } from '@/components/art/RankEmblem';
 import { RingsArt } from '@/components/art/SceneArt';
 import { AppText, Badge, Button, Card, Divider, ExerciseList, GradientCard, ErrorState, IconBubble, InlineMessage, ListRow, ProgressBar, Row, Screen, SectionAction, SectionHeader, StatStrip, StateView } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
+import { rankLabel, stepProgress } from '@/lib/prestige';
 import { useFeature } from '@/lib/features';
 import { labelOf } from '@/lib/profileForm';
 import { useAchievements, useBodyQuest, useCatalog, useMe, useProfileSummary, useProgress, useRecords, useRefetchOnFocus, useWeightHistory, useWorkouts } from '@/lib/queries';
@@ -62,17 +63,17 @@ export default function ProfileHub() {
         </Row>
         {p ? (
           <Row gap={space.md} style={{ alignSelf: 'stretch' }}>
-            <RankEmblem rank={p.rank} size={46} />
+            <RankEmblem rank={p.rank} size={46} prestige={p.prestige} />
             <View style={{ flex: 1, gap: space.sm }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <AppText variant="bodyStrong">
-                  Level {p.level} · <AppText variant="bodyStrong" color={rankColor(p.rank)}>{p.rank}</AppText>
+                  Level {p.level} · <AppText variant="bodyStrong" color={rankColor(p.rank)}>{rankLabel(p.rank, p.prestige)}</AppText>
                 </AppText>
                 <AppText variant="caption" color={colors.textMuted}>
                   {p.totalXp.toLocaleString()} XP
                 </AppText>
               </Row>
-              <ProgressBar value={p.fractionToNext} height={6} label={`Progress to level ${p.level + 1}`} />
+              <ProgressBar value={stepProgress(p).fraction} height={6} label={`Progress to ${stepProgress(p).nextName ?? `level ${p.level + 1}`}`} />
             </View>
           </Row>
         ) : progress.isError ? (

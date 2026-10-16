@@ -95,6 +95,7 @@ describe("settings", () => {
       aiCoachConsent: false, // nothing goes to an external AI until the user agrees
       coachKeepHistory: true,
       foodScanConsent: false,
+      leaderboardOptIn: false,
     });
     const patched = await app.inject({ method: "PATCH", url: "/me/settings", headers: u.auth, payload: { analyticsConsent: true } });
     expect(patched.json()).toMatchObject({ analyticsConsent: true, personalizedAdsConsent: false });

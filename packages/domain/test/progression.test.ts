@@ -3,12 +3,53 @@ import {
   DomainValidationError,
   MAX_LEVEL,
   nutritionDayXp,
+  PRESTIGE_STEP_XP,
   progressFromXp,
   RANKS,
   rankForLevel,
+  rankLabel,
   workoutXp,
   xpRequiredForLevel,
 } from "../src";
+
+describe("endless Champion prestige", () => {
+  const top = xpRequiredForLevel(MAX_LEVEL);
+
+  it("has no prestige below the top and keeps the per-level step", () => {
+    const p = progressFromXp(top - 1);
+    expect(p.level).toBe(MAX_LEVEL - 1);
+    expect(p.prestige).toBeNull();
+    expect(p.xpIntoStep).toBe(p.xpIntoLevel);
+    expect(p.xpForStep).toBe(p.xpForNextLevel);
+    expect(progressFromXp(0)).toMatchObject({ prestige: null, xpIntoStep: 0, xpForStep: xpRequiredForLevel(2) });
+  });
+
+  it("is Champion 1 exactly at the max-level threshold, then +1 per step", () => {
+    expect(progressFromXp(top)).toMatchObject({ level: MAX_LEVEL, rank: "Champion", prestige: 1, xpIntoStep: 0, xpForStep: PRESTIGE_STEP_XP, xpForNextLevel: 0, fractionToNext: 1 });
+    expect(progressFromXp(top + PRESTIGE_STEP_XP - 1)).toMatchObject({ prestige: 1, xpIntoStep: PRESTIGE_STEP_XP - 1 });
+    expect(progressFromXp(top + PRESTIGE_STEP_XP)).toMatchObject({ prestige: 2, xpIntoStep: 0 });
+    expect(progressFromXp(top + 9 * PRESTIGE_STEP_XP + 5)).toMatchObject({ prestige: 10, xpIntoStep: 5 });
+  });
+
+  it("labels the rank", () => {
+    expect(rankLabel("Champion", 3)).toBe("Champion 3");
+    expect(rankLabel("Iron", null)).toBe("Iron");
+  });
+
+  it("stays modest: a year of a max-capped workout every day is well under 100", () => {
+    const day = workoutXp({
+      sets: [{ reps: 200, verifiedReps: 200, repQuality: Array.from({ length: 200 }, () => ({ formScore: 100, romPercent: 100 })) }, { reps: 100, verifiedReps: 100, repQuality: Array.from({ length: 100 }, () => ({ formScore: 100, romPercent: 100 })) }],
+      durationMinutes: 60,
+      priorTrainingMinutesToday: 0,
+      painLevel: "none",
+      personalRecords: 3,
+    }).xp + nutritionDayXp({ mealsLogged: 4, totalKcal: 2000, targetKcal: 2000, safeFloorKcal: 1200, dayComplete: true }).xp;
+    const prestige = progressFromXp(day * 365).prestige;
+    expect(prestige).not.toBeNull();
+    expect(prestige!).toBeLessThan(60);
+    expect(PRESTIGE_STEP_XP).toBeLessThanOrEqual(3 * (xpRequiredForLevel(MAX_LEVEL) - xpRequiredForLevel(MAX_LEVEL - 1)));
+  });
+});
 
 describe("level curve", () => {
   it("starts at level 1 with 0 XP and increases strictly", () => {

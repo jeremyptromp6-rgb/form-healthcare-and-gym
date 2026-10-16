@@ -96,6 +96,8 @@ export interface UserSettings {
   coachKeepHistory: boolean;
   /** Off by default: meal photos are only sent to the external recognition provider after the user agrees. */
   foodScanConsent: boolean;
+  /** Off by default: the user appears on the leaderboard by their display name. Off: anonymous "Athlete #code". */
+  leaderboardOptIn: boolean;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   aiCoachConsent: false,
   coachKeepHistory: true,
   foodScanConsent: false,
+  leaderboardOptIn: false,
 };
 
 /**

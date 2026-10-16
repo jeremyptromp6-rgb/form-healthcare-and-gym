@@ -5,7 +5,7 @@ import { api, type ApiError, type FoodLogPatch, type GroceryAction, type NewFood
 import { useAuth } from './auth';
 import { localDateKey, setUserTimeZone } from './dates';
 import { useDebouncedValue } from './timing';
-import type { AnalyticsRange, Celebration, NotificationPreferences, CoachResponse, ProgressAnalytics, CoachTopic, CoachTurn, CompletionResult, HomeViewModel, MealType, Me, NutritionPreferences, PainLevel, ProfilePatch, UserSettings, WeightEntry, WorkoutSession, SessionSet } from './types';
+import type { AnalyticsRange, LeaderboardPeriod, Celebration, NotificationPreferences, CoachResponse, ProgressAnalytics, CoachTopic, CoachTurn, CompletionResult, HomeViewModel, MealType, Me, NutritionPreferences, PainLevel, ProfilePatch, UserSettings, WeightEntry, WorkoutSession, SessionSet } from './types';
 
 /**
  * Server state for the whole app. Screens read through these hooks, share one cache, and
@@ -42,6 +42,7 @@ export const qk = {
   xpEvents: ['xp-events'] as const,
   xpHistory: ['xp-events', 'history'] as const,
   standing: ['standing'] as const,
+  leaderboard: (period: LeaderboardPeriod) => ['leaderboard', period] as const,
   achievements: ['achievements'] as const,
   streaks: ['streaks'] as const,
   muscleRanks: (today: string) => ['muscle-ranks', today] as const,
@@ -115,6 +116,8 @@ export const useMuscleRanks = (today = localDateKey()) => useAuthedQuery(qk.musc
 /** "Top X% of FORM users". An older server answers 404: no retries, the screen shows a friendly note. */
 export const useStanding = () => useAuthedQuery(qk.standing, api.standing, { retry: 0, staleTime: 60_000 });
 /** Up to the 100 newest XP ledger entries — enough to draw the recent rank-over-time line. */
+/** Top 50 for a period plus your own place. An older server answers 404: no retries, the screen shows a friendly note. */
+export const useLeaderboard = (period: LeaderboardPeriod) => useAuthedQuery(qk.leaderboard(period), (t) => api.leaderboard(t, period, localDateKey()), { retry: 0, staleTime: 30_000 });
 export const useXpHistory = () => useAuthedQuery(qk.xpHistory, (t) => api.xpEvents(t, 100));
 export const useBodyQuest = () => useAuthedQuery(qk.bodyQuest, api.bodyQuest);
 export const useCelebrations = () => useAuthedQuery(qk.celebrations, api.celebrations);
@@ -602,6 +605,8 @@ export function useUpdateSettings() {
       // Coach switches and consents change which coach answers (and whether chat history exists).
       qc.invalidateQueries({ queryKey: ['coach'] });
       qc.invalidateQueries({ queryKey: ['analytics'] });
+      // Opting in or out changes how you are named on every board.
+      qc.invalidateQueries({ queryKey: ['leaderboard'] });
     },
   });
 }

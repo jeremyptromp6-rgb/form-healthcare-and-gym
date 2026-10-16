@@ -74,6 +74,14 @@ export function rankForLevel(level: number): RankName {
   return rank;
 }
 
+/**
+ * Endless prestige: at MAX_LEVEL progress never stops. Champion 1 starts at the max-level threshold and
+ * every further PRESTIGE_STEP_XP earns the next "Champion N". The last regular level spans ~1.5k XP; the
+ * step is about twice that, so a dedicated trainer (a few hundred XP a workout) gains one roughly every
+ * week or two, and even a year of one max-capped workout a day stays far below 100.
+ */
+export const PRESTIGE_STEP_XP = 3000;
+
 export interface ProgressSnapshot {
   totalXp: number;
   level: number;
@@ -82,6 +90,17 @@ export interface ProgressSnapshot {
   /** XP span of the current level; 0 at max level. */
   xpForNextLevel: number;
   fractionToNext: number;
+  /** Champion N once at max level (1 at the threshold, +1 per PRESTIGE_STEP_XP); null below it. */
+  prestige: number | null;
+  /** XP earned inside the current step: the level below max level, the prestige step at it. */
+  xpIntoStep: number;
+  /** XP span of the current step (the level's span below max level, PRESTIGE_STEP_XP at it). Never 0. */
+  xpForStep: number;
+}
+
+/** Display label for a rank: "Champion 3" for a prestige, otherwise the rank name. */
+export function rankLabel(rank: string, prestige: number | null | undefined): string {
+  return prestige != null && prestige > 0 ? `${rank} ${prestige}` : rank;
 }
 
 export function progressFromXp(totalXp: number): ProgressSnapshot {
@@ -91,14 +110,19 @@ export function progressFromXp(totalXp: number): ProgressSnapshot {
   while (level < MAX_LEVEL && xp >= xpRequiredForLevel(level + 1)) level++;
 
   const base = xpRequiredForLevel(level);
-  const span = level === MAX_LEVEL ? 0 : xpRequiredForLevel(level + 1) - base;
+  const atMax = level === MAX_LEVEL;
+  const span = atMax ? 0 : xpRequiredForLevel(level + 1) - base;
+  const above = xp - base;
   return {
     totalXp: xp,
     level,
     rank: rankForLevel(level),
-    xpIntoLevel: xp - base,
+    xpIntoLevel: above,
     xpForNextLevel: span,
-    fractionToNext: span === 0 ? 1 : (xp - base) / span,
+    fractionToNext: span === 0 ? 1 : above / span,
+    prestige: atMax ? 1 + Math.floor(above / PRESTIGE_STEP_XP) : null,
+    xpIntoStep: atMax ? above % PRESTIGE_STEP_XP : above,
+    xpForStep: atMax ? PRESTIGE_STEP_XP : span,
   };
 }
 

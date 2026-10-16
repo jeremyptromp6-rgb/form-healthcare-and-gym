@@ -121,3 +121,22 @@ describe('progression views', () => {
     expect(streakCaption(progress({ streak: { current: 0, longest: 0, activeToday: false, restDaysRemaining: 0 } }))).toBe('Log a workout to start a streak');
   });
 });
+
+describe('endless Champion levels in the level hero', () => {
+  const champion = (over: Partial<Progress> = {}) =>
+    progress({ level: 100, rank: 'Champion', xpIntoLevel: 5000, xpForNextLevel: 0, fractionToNext: 1, prestige: 2, xpIntoStep: 2000, xpForStep: 3000, ...over });
+
+  it('formats the line and shows Champion N with the bar to the next one', async () => {
+    expect(levelLine(champion())).toBe('CHAMPION 2 — 2,000 / 3,000 XP');
+    await render(<LevelHero progress={champion()} />);
+    expect(screen.getByText('Champion 2')).toBeTruthy();
+    expect(screen.getByText('1,000 XP to Champion 3')).toBeTruthy();
+    expect(screen.getByLabelText('Champion 2 rank')).toBeTruthy();
+    expect(screen.queryByText('Top rank reached')).toBeNull();
+  });
+
+  it('points a Champion below level 100 at Champion 1', async () => {
+    await render(<LevelHero progress={progress({ level: 70, rank: 'Champion', prestige: null })} />);
+    expect(screen.getByText('Champion 1 at level 100')).toBeTruthy();
+  });
+});
