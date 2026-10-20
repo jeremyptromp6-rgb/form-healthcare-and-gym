@@ -1,6 +1,7 @@
 import { fromMediaPipePose, type LiveFeedback, type PoseDetection } from '@form/domain';
 import { useCameraPermissions } from 'expo-camera';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useReducedMotion } from '@/lib/a11y';
 import { StanceTracker } from '@/lib/pose/stance';
 import { cameraErrorStatus } from '@/lib/pose/status';
@@ -20,6 +21,8 @@ const FIRST_FRAME_TIMEOUT_MS = 6000;
 export const CAMERA_START_TIMEOUT_MS = 15_000;
 /** Camera live but the pose model making no progress for this long (stalled download or start) → retry. */
 export const MODEL_LOAD_TIMEOUT_MS = 60_000;
+/** Frames stopped and did not come back this long → "the camera stopped" with Try again (never an endless wait). */
+export const INTERRUPTED_GIVEUP_MS = 15_000;
 
 /**
  * What an engine reports, in one shape: the WebView engine page posts these as JSON and the native
@@ -45,7 +48,7 @@ export interface PoseFeedIo {
  */
 export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
   const { active, session, retryToken, onCamera, onPose, onReadout, onDiag } = p;
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const callbacks = useRef({ onCamera, onPose, onReadout, onDiag });
   useEffect(() => {
     callbacks.current = { onCamera, onPose, onReadout, onDiag };
@@ -54,7 +57,42 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
   useEffect(() => {
     ioRef.current = io;
   });
-  const live = useRef({ camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, lastReadout: 0, frames: 0, fpsSince: 0, fps: 0, stallMs: STALL_MS, cue: null as LiveFeedback | null, backend: null as 'GPU' | 'CPU' | null });
+  const live = useRef({
+    camera: false,
+    errored: false,
+    ready: false,
+    cameraAt: 0,
+    progressAt: 0,
+    lastFrameAt: 0,
+    interrupted: false,
+    interruptedAt: 0,
+    stalledSent: false,
+    lastReadout: 0,
+    frames: 0,
+    fpsSince: 0,
+    fps: 0,
+    stallMs: STALL_MS,
+    cue: null as LiveFeedback | null,
+    backend: null as 'GPU' | 'CPU' | null,
+  });
+
+  // The camera is paused while the app is in the background and starts fresh when it comes back (the
+  // model is already on the phone, so nothing downloads again). A WebView camera track does not survive
+  // a background trip, and a native one is released by the system anyway, so a clean restart is the
+  // one path that works the same on both engines.
+  const [appActive, setAppActive] = useState(AppState.currentState !== 'background');
+  const getPermissionRef = useRef(getPermission);
+  useEffect(() => {
+    getPermissionRef.current = getPermission;
+  });
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      setAppActive(state !== 'background');
+      // Back from the phone's settings: pick up a permission granted there.
+      if (state === 'active') getPermissionRef.current?.().catch(() => undefined);
+    });
+    return () => sub.remove();
+  }, []);
 
   // What the skeleton shows (tone, tracked side, emphasised joints) is judged here, once per camera
   // session, and handed to the engine through `io.pushSkeleton`.
@@ -77,18 +115,36 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
       return;
     }
     callbacks.current.onCamera({ kind: 'requesting' });
-    requestPermission().then((r) => {
-      if (!r.granted) callbacks.current.onCamera({ kind: 'denied', canAskAgain: r.canAskAgain });
-    });
+    requestPermission()
+      .then((r) => {
+        if (!r.granted) callbacks.current.onCamera({ kind: 'denied', canAskAgain: r.canAskAgain });
+      })
+      // A request that fails outright must not leave "Starting your camera…" spinning for ever.
+      .catch(() => callbacks.current.onCamera({ kind: 'denied', canAskAgain: true }));
   }, [active, known, granted, canAskAgain, retryToken, requestPermission]);
 
-  const running = active && granted;
+  // Permission granted while the denied message was up (in the phone's settings): start over from "starting".
+  const wasGranted = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (granted && wasGranted.current === false) callbacks.current.onCamera({ kind: 'requesting' });
+    wasGranted.current = granted;
+  }, [granted]);
+
+  const running = active && granted && appActive;
+
+  // Sent to the background while it would have run: the screen goes back to "starting" so that, on return,
+  // it shows a fresh start instead of a stale "live".
+  useEffect(() => {
+    if (appActive || !active || !granted) return;
+    callbacks.current.onCamera({ kind: 'requesting' });
+    callbacks.current.onPose({ kind: 'idle' });
+  }, [appActive, active, granted]);
 
   // ---- watchdog: a stalled or never-started stream is reported, and stale state is dropped ----
   useEffect(() => {
     if (!running) return;
     const s = live.current;
-    Object.assign(s, { camera: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, frames: 0, fpsSince: Date.now(), fps: 0, stallMs: STALL_MS, cue: null, backend: null });
+    Object.assign(s, { camera: false, errored: false, ready: false, cameraAt: 0, progressAt: 0, lastFrameAt: 0, interrupted: false, interruptedAt: 0, stalledSent: false, frames: 0, fpsSince: Date.now(), fps: 0, stallMs: STALL_MS, cue: null, backend: null });
     skel.reset();
     stance.reset();
     session.interrupt();
@@ -98,7 +154,8 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
       const now = Date.now();
       // Start-up never spins forever: a camera that doesn't open, or a model that doesn't load, ends
       // in a clear message with "Try again".
-      if (!gaveUp && !s.camera && now - startedAt > CAMERA_START_TIMEOUT_MS) {
+      // (A camera that already said why it can't open — busy, blocked — keeps that message.)
+      if (!gaveUp && !s.camera && !s.errored && now - startedAt > CAMERA_START_TIMEOUT_MS) {
         gaveUp = true;
         callbacks.current.onCamera({ kind: 'unavailable', reason: 'start_timeout' });
         return;
@@ -109,11 +166,20 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
         callbacks.current.onPose({ kind: 'failed', message: 'Camera coaching is taking too long to load. Check your connection and try again.', retryable: true });
         return;
       }
+      // Frames stopped and never came back: say so, with Try again, instead of waiting for ever. (If they
+      // do come back after all, the next frame clears it.)
+      if (s.interrupted && !s.stalledSent && now - s.interruptedAt > INTERRUPTED_GIVEUP_MS) {
+        s.stalledSent = true;
+        callbacks.current.onCamera({ kind: 'unavailable', reason: 'stalled' });
+        return;
+      }
       if (!s.camera || !s.ready || s.interrupted) return;
       const neverStarted = s.lastFrameAt === 0 && now - s.cameraAt > FIRST_FRAME_TIMEOUT_MS;
       const stalled = s.lastFrameAt > 0 && now - s.lastFrameAt > s.stallMs;
       if (neverStarted || stalled) {
         s.interrupted = true;
+        s.interruptedAt = now;
+        s.stalledSent = false;
         session.interrupt();
         callbacks.current.onReadout(null);
         callbacks.current.onCamera({ kind: 'interrupted' });
@@ -134,6 +200,7 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
       if (m.t === 'camera') {
         if (m.kind === 'live') {
           s.camera = true;
+          s.errored = false;
           s.cameraAt = Date.now();
           cb.onCamera({ kind: 'live' });
           push(skel.current());
@@ -141,7 +208,10 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
           s.camera = false;
           cb.onReadout(null);
           cb.onCamera({ kind: 'unavailable', reason: 'ended' });
-        } else if (m.kind === 'error') cb.onCamera(cameraErrorStatus({ name: m.name ?? '' }));
+        } else if (m.kind === 'error') {
+          s.errored = true;
+          cb.onCamera(cameraErrorStatus({ name: m.name ?? '' }));
+        }
         return;
       }
       if (m.t === 'pose') {
@@ -164,7 +234,7 @@ export function usePoseFeedCore(p: PoseCameraFeedProps, io: PoseFeedIo) {
           cb.onPose(
             m.offline
               ? { kind: 'failed', message: 'Camera coaching needs an internet connection the first time it loads.', retryable: true }
-              : { kind: 'failed', message: "Camera coaching couldn't load.", retryable: true },
+              : { kind: 'failed', message: "Camera coaching couldn't finish loading. Check your connection and try again.", retryable: true },
           );
         return;
       }

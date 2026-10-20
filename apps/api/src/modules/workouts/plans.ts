@@ -4,6 +4,8 @@ import {
   addDays,
   daysBetween,
   goalOn,
+  progressFromXp,
+  rankTierFor,
   ruleBasedGenerator,
   weakMuscleFocus,
   type AdaptiveInput,
@@ -19,6 +21,7 @@ import type { UserClock } from "../../shared/userClock";
 import { loadGoalHistory, loadProfile } from "../users/repo";
 import { can } from "../billing/entitlements";
 import { muscleRanks } from "../analytics/muscleRanks";
+import { activeXp } from "../progression/service";
 
 /** Free: the rule-based generator. */
 export const activeGenerator: WorkoutGenerator = ruleBasedGenerator;
@@ -134,6 +137,8 @@ export function generationInput(ctx: AppContext, userId: string, clock: UserCloc
     daysSinceLastWorkout: last ? daysBetween(last, clock.today) : null,
     recentSeriousPain: recent.some((r) => r.pain === "serious" && r.d >= addDays(clock.today, -2)),
     previous: previousPerformance(db, userId),
+    // Rank scales difficulty a little (prestige levels count as Champion); no XP yet = Rookie = baseline.
+    rankTier: rankTierFor(progressFromXp(activeXp(db, userId)).rank),
   };
 }
 

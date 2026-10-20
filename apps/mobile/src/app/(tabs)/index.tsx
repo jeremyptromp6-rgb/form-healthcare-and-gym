@@ -5,6 +5,7 @@ import { ProWelcomeHost } from '@/components/pro/ProWelcome';
 import { ErrorState, Screen, StateView } from '@/components/ui';
 import { uuid } from '@/lib/dates';
 import { useAddWater, useCoachInsight, useHome, useRefetchOnFocus, useUndoWater } from '@/lib/queries';
+import { useSteps } from '@/lib/useSteps';
 
 const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak' | '/progress/rank'> = {
   train: '/train',
@@ -24,6 +25,7 @@ export default function Home() {
   const coachOn = !!home.data && home.data.coach.mode !== 'unavailable';
   const coach = useCoachInsight('home', coachOn);
   useRefetchOnFocus(home.refetch);
+  const steps = useSteps();
 
   if (!home.data) {
     return (
@@ -53,6 +55,7 @@ export default function Home() {
         coach={{ response: coach.data?.insight ?? null, loading: coach.isPending && coach.fetchStatus !== 'idle', failed: coach.isError }}
         onOpenCoach={() => router.push('/coach' as Href)}
         onOpenRoute={(route) => router.push(route as Href)}
+        steps={steps}
       />
       {/* The one-time FORM Pro welcome, once Home is up and nothing else (a celebration, a workout) has the floor. */}
       <ProWelcomeHost />

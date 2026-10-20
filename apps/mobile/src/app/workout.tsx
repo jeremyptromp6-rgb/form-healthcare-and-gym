@@ -10,8 +10,10 @@ import { localDateKey, uuid } from '@/lib/dates';
 import { usePostWorkoutAd } from '@/lib/ads/usePostWorkoutAd';
 import type { ApiError } from '@/lib/api';
 import { useScreenAwake } from '@/lib/keepAwake';
+import { usePrefetchPoseModels } from '@/lib/pose/prefetch';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useSessionNotes, useStartRest, useUpdateSet } from '@/lib/queries';
+import { onWorkoutCompleted } from '@/lib/reminders';
 import type { CompletionResult, PainLevel, WorkoutSession } from '@/lib/types';
 import { useUnits } from '@/lib/units';
 import { currentExerciseIndex, exerciseDone, nextSetDefaults } from '@/lib/workoutSession';
@@ -20,6 +22,8 @@ import { colors, MAX_CONTENT_WIDTH, space } from '@/theme/tokens';
 /** Full-screen live workout. All state is on the server, so leaving and coming back resumes exactly here. */
 export default function WorkoutScreen() {
   useScreenAwake();
+  // Get the camera coach's model onto the phone while the workout is under way, so the camera opens fast.
+  usePrefetchPoseModels();
   const active = useActiveSession();
   const [result, setResult] = useState<CompletionResult | null>(null);
   useMarkWorkoutRecordsSeen(result?.workout.id ?? null);
@@ -49,7 +53,16 @@ export default function WorkoutScreen() {
       </Shell>
     );
   }
-  return <LiveWorkout session={active.data} onCompleted={setResult} />;
+  return (
+    <LiveWorkout
+      session={active.data}
+      onCompleted={(r) => {
+        // Trained today: no "time to train" or streak nudge tonight.
+        void onWorkoutCompleted();
+        setResult(r);
+      }}
+    />
+  );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

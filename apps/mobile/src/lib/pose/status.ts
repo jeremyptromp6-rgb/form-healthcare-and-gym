@@ -12,7 +12,7 @@ export type CameraStatus =
   | { kind: 'off' }
   | { kind: 'requesting' }
   | { kind: 'denied'; canAskAgain: boolean }
-  | { kind: 'unavailable'; reason: 'no_camera' | 'in_use' | 'insecure' | 'unsupported' | 'ended' | 'start_timeout' }
+  | { kind: 'unavailable'; reason: 'no_camera' | 'in_use' | 'insecure' | 'unsupported' | 'ended' | 'start_timeout' | 'stalled' }
   | { kind: 'live' }
   /** Frames stopped arriving (app backgrounded, stream stalled). */
   | { kind: 'interrupted' };
@@ -63,9 +63,15 @@ export interface PoseDiag {
 
 export type CameraAction = 'start' | 'retry' | 'settings';
 
+/** The short "get into position" countdown before counting starts: 3, 2, 1, then a brief "ready". */
+export type GetReadyStep = 3 | 2 | 1 | 'ready';
+
 export interface CameraScreenModel {
-  /** Blocks the feed area (nothing useful to show behind it). */
-  overlay: { kind: StateKind; title: string; message: string; action: CameraAction | null; actionLabel: string | null } | null;
+  /**
+   * Blocks the feed area (nothing useful to show behind it). `progress` (0..1, only while a download
+   * reports it) and `tip` (the setup tip, so the wait is useful) belong to the first-run loading card.
+   */
+  overlay: { kind: StateKind; title: string; message: string; action: CameraAction | null; actionLabel: string | null; progress?: number | null; tip?: boolean } | null;
   /** One line of guidance under the feed; rep cues carry a headline ("CORRECT FORM"). */
   feedback: { message: string; tone: 'ready' | 'adjust' | 'info'; headline?: string } | null;
 }
@@ -81,17 +87,40 @@ const UNAVAILABLE: Record<Extract<CameraStatus, { kind: 'unavailable' }>['reason
   unsupported: { title: "Camera isn't supported here", message: `This browser or device can't provide a camera feed. ${MANUAL}`, retry: false },
   ended: { title: 'Camera disconnected', message: 'The camera stopped. Reconnect it and try again.', retry: true },
   start_timeout: { title: "The camera didn't start", message: `Try again. If it keeps happening, close other apps that use the camera and reopen FORM. ${MANUAL}`, retry: true },
+  stalled: { title: 'The camera stopped', message: `Video stopped coming in. Try again. If it keeps happening, close other apps that use the camera. ${MANUAL}`, retry: true },
 };
 
-/** Start-up in plain words, with the download's progress when there is one. */
-export function loadingMessage(pose: PoseStatus): string {
-  if (pose.kind !== 'loading' || !pose.stage) return 'Getting your camera coach ready…';
-  if (pose.stage === 'starting') return 'Almost ready — starting your camera coach…';
-  const pct = typeof pose.pct === 'number' ? ` — ${Math.max(0, Math.min(99, Math.round(pose.pct)))}%` : '';
-  return `Downloading your camera coach${pct}. This happens once; next time it starts quickly.`;
+/** What to do while waiting: the same advice the exercise's setup gives, in one line. */
+export const WAITING_TIP = 'While you wait: stand side-on to the phone, with your whole body in view, 2–3 m away, in good light.';
+
+/** True while the model is being downloaded (and not yet fully on disk). */
+function isDownloading(pose: PoseStatus): boolean {
+  return pose.kind === 'loading' && (pose.stage === 'model' || pose.stage === 'runtime') && !(typeof pose.pct === 'number' && pose.pct >= 100);
 }
 
-export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readout: LiveReadout | null, paused: boolean): CameraScreenModel {
+/** Start-up in plain words. The first run downloads the model once; later starts skip straight to "starting". */
+export function loadingMessage(pose: PoseStatus): string {
+  if (pose.kind === 'loading' && isDownloading(pose)) return `First time only — about ${pose.stage === 'runtime' ? 20 : 10} MB. After this it starts in seconds.`;
+  if (pose.kind === 'loading' && pose.stage) return 'Starting your camera coach…';
+  return 'Just a moment…';
+}
+
+/** The loading card: real download progress when there is some, and the setup tip so the wait is useful. */
+function loadingOverlay(pose: PoseStatus): NonNullable<CameraScreenModel['overlay']> {
+  const starting = pose.kind === 'loading' && !!pose.stage && !isDownloading(pose);
+  const pct = pose.kind === 'loading' && isDownloading(pose) && typeof pose.pct === 'number' ? Math.max(0, Math.min(99, Math.round(pose.pct))) : null;
+  return {
+    kind: 'loading',
+    title: starting ? 'Almost ready' : 'Getting your camera coach ready',
+    message: loadingMessage(pose),
+    action: null,
+    actionLabel: null,
+    progress: pct === null ? null : pct / 100,
+    tip: true,
+  };
+}
+
+export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readout: LiveReadout | null, paused: boolean, getReady: GetReadyStep | null = null): CameraScreenModel {
   switch (camera.kind) {
     case 'off':
       return {
@@ -105,6 +134,8 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
         feedback: null,
       };
     case 'requesting':
+      // The model downloads while the camera opens: once there is progress to show, show it.
+      if (pose.kind === 'loading' && pose.stage) return { overlay: loadingOverlay(pose), feedback: null };
       return { overlay: { kind: 'loading', title: '', message: '', action: null, actionLabel: null }, feedback: { message: 'Starting your camera — if your phone asks, tap Allow.', tone: 'info' } };
     case 'denied':
       return {
@@ -137,7 +168,9 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
   if (pose.kind === 'unsupported') return { overlay: null, feedback: { message: `${pose.message} ${MANUAL}`, tone: 'info' } };
   if (paused) return { overlay: null, feedback: { message: 'Paused — resume when you’re ready.', tone: 'info' } };
   if (camera.kind === 'interrupted') return { overlay: null, feedback: { message: 'Waiting for the camera to come back…', tone: 'adjust' } };
-  if (pose.kind !== 'ready') return { overlay: null, feedback: { message: loadingMessage(pose), tone: 'info' } };
+  if (pose.kind !== 'ready') return { overlay: loadingOverlay(pose), feedback: null };
+  if (getReady === 'ready') return { overlay: null, feedback: { message: 'Ready — start when you like.', tone: 'ready' } };
+  if (getReady !== null) return { overlay: null, feedback: { headline: 'GET INTO POSITION', message: 'Side-on, whole body in view. Counting starts in a moment.', tone: 'info' } };
   if (!readout) return { overlay: null, feedback: { message: 'Looking for you…', tone: 'info' } };
   // Priority: can't see you properly > set is full > facing the camera > the latest rep cue > where you are in the movement.
   if (!readout.framing.trackable) return { overlay: null, feedback: { message: readout.framing.message, tone: 'adjust' } };

@@ -1,5 +1,7 @@
 package app.form.posecamera
 
+import app.form.posecamera.engine.ModelStore
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -10,6 +12,30 @@ class FormPoseCameraModule : Module() {
         // Gives requireOptionalNativeModule('FormPoseCamera') something to return, so JS can
         // tell "native pose camera present" from "absent" without touching the view.
         Constants("apiVersion" to 1)
+
+        // Downloads the pose models ahead of the first camera open (no UI). Resolves true when the full
+        // model is on disk, false on any problem; it never rejects. Runs on its own thread because a
+        // download blocks. An app build without this function simply never prefetches (JS checks).
+        AsyncFunction("prefetchModels") { fullUrl: String, liteUrl: String?, promise: Promise ->
+            val ctx = appContext.reactContext
+            if (ctx == null) {
+                promise.resolve(false)
+            } else {
+                val worker = Thread(
+                    {
+                        val ok = try {
+                            ModelStore(ctx).prefetch(fullUrl, liteUrl)
+                        } catch (ignored: Throwable) {
+                            false
+                        }
+                        promise.resolve(ok)
+                    },
+                    "form-pose-prefetch",
+                )
+                worker.isDaemon = true
+                worker.start()
+            }
+        }
 
         View(FormPoseCameraView::class) {
             Events("onCamera", "onPose", "onFrame", "onDiag")

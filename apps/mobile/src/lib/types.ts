@@ -54,7 +54,7 @@ export interface Progress {
 
 export interface XpLedgerEntry {
   id: number;
-  source: 'workout' | 'nutrition_day' | 'quest' | 'achievement' | 'decay' | 'reset' | 'correction';
+  source: 'workout' | 'nutrition_day' | 'quest' | 'achievement' | 'decay' | 'reset' | 'correction' | 'steps';
   reference: string;
   kind: 'award' | 'adjustment' | 'decay' | 'reset' | 'correction';
   xp: number;
@@ -1009,4 +1009,18 @@ export interface Leaderboard {
   totalRanked: number;
   entries: LeaderboardEntry[];
   you: LeaderboardYou;
+}
+
+/** POST /steps: the day as the server now holds it (its highest reported total) and the XP that earns. */
+export interface StepsPosted {
+  localDate: string;
+  steps: number;
+  xp: number;
+  goal: number;
+}
+
+/** GET /steps: the last N days, oldest first, zero-filled. */
+export interface StepsHistory {
+  goal: number;
+  days: { date: string; steps: number; xp: number }[];
 }

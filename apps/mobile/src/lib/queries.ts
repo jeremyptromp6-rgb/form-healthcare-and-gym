@@ -45,6 +45,7 @@ export const qk = {
   leaderboard: (period: LeaderboardPeriod) => ['leaderboard', period] as const,
   achievements: ['achievements'] as const,
   streaks: ['streaks'] as const,
+  steps: ['steps'] as const,
   muscleRanks: (today: string) => ['muscle-ranks', today] as const,
   bodyQuest: ['body-quest'] as const,
   celebrations: ['celebrations'] as const,
@@ -465,6 +466,9 @@ export function useUndoWater() {
     },
   });
 }
+
+/** The last seven days of step totals as the server holds them (only fetched once steps are connected). */
+export const useStepsHistory = (enabled: boolean) => useAuthedQuery(qk.steps, (t) => api.steps(t, 7), { enabled, staleTime: 60_000 });
 
 // ---- Training ---------------------------------------------------------------------------
 

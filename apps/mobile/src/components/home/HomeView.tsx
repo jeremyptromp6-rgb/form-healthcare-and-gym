@@ -6,13 +6,14 @@ import { Buddy } from '@/components/art/Buddy';
 import { ExerciseThumb } from '@/components/art/ExerciseArt';
 import { setsPerMuscle } from '@/lib/muscles';
 import { RankEmblem as RankBadge } from '@/components/art/RankEmblem';
-import { AppText, Badge, Button, Card, Divider, ExerciseList, FuelSummary, heroInk, ICON_BUBBLE, IconBubble, InlineMessage, PhotoHero, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
+import { AppText, Badge, Button, Card, Divider, ExerciseList, FuelSummary, heroInk, ICON_BUBBLE, IconBubble, InlineMessage, PhotoHero, ProgressBar, ProgressRing, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
 import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
 import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
 import { accuracyLine, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
 import { heroPhoto } from '@/lib/heroPhotos';
 import { rankLabel, stepProgress } from '@/lib/prestige';
+import type { StepsCardState } from '@/lib/useSteps';
 import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress } from '@/lib/types';
 import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { colors, radius, space } from '@/theme/tokens';
@@ -39,6 +40,8 @@ export interface HomeViewProps {
   coach?: { response: CoachResponse | null; loading: boolean; failed: boolean };
   onOpenCoach?: () => void;
   onOpenRoute?: (route: string) => void;
+  /** Today's steps from Health Connect (Android). Hidden unless the device can offer them. */
+  steps?: StepsCardState;
 }
 
 const SECTION_LABEL: Record<HomeSection, string> = {
@@ -56,7 +59,7 @@ const SECTION_LABEL: Record<HomeSection, string> = {
  * clear action, three numbers that matter, then everything else, quieter. A pure view over the
  * server's Home view model — every number comes from `vm`, every action routes somewhere real.
  */
-export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute, units }: HomeViewProps) {
+export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute, units, steps }: HomeViewProps) {
   const failed = (s: HomeSection) => vm.errors.includes(s);
   const date = new Date(`${vm.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -97,6 +100,8 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
         </PhotoHero>
       }>
       {vm.nutrition || vm.water || vm.progression ? <StatTiles vm={vm} onNavigate={onNavigate} /> : null}
+
+      {steps && steps.status !== 'unavailable' && steps.status !== 'checking' ? <StepsCard steps={steps} /> : null}
 
 
       {refreshFailed ? (
@@ -426,6 +431,66 @@ function StatTile({
   return (
     <View accessible accessibilityLabel={accessibilityLabel} style={styles.tile}>
       {body}
+    </View>
+  );
+}
+
+/** Today's steps toward a goal. Not connected yet, it explains what it reads and offers the one button that asks. */
+function StepsCard({ steps }: { steps: StepsCardState }) {
+  const ready = steps.status === 'ready';
+  const count = steps.today ?? 0;
+  const intro = 'Show the steps from your phone and watch, counted once, and earn a little XP for them. FORM only reads your step count.';
+  return (
+    <View style={{ gap: space.md }}>
+      <SectionHeader title="Steps" />
+      <Card style={{ gap: space.md }}>
+        {ready ? (
+          <>
+            <Row gap={space.lg}>
+              <ProgressRing value={count / steps.goal} size={76} stroke={8} color={colors.primary} label="Steps of daily goal">
+                <Ionicons name="walk" size={24} color={colors.primary} />
+              </ProgressRing>
+              <View style={{ flex: 1, gap: 2 }} accessible accessibilityLabel={`Steps today: ${steps.today === null ? 'not available' : `${count.toLocaleString()} of ${steps.goal.toLocaleString()}`}`}>
+                <AppText variant="stat">{steps.today === null ? '—' : count.toLocaleString()}</AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {`of ${steps.goal.toLocaleString()} steps`}
+                </AppText>
+                <AppText variant="caption" color={colors.textFaint}>
+                  {count >= steps.goal ? 'Goal reached. ' : ''}
+                  {`+${steps.xpToday} XP today (1 per 1,000, up to 10)`}
+                </AppText>
+              </View>
+            </Row>
+            {steps.weekAverage !== null ? (
+              <AppText variant="caption" color={colors.textMuted}>
+                {`7-day average: ${steps.weekAverage.toLocaleString()} steps`}
+              </AppText>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Row gap={space.md}>
+              <IconBubble icon="walk" tint={colors.primary} size={ICON_BUBBLE.lg} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <AppText variant="heading" header>
+                  Count your steps
+                </AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {steps.status === 'needs_install' ? "Steps come from the Health Connect app, which isn't on this phone yet." : steps.status === 'denied' ? "FORM doesn't have access to your steps. You can switch it on in Health Connect." : intro}
+                </AppText>
+              </View>
+            </Row>
+            {steps.status === 'needs_install' ? <Button label="Get Health Connect" icon="logo-google-playstore" onPress={steps.onInstall} /> : null}
+            {steps.status === 'needs_permission' ? <Button label="Connect steps" icon="walk" onPress={steps.onConnect} loading={steps.busy} /> : null}
+            {steps.status === 'denied' ? (
+              <Row gap={space.sm}>
+                <Button label="Open Health Connect" variant="secondary" onPress={steps.onOpenSettings} style={{ flex: 1 }} />
+                <Button label="Try again" variant="secondary" onPress={steps.onConnect} loading={steps.busy} style={{ flex: 1 }} />
+              </Row>
+            ) : null}
+          </>
+        )}
+      </Card>
     </View>
   );
 }

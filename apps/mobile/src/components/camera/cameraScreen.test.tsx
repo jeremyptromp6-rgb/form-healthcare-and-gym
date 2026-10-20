@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import CameraScreen from '@/app/camera';
+import { READY_HOLD_MS } from '@/lib/pose/useGetReady';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
 
 // The camera route: the set it logs uses the load from the workout screen (A2-04), practice mode never
@@ -210,6 +211,25 @@ describe('camera screen in practice mode (?practice=1)', () => {
     mockSession = null;
     await renderCamera();
     expect(screen.getByText('Practice — nothing is logged')).toBeTruthy();
+  });
+});
+
+describe('camera screen get-ready countdown', () => {
+  it('with reduce motion on there are no numbers: a brief "Ready", once, then the normal screen', async () => {
+    jest.useFakeTimers();
+    try {
+      await renderCamera();
+      expect(screen.getByTestId('get-ready')).toBeTruthy();
+      expect(screen.getByText('Ready')).toBeTruthy();
+      expect(screen.queryByText('Get into position')).toBeNull();
+      await act(async () => jest.advanceTimersByTime(READY_HOLD_MS + 100));
+      expect(screen.queryByTestId('get-ready')).toBeNull();
+      await act(async () => jest.advanceTimersByTime(10_000));
+      expect(screen.queryByTestId('get-ready')).toBeNull();
+      expect(screen.getByRole('button', { name: /^Log set · 5 verified reps/ })).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

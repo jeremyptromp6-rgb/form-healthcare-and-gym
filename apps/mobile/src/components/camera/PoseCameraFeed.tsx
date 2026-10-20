@@ -12,7 +12,7 @@ import { usePoseFeedCore, type EngineMessage } from './poseFeedCore';
 import { skeletonInjection } from './skeletonState';
 import type { SkeletonState } from './skeletonTypes';
 
-export { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS } from './poseFeedCore';
+export { CAMERA_START_TIMEOUT_MS, INTERRUPTED_GIVEUP_MS, MODEL_LOAD_TIMEOUT_MS } from './poseFeedCore';
 
 /**
  * Phone camera + on-device pose. Android builds that include the native pose camera use it
@@ -87,9 +87,12 @@ function WebViewPoseFeed(p: PoseCameraFeedProps) {
     callbacks.current = { onCamera };
   });
   const onEngineError = useCallback(() => callbacks.current.onCamera({ kind: 'unavailable', reason: 'unsupported' }), []);
+  // The system can kill the page's renderer when the phone runs low on memory, which leaves a blank view:
+  // that ends in "the camera stopped" with Try again, never a blank screen.
+  const onEngineGone = useCallback(() => callbacks.current.onCamera({ kind: 'unavailable', reason: 'stalled' }), []);
 
   if (!running) return null;
-  return <EngineView key={retryToken} html={html} webRef={web} onMessage={stableOnMessage} onError={onEngineError} />;
+  return <EngineView key={retryToken} html={html} webRef={web} onMessage={stableOnMessage} onError={onEngineError} onGone={onEngineGone} />;
 }
 
 const ENGINE_BASE_URL = 'https://form.app/';
@@ -100,11 +103,13 @@ const EngineView = memo(function EngineView({
   webRef,
   onMessage,
   onError,
+  onGone,
 }: {
   html: string;
   webRef: RefObject<WebView | null>;
   onMessage: (e: WebViewMessageEvent) => void;
   onError: () => void;
+  onGone: () => void;
 }) {
   const source = useMemo(() => ({ html, baseUrl: ENGINE_BASE_URL }), [html]);
   return (
@@ -120,6 +125,7 @@ const EngineView = memo(function EngineView({
       allowsInlineMediaPlayback
       mediaCapturePermissionGrantType="grant"
       onError={onError}
+      onRenderProcessGone={onGone}
       accessibilityLabel="Live camera preview"
     />
   );

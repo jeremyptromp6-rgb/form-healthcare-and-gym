@@ -10,7 +10,7 @@
  *   the latest reset; the history before it is kept untouched.
  */
 
-export const XP_SOURCES = ["workout", "nutrition_day", "quest", "achievement", "decay", "reset", "correction"] as const;
+export const XP_SOURCES = ["workout", "nutrition_day", "quest", "achievement", "decay", "reset", "correction", "steps"] as const;
 export type XpSource = (typeof XP_SOURCES)[number];
 
 export const XP_KINDS = ["award", "adjustment", "decay", "reset", "correction"] as const;

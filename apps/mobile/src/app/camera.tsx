@@ -6,9 +6,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LiveCameraView } from '@/components/camera/LiveCameraView';
 import { PoseCameraFeed } from '@/components/camera/PoseCameraFeed';
 import { StateView } from '@/components/ui';
+import { useReducedMotion } from '@/lib/a11y';
 import { config } from '@/lib/config';
 import { nativePoseAvailable } from '@/lib/pose/nativePose';
 import { cameraScreenModel, type CameraAction, type CameraStatus, type LiveReadout, type PoseDiag, type PoseStatus } from '@/lib/pose/status';
+import { useGetReady } from '@/lib/pose/useGetReady';
 import { uuid } from '@/lib/dates';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { useActiveSession, useLogSet, useSessionAction } from '@/lib/queries';
@@ -69,6 +71,12 @@ export default function CameraScreen() {
   // A failed save keeps its client id, so retrying can never create a second copy of the set.
   const [pendingSetId, setPendingSetId] = useState<string | null>(null);
 
+  const paused = localPaused || (inWorkout !== null && workout?.status === 'paused');
+  // The first time the coach is ready this visit: a short "get into position" countdown, then counting starts
+  // from zero (whatever the camera saw while the numbers ran is dropped). A restart later does not repeat it.
+  const reduceMotion = useReducedMotion();
+  const getReady = useGetReady(started && camera.kind === 'live' && pose.kind === 'ready' && !paused, reduceMotion, () => session?.startSet());
+
   const close = () => (router.canGoBack() ? router.back() : router.replace('/train' as Href));
 
   if (!exercise || !session) {
@@ -85,8 +93,7 @@ export default function CameraScreen() {
     );
   }
 
-  const paused = localPaused || (inWorkout !== null && workout?.status === 'paused');
-  const model = cameraScreenModel(started ? camera : { kind: 'off' }, pose, readout, paused);
+  const model = cameraScreenModel(started ? camera : { kind: 'off' }, pose, readout, paused, getReady);
 
   const onAction = (a: CameraAction) => {
     if (a === 'start') {
@@ -162,6 +169,7 @@ export default function CameraScreen() {
       model={model}
       readout={readout}
       paused={paused}
+      getReady={getReady}
       // The native camera fills the video area; the WebView and web feeds are boxed to the video's aspect.
       // Until the feed reports its engine, assume the one it will start with.
       feedFit={(engine ?? (nativePoseAvailable() ? 'native' : 'webview')) === 'native' ? 'fill' : 'aspect'}

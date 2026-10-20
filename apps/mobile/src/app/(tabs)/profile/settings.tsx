@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Linking, Platform, View } from 'react-native';
 import { AppText, Badge, Button, Card, GradientCard, ErrorState, Field, InlineMessage, ListRow, Row, Screen, SectionHeader, Segmented, StateView, Toggle } from '@/components/ui';
 import { AppearancePicker } from '@/components/settings/AppearancePicker';
+import { RemindersSettings } from '@/components/settings/RemindersSettings';
 import { useAuth } from '@/lib/auth';
 import { useCoachStatus, useEntitlements, useLegal, useMe, useUpdateSettings } from '@/lib/queries';
 import { deviceTimeZone } from '@/lib/timezone';
@@ -35,6 +36,8 @@ export default function SettingsScreen() {
           <Card style={{ paddingVertical: space.xs }}>
             <ListRow title="Notification preferences" subtitle="What FORM may remind you about — separate from your device's permission" icon="notifications-outline" onPress={() => router.push('/profile/notifications' as Href)} />
           </Card>
+
+          <RemindersSettings />
 
           <CoachSettings me={me.data} />
           <CameraPrivacy />

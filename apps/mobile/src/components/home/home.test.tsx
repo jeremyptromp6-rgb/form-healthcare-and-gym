@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { accuracyLine, dailySummary, formatLitres, fuelLine, updatedAgo } from '@/lib/homeFormat';
 import type { HomeViewModel } from '@/lib/types';
+import type { StepsCardState } from '@/lib/useSteps';
 import { HomeView } from './HomeView';
 
 const NOW = new Date('2026-09-27T12:00:00Z');
@@ -298,5 +299,60 @@ describe('Home last session in display units', () => {
     await renderHome(vm(), { units: 'imperial' });
     expect(screen.getByText(/Squat: 3 sets, 24 reps · top 132.3 lb/)).toBeTruthy();
     expect(screen.queryByText(/ kg/)).toBeNull();
+  });
+});
+
+describe('Steps card', () => {
+  const steps = (over: Partial<StepsCardState> = {}): StepsCardState => ({
+    status: 'ready',
+    today: 6500,
+    goal: 8000,
+    xpToday: 6,
+    weekAverage: 7100,
+    busy: false,
+    onConnect: jest.fn(),
+    onInstall: jest.fn(),
+    onOpenSettings: jest.fn(),
+    ...over,
+  });
+
+  it('shows today against the goal, the XP it is worth and the week average', async () => {
+    await renderHome(vm(), { steps: steps() });
+    expect(screen.getByText('Steps')).toBeOnTheScreen();
+    expect(screen.getByText('6,500')).toBeOnTheScreen();
+    expect(screen.getByText('of 8,000 steps')).toBeOnTheScreen();
+    expect(screen.getByText('+6 XP today (1 per 1,000, up to 10)')).toBeOnTheScreen();
+    expect(screen.getByText('7-day average: 7,100 steps')).toBeOnTheScreen();
+    expect(screen.getByLabelText('Steps of daily goal').props.accessibilityValue).toMatchObject({ now: 81 });
+    expect(screen.queryByRole('button', { name: 'Connect steps' })).toBeNull();
+  });
+
+  it('offers one Connect steps button until steps are connected', async () => {
+    const s = steps({ status: 'needs_permission', today: null });
+    await renderHome(vm(), { steps: s });
+    await fireEvent.press(screen.getByRole('button', { name: 'Connect steps' }));
+    expect(s.onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('links to Google Play when Health Connect is missing', async () => {
+    const s = steps({ status: 'needs_install', today: null });
+    await renderHome(vm(), { steps: s });
+    await fireEvent.press(screen.getByRole('button', { name: 'Get Health Connect' }));
+    expect(s.onInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it('explains a refusal and points to Health Connect settings', async () => {
+    const s = steps({ status: 'denied', today: null });
+    await renderHome(vm(), { steps: s });
+    expect(screen.getByText("FORM doesn't have access to your steps. You can switch it on in Health Connect.")).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: 'Open Health Connect' }));
+    expect(s.onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['unavailable', 'checking'] as const)('is hidden while %s', async (status) => {
+    await renderHome(vm(), { steps: steps({ status, today: null }) });
+    expect(screen.queryByText('Steps')).toBeNull();
+    await renderHome(vm());
+    expect(screen.queryByText('Steps')).toBeNull();
   });
 });

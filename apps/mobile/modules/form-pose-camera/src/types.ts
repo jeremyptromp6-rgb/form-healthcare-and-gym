@@ -108,4 +108,9 @@ export interface FormPoseCameraViewProps {
 /** What requireOptionalNativeModule('FormPoseCamera') returns (Constants in FormPoseCameraModule.kt). */
 export interface FormPoseCameraNativeModule {
   apiVersion: number;
+  /**
+   * Downloads the pose models (full, then lite) ahead of the first camera open. Resolves true when
+   * the full model is on disk, false on any problem; never rejects. Absent in a build that predates it.
+   */
+  prefetchModels?: (modelUrl: string, liteModelUrl: string | null) => Promise<boolean>;
 }

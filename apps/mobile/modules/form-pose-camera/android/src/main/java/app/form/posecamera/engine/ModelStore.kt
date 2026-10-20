@@ -29,8 +29,38 @@ internal class ModelStore(context: Context) {
      * only used for progress when the server sends no Content-Length. [onProgress] gets 0..100.
      * [isCancelled] is polled while downloading.
      */
-    @Synchronized
     fun ensure(
+        url: String,
+        expectedBytes: Long,
+        isCancelled: () -> Boolean,
+        onProgress: (Int) -> Unit,
+    ): File = synchronized(LOCK) { ensureLocked(url, expectedBytes, isCancelled, onProgress) }
+
+    /**
+     * Downloads the full model, then the lite one (best effort), so the first camera open finds both
+     * on disk. No UI, no progress, safe to call repeatedly (a model already on disk costs nothing, and
+     * a camera session starting meanwhile waits for the same download instead of starting a second
+     * one). Returns true when the full model is on disk; never throws. Blocking: call from a worker thread.
+     */
+    fun prefetch(fullUrl: String, liteUrl: String?): Boolean {
+        if (fullUrl.isBlank()) return false
+        try {
+            ensure(fullUrl, FULL_BYTES, { false }) { }
+        } catch (t: Throwable) {
+            Log.w(TAG, "model prefetch failed", t)
+            return false
+        }
+        if (!liteUrl.isNullOrBlank()) {
+            try {
+                ensure(liteUrl, LITE_BYTES, { false }) { }
+            } catch (t: Throwable) {
+                Log.w(TAG, "lite model prefetch failed", t)
+            }
+        }
+        return true
+    }
+
+    private fun ensureLocked(
         url: String,
         expectedBytes: Long,
         isCancelled: () -> Boolean,
@@ -180,5 +210,10 @@ internal class ModelStore(context: Context) {
         const val MAX_REDIRECTS = 5
         const val BUFFER_BYTES = 64 * 1024
         const val STALE_PART_MS = 5 * 60 * 1000L
+        const val FULL_BYTES = 9_000_000L
+        const val LITE_BYTES = 5_500_000L
+
+        /** One download at a time across every ModelStore (the engine's and the prefetch's). */
+        val LOCK = Any()
     }
 }

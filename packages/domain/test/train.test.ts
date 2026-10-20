@@ -7,10 +7,12 @@ import {
   exerciseAnalyzer,
   FOCUS_AREAS,
   FOCUS_MUSCLES,
+  isRankBumpNote,
   jointAngleDeg,
   liveRepCounter,
   normalizeFocusAreas,
   PROFILE_LIMITS,
+  rankTierFor,
   MovementStateMachine,
   repVerifier,
   restRemainingSeconds,
@@ -238,6 +240,119 @@ describe("workout generator (rule-based v1)", () => {
 
   it("is deterministic", () => {
     expect(ruleBasedGenerator.generate(base)).toEqual(ruleBasedGenerator.generate(base));
+  });
+});
+
+describe("rank-scaled difficulty", () => {
+  const gym = ["barbell", "squat_rack", "bench", "dumbbells", "cable_machine", "machines"] as GenerationInput["equipment"];
+  const base: GenerationInput = {
+    date: "2026-09-28",
+    goal: "build_muscle",
+    experience: "intermediate",
+    equipment: gym,
+    trainingDaysPerWeek: 3,
+    sessionsThisWeek: 0,
+    daysSinceLastWorkout: 2,
+    recentSeriousPain: false,
+    previous: {},
+  };
+  const at = (rankTier: number | null, over: Partial<GenerationInput> = {}) => ruleBasedGenerator.generate({ ...base, ...over, rankTier });
+  const [ROOKIE, STARTER, ATHLETE, IRON, ELITE, MASTER, CHAMPION] = [0, 1, 2, 3, 4, 5, 6];
+  const topReps = (tier: number | null, over: Partial<GenerationInput> = {}) => at(tier, over).exercises.map((e) => e.targetReps.max);
+  const totalSets = (tier: number | null, over: Partial<GenerationInput> = {}) => at(tier, over).exercises.reduce((a, e) => a + e.sets, 0);
+
+  it("changes nothing without rank info or at Rookie", () => {
+    const plain = ruleBasedGenerator.generate(base);
+    expect(at(null)).toEqual(plain);
+    expect(at(ROOKIE)).toEqual(plain);
+    expect(plain.notes.some(isRankBumpNote)).toBe(false);
+  });
+
+  it("raises rep ceilings by one per tier up to +3, and the same exercises are planned", () => {
+    const r = topReps(ROOKIE);
+    expect(topReps(STARTER)).toEqual(r.map((x) => x + 1));
+    expect(topReps(ATHLETE)).toEqual(r.map((x) => x + 2));
+    expect(topReps(IRON)).toEqual(r.map((x) => x + 3));
+    for (const tier of [ELITE, MASTER, CHAMPION, 20, 99]) expect(topReps(tier)).toEqual(topReps(IRON));
+    expect(at(IRON).exercises.map((e) => e.exerciseId)).toEqual(at(ROOKIE).exercises.map((e) => e.exerciseId));
+    expect(at(ATHLETE).notes.find(isRankBumpNote)).toMatch(/^Athlete rank: \+2 reps/);
+  });
+
+  it("adds one set on main lifts from Iron, never above 4 sets (5 advanced), identical at Champion and beyond", () => {
+    expect(totalSets(ATHLETE)).toBe(totalSets(ROOKIE));
+    expect(totalSets(IRON)).toBeGreaterThan(totalSets(ROOKIE));
+    const rookie = at(ROOKIE).exercises;
+    for (const [i, e] of at(IRON).exercises.entries()) {
+      expect(e.sets - rookie[i]!.sets).toBeLessThanOrEqual(1);
+      expect(e.sets).toBeLessThanOrEqual(4);
+    }
+    expect(at(CHAMPION).exercises).toEqual(at(IRON).exercises);
+    expect(at(99).exercises).toEqual(at(CHAMPION).exercises);
+    for (const e of at(CHAMPION, { experience: "advanced", goal: "get_stronger" }).exercises) expect(e.sets).toBeLessThanOrEqual(5);
+    for (const e of at(CHAMPION, { goal: "get_stronger" }).exercises) expect(e.sets).toBeLessThanOrEqual(4);
+  });
+
+  it("keeps heavy strength rep ranges to +1 and never bumps hold exercises", () => {
+    for (const e of at(CHAMPION, { goal: "get_stronger" }).exercises) {
+      const base = EXERCISE_BY_ID.get(e.exerciseId)!.loadable ? 6 : EXERCISE_BY_ID.get(e.exerciseId)!.targetReps.max;
+      expect(e.targetReps.max).toBeLessThanOrEqual(base + (base <= 6 ? 1 : 3));
+    }
+    const bodyweight = { equipment: ["bodyweight"] as GenerationInput["equipment"], focusAreas: ["core"] as GenerationInput["focusAreas"] };
+    const holds = (tier: number) => at(tier, bodyweight).exercises.filter((e) => EXERCISE_BY_ID.get(e.exerciseId)!.targetReps.max >= 30);
+    expect(holds(CHAMPION)).toEqual(holds(ROOKIE));
+  });
+
+  it("suppresses the bump for beginners, serious pain, a long break and unknown experience", () => {
+    const rookie = (over: Partial<GenerationInput>) => at(ROOKIE, over);
+    for (const over of [{ experience: "beginner" as const }, { experience: null }, { recentSeriousPain: true }, { daysSinceLastWorkout: 20 }]) {
+      const plan = at(CHAMPION, over);
+      expect(plan.exercises).toEqual(rookie(over).exercises);
+      expect(plan.notes.some(isRankBumpNote)).toBe(false);
+    }
+  });
+
+  it("leaves deloads and holds alone", () => {
+    const squat = at(ROOKIE).exercises[0]!;
+    const previous = { [squat.exerciseId]: { localDate: "2026-09-26", painLevel: "serious" as const, sets: [{ reps: 8, loadKg: 60 }], averageRomPercent: null } };
+    const withPain = at(CHAMPION, { previous }).exercises.find((e) => e.exerciseId === squat.exerciseId)!;
+    expect(withPain.progression).toBe("deload");
+    expect(withPain).toEqual(at(ROOKIE, { previous }).exercises.find((e) => e.exerciseId === squat.exerciseId));
+    const lowRom = { [squat.exerciseId]: { localDate: "2026-09-26", painLevel: "none" as const, sets: [{ reps: 8, loadKg: 60 }], averageRomPercent: 60 } };
+    const held = at(CHAMPION, { previous: lowRom }).exercises.find((e) => e.exerciseId === squat.exerciseId)!;
+    expect(held.progression).toBe("hold_for_rom");
+    expect(held).toEqual(at(ROOKIE, { previous: lowRom }).exercises.find((e) => e.exerciseId === squat.exerciseId));
+  });
+
+  it("drops the extra set rather than exceed the session length", () => {
+    const roomy = at(IRON, { sessionMinutes: 120 });
+    expect(roomy.exercises.reduce((a, e) => a + e.sets, 0)).toBeGreaterThan(totalSets(ROOKIE));
+    const tight = at(IRON, { sessionMinutes: 5 });
+    expect(tight.exercises.map((e) => e.sets)).toEqual(at(ROOKIE).exercises.map((e) => e.sets));
+    expect(tight.notes.find(isRankBumpNote)).not.toMatch(/set/);
+    expect(at(IRON, { sessionMinutes: roomy.estimatedMinutes - 1 }).estimatedMinutes).toBeLessThanOrEqual(roomy.estimatedMinutes);
+  });
+
+  it("takes a slightly bigger load step only from Master, and only up to 5% of the last load", () => {
+    const squat = at(ROOKIE).exercises.find((e) => EXERCISE_BY_ID.get(e.exerciseId)!.loadable)!;
+    const ex = EXERCISE_BY_ID.get(squat.exerciseId)!;
+    const next = (tier: number, loadKg: number) => {
+      const previous = { [ex.id]: { localDate: "2026-09-26", painLevel: "none" as const, sets: [{ reps: 99, loadKg }, { reps: 99, loadKg }], averageRomPercent: null } };
+      return at(tier, { previous }).exercises.find((e) => e.exerciseId === ex.id)!.targetLoadKg!;
+    };
+    const heavy = ex.loadIncrementKg * 60; // the doubled step is well under 5%
+    const light = ex.loadIncrementKg * 4; // doubled step would be 50%
+    expect(next(ROOKIE, heavy)).toBe(heavy + ex.loadIncrementKg);
+    expect(next(ELITE, heavy)).toBe(heavy + ex.loadIncrementKg);
+    expect(next(MASTER, heavy)).toBe(heavy + ex.loadIncrementKg * 2);
+    expect(next(CHAMPION, heavy) - heavy).toBeLessThanOrEqual(heavy * 0.05);
+    expect(next(CHAMPION, light)).toBe(light + ex.loadIncrementKg);
+  });
+
+  it("is deterministic and pure", () => {
+    expect(at(IRON)).toEqual(at(IRON));
+    expect(rankTierFor("Iron")).toBe(3);
+    expect(rankTierFor("Champion")).toBe(6);
+    expect(rankTierFor("nope")).toBeNull();
   });
 });
 

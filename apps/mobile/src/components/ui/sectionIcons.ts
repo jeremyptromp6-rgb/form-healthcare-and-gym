@@ -49,6 +49,8 @@ export const SECTION_ICONS: Record<string, { icon: IconName; tint: string }> = {
   Camera: { icon: 'camera', tint: colors.water },
   'Food scanner': { icon: 'scan', tint: colors.success },
   Privacy: { icon: 'lock-closed', tint: colors.textMuted },
+  Steps: { icon: 'footsteps', tint: colors.primary },
+  Reminders: { icon: 'alarm', tint: colors.accent },
   'By day': { icon: 'calendar', tint: colors.water },
   'By week': { icon: 'calendar', tint: colors.water },
   'By month': { icon: 'calendar', tint: colors.water },

@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from '@/lib/auth';
 import { reportCrash } from '@/lib/crashReport';
 import { useMe } from '@/lib/queries';
 import { bindAppFocus, createQueryClient } from '@/lib/queryClient';
+import { useReminders } from '@/lib/useReminders';
 import { useTimeZoneSync } from '@/lib/timezone';
 import { useAfterDelay } from '@/lib/timing';
 import { installFocusRing } from '@/lib/webFocus';
@@ -47,6 +48,8 @@ function RootNavigator() {
   const { status } = useAuth();
   const me = useMe();
   useTimeZoneSync();
+  // Local reminders: kept in step with Home's numbers; a tapped one opens its screen once the tabs are up.
+  useReminders(status === 'signedIn' && !(me.isPending && me.failureCount === 0) && me.data?.onboarding.completed !== false);
   // Wait for /me only while it has a chance: after one failure (offline, API down) go on in, and
   // let each screen show its own error state instead of holding everyone on a spinner through retries.
   const waitingForMe = status === 'signedIn' && me.isPending && me.failureCount === 0;

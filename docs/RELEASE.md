@@ -66,12 +66,37 @@ need the operator (store, legal, providers, infrastructure) or new native work. 
 | Server logs (stdout) | Request method/path/status/timing, request id, user id (opaque UUID) in domain-event lines, client IP, error class/code, scrubbed crash reports | Host's log retention | Host |
 | Device — native | Session token (SecureStore); query cache (memory); temp photo files (deleted after upload); export temp file (deleted after sharing) | Session | Sign-out |
 | Device — web | Session token (`sessionStorage`, tab lifetime); query cache (memory) | Tab | Sign-out / closing the tab |
+| Daily steps (Android) | Read from Health Connect on request: the day's total step count for today and yesterday. Stored on the server as one number per day (`steps_daily`) plus the XP it earns. No other Health Connect data is read; nothing is written back | Until the account is deleted | Account deletion (cascade) |
 | Analytics | None sent (`analyticsConsent` stored; no provider) | — | — |
 | AI provider | Coaching facts + chat text, only with `aiCoachConsent` | Provider's retention terms | — |
 | Meal recognition | Meal photo (EXIF stripped), only with `foodScanConsent` | Provider's retention terms | — |
 | Camera | Nothing leaves the device but joint angles of verified sets | — | — |
 | Ads | None. The build contains no ads SDK and no advertising identifier; nothing is sent to an ad network, and there is no ad consent form. (If ads return, add the network here and answer the store privacy forms again.) | — | — |
 | Exports | JSON file handed to the user's chosen destination | User's | User |
+| Reminders (local notifications) | Nothing leaves the device: reminders are scheduled on the phone by `expo-notifications` (no push server, no push token); choices are stored locally in the secure store. Android permission `android.permission.POST_NOTIFICATIONS` (13+) is requested only when the user turns a reminder on in Settings, Reminders; at most two a day, none 22:00–08:00. The library also declares `RECEIVE_BOOT_COMPLETED` so scheduled reminders survive a restart. Not used for advertising. Answer "no" to data collected for the notification content; list the permission in the store form. | On-device until the user turns them off, signs out, or uninstalls | User (Settings) |
+
+## Health Connect (Play Console declaration)
+
+FORM reads daily step counts from Android Health Connect (`react-native-health-connect`, config plugin in
+`app.json`). Fill in the Play Console **Health apps** declaration and the data-safety form with:
+
+| Field | Answer |
+|---|---|
+| Permission requested | `android.permission.health.READ_STEPS` only (declared in `app.json` `android.permissions`) |
+| Access | Read-only. FORM never writes to Health Connect and requests no background, history or other record types |
+| Data type | Health and fitness: steps (daily total from the user's own phone and connected watch, already merged by Health Connect) |
+| Purpose | Show the user's daily steps in the app and award a small amount of XP for them (1 XP per 1,000 steps, up to 10 a day). Not used for advertising, profiling, or sharing with third parties |
+| Collected / shared | Collected: the daily step total is sent to FORM's server over TLS and tied to the account. Shared: no |
+| Optional | Yes. The app works without it; permission is requested only when the user taps "Connect steps" and can be revoked in Health Connect at any time |
+| Deletion | Deleted with the account (Profile, Delete account); the user can also stop syncing by revoking the permission |
+| Privacy policy | Must mention Health Connect steps (what is read, why, retention) before submission |
+
+Manifest: the config plugin adds the permission-rationale activity (Android 13 and older) and the
+`VIEW_PERMISSION_USAGE` alias (Android 14+) that Health Connect requires to link to the privacy policy.
+`minSdkVersion` is raised to 26 via `expo-build-properties`. Health Connect access also needs Google's approval of
+the declaration before the permission works for store users; allow up to a week. It needs a development or
+store build (not Expo Go) and an Android device with Health Connect (built in on Android 14+; a Play Store app
+before that).
 
 ## Operations runbook
 

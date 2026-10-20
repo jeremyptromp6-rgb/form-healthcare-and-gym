@@ -1022,6 +1022,53 @@ const V26_LEADERBOARD = `
   CREATE INDEX xp_events_local_date ON xp_events(local_date, user_id);
 `;
 
+/**
+ * Daily steps (read from the phone's Health Connect by the app). One row per user and local date holding the
+ * highest total reported for that day. Steps earn modest XP through the ledger under their own source
+ * ('steps', reference = the date); they are never a workout, a streak day or a quest day. SQLite cannot widen
+ * a CHECK, so the append-only ledger is rebuilt with 'steps' allowed — rows, ids, indexes and triggers kept.
+ */
+const V27_STEPS = `
+  CREATE TABLE steps_daily (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    local_date TEXT NOT NULL,
+    steps INTEGER NOT NULL CHECK (steps BETWEEN 0 AND 60000),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, local_date)
+  );
+
+  CREATE TABLE xp_events_v27 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source TEXT NOT NULL CHECK (source IN ('workout', 'nutrition_day', 'quest', 'achievement', 'decay', 'reset', 'correction', 'steps')),
+    source_key TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('award', 'adjustment', 'decay', 'reset', 'correction')),
+    xp INTEGER NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    domain_event_id INTEGER REFERENCES domain_events(id),
+    local_date TEXT,
+    detail TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(detail)),
+    created_at TEXT NOT NULL,
+    UNIQUE (user_id, idempotency_key),
+    CHECK (kind <> 'award' OR xp >= 0),
+    CHECK (kind <> 'decay' OR xp <= 0),
+    CHECK (kind <> 'reset' OR xp = 0)
+  );
+  INSERT INTO xp_events_v27 (id, user_id, source, source_key, kind, xp, idempotency_key, domain_event_id, local_date, detail, created_at)
+  SELECT id, user_id, source, source_key, kind, xp, idempotency_key, domain_event_id, local_date, detail, created_at FROM xp_events ORDER BY id;
+  DROP TABLE xp_events;
+  ALTER TABLE xp_events_v27 RENAME TO xp_events;
+  CREATE INDEX xp_events_user ON xp_events(user_id, id);
+  CREATE INDEX xp_events_reference ON xp_events(user_id, source, source_key);
+  CREATE INDEX xp_events_user_date ON xp_events(user_id, local_date);
+  CREATE INDEX xp_events_local_date ON xp_events(local_date, user_id);
+  CREATE TRIGGER xp_events_append_only_update BEFORE UPDATE ON xp_events
+  BEGIN SELECT RAISE(ABORT, 'xp_events is append-only: add a compensating entry instead'); END;
+  CREATE TRIGGER xp_events_append_only_delete BEFORE DELETE ON xp_events
+  WHEN EXISTS (SELECT 1 FROM users WHERE id = OLD.user_id)
+  BEGIN SELECT RAISE(ABORT, 'xp_events is append-only: add a compensating entry instead'); END;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1049,4 +1096,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 24, name: "warmup_notes", up: V24_WARMUP_NOTES },
   { version: 25, name: "streak_freezes", up: V25_STREAK_FREEZES },
   { version: 26, name: "leaderboard", up: V26_LEADERBOARD },
+  { version: 27, name: "steps", up: V27_STEPS },
 ];

@@ -1,4 +1,4 @@
-import type { PainLevel } from "../progression/progressionEngine";
+import { RANKS, type PainLevel } from "../progression/progressionEngine";
 import { dayNumber, type DateKey } from "../shared/dates";
 import { FOCUS_AREAS, type Equipment, type ExperienceLevel, type FocusArea, type PrimaryGoal } from "../users/profileOptions";
 import { canPerform, EXERCISES, suitableFor, type Exercise, type MovementPattern, type MuscleGroup } from "./exercises";
@@ -33,6 +33,10 @@ export interface GenerationInput {
   recentSeriousPain: boolean;
   /** Most recent performance per exercise id. */
   previous: Record<string, ExercisePerformance>;
+  /** The user's rank tier (0 Rookie … 6 Champion; prestige levels count as 6). Missing = baseline plan. See RANK_DIFFICULTY. */
+  rankTier?: number | null;
+  /** The user's session length in minutes; the rank bump's extra set is dropped rather than exceed it. Default DEFAULT_SESSION_MINUTES. */
+  sessionMinutes?: number | null;
 }
 
 export type ProgressionDecision = "new" | "repeat" | "increase_load" | "increase_reps" | "deload" | "hold_for_rom" | "hold_for_form";
@@ -175,6 +179,65 @@ const focusBonus = (e: Exercise, muscles: ReadonlySet<MuscleGroup>) =>
 const RETURNING_AFTER_DAYS = 14;
 const MIN_ROM_TO_PROGRESS = 80;
 
+// ---- Rank-scaled difficulty --------------------------------------------------------------
+
+/**
+ * As a user ranks up, plans get gradually (and slightly) more demanding. All of it is a small, capped
+ * step on top of the normal plan, and every safety rule wins over it:
+ *
+ * - Rep ceilings: +1 per rank tier, capped at +3 (Rookie +0, Starter +1, Athlete +2, Iron and above +3).
+ *   Heavy rep ranges (ceiling of 6 or less, i.e. strength work) cap at +1. Hold exercises (seconds) are left alone.
+ *   Applies to new and repeated exercises only: an exercise already progressing by load or reps is not
+ *   also bumped.
+ * - Sets: +1 working set on main lifts (squat, hinge, push, pull patterns) from Iron (tier 3) up, never above
+ *   4 sets (5 for advanced lifters, the existing maximum) and dropped when it would push the session past the
+ *   user's session length.
+ * - Load: from Master (tier 5) up, a load increase may be two of the exercise's normal steps instead of one,
+ *   but only when that is still at most 5% of the last load (so heavy lifts get it, light ones never do).
+ * - Prestige levels add nothing beyond Champion; no rank info means no change at all.
+ * - Suppressed entirely for beginners (or unknown experience), after recent serious pain, and in the
+ *   easing-back week after a break. Deload / hold decisions per exercise also keep their normal targets.
+ */
+export const RANK_DIFFICULTY = {
+  maxRepBonus: 3,
+  heavyRepBonusCap: 1,
+  heavyRepCeiling: 6,
+  holdRepCeiling: 30,
+  extraSetMinTier: 3,
+  extraSetMainLifts: ["squat", "hinge", "push_horizontal", "push_vertical", "pull_horizontal", "pull_vertical"] as readonly MovementPattern[],
+  maxSets: 4,
+  maxSetsAdvanced: 5,
+  bigLoadStepMinTier: 5,
+  bigLoadStepMultiple: 2,
+  maxLoadIncreaseShare: 0.05,
+} as const;
+
+/** Default session length (minutes) the rank bump's extra set must fit in. */
+export const DEFAULT_SESSION_MINUTES = 60;
+
+/** The tier for a rank name (0 Rookie … 6 Champion), or null for an unknown rank. Prestige is still Champion. */
+export function rankTierFor(rank: string | null | undefined): number | null {
+  const i = RANKS.findIndex((r) => r.name === rank);
+  return i < 0 ? null : i;
+}
+
+const clampTier = (tier: number | null | undefined): number => (tier == null || !Number.isFinite(tier) ? 0 : Math.min(RANKS.length - 1, Math.max(0, Math.floor(tier))));
+
+/** Extra reps on the rep ceiling at this tier for a rep range (0 for holds). */
+export function rankRepBonus(tier: number | null | undefined, reps: { min: number; max: number }): number {
+  if (reps.max >= RANK_DIFFICULTY.holdRepCeiling) return 0;
+  const bonus = Math.min(clampTier(tier), RANK_DIFFICULTY.maxRepBonus);
+  return reps.max <= RANK_DIFFICULTY.heavyRepCeiling ? Math.min(bonus, RANK_DIFFICULTY.heavyRepBonusCap) : bonus;
+}
+
+const RANK_NOTE_MARKER = " rank: ";
+
+/** Whether a plan note is the rank-bump note (so a generator that sets the bump aside can drop it). */
+export const isRankBumpNote = (note: string): boolean => RANKS.some((r) => note.startsWith(r.name + RANK_NOTE_MARKER));
+
+/** Whether this tier adds a working set to main lifts. */
+export const rankAddsSet = (tier: number | null | undefined): boolean => clampTier(tier) >= RANK_DIFFICULTY.extraSetMinTier;
+
 /** Rounds a reduced load DOWN to the equipment step, so a deload is never rounded back up to the old load. */
 function deloadTo(value: number, step: number): number {
   return step > 0 ? Math.max(step, Math.floor(value / step + 1e-9) * step) : value;
@@ -213,15 +276,19 @@ function pick(
   return top[dayNumber(input.date) % top.length]!;
 }
 
-function progressionFor(exercise: Exercise, reps: { min: number; max: number }, input: GenerationInput) {
+/** `tier` is the rank tier to apply (0 when the rank bump is off); it only touches new, repeated and load-increase targets. */
+function progressionFor(exercise: Exercise, baseReps: { min: number; max: number }, input: GenerationInput, tier: number) {
   const prev = input.previous[exercise.id];
   const loadable = loadableWith(exercise, input.equipment);
+  // Progress decisions use the normal range; only the target shown for new/repeat work gets the rank bump.
+  const reps = baseReps;
+  const bumpedReps = { min: baseReps.min, max: baseReps.max + rankRepBonus(tier, baseReps) };
   if (!prev || prev.sets.length === 0) {
     return {
       decision: "new" as const,
       targetLoadKg: null,
-      reps,
-      note: loadable ? `Choose a weight you can lift for ${reps.max} reps with good form.` : null,
+      reps: bumpedReps,
+      note: loadable ? `Choose a weight you can lift for ${bumpedReps.max} reps with good form.` : null,
     };
   }
   const lastLoad = Math.max(...prev.sets.map((s) => s.loadKg));
@@ -254,7 +321,11 @@ function progressionFor(exercise: Exercise, reps: { min: number; max: number }, 
   }
   if (allHitTop) {
     if (loadable && lastLoad > 0) {
-      return { decision: "increase_load" as const, targetLoadKg: lastLoad + exercise.loadIncrementKg, reps, note: `You hit ${reps.max} reps on every set — up ${exercise.loadIncrementKg} kg.` };
+      const step = exercise.loadIncrementKg;
+      // High ranks may take a slightly bigger step, but never more than 5% of the last load.
+      const big = step * RANK_DIFFICULTY.bigLoadStepMultiple;
+      const inc = tier >= RANK_DIFFICULTY.bigLoadStepMinTier && big <= lastLoad * RANK_DIFFICULTY.maxLoadIncreaseShare + 1e-9 ? big : step;
+      return { decision: "increase_load" as const, targetLoadKg: lastLoad + inc, reps, note: `You hit ${reps.max} reps on every set — up ${inc} kg.`, bigLoadStep: inc > step };
     }
     const bump = { min: reps.min + 2, max: reps.max + 2 };
     return { decision: "increase_reps" as const, targetLoadKg: null, reps: bump, note: "You hit the top of the range — aim for 2 more reps." };
@@ -262,7 +333,7 @@ function progressionFor(exercise: Exercise, reps: { min: number; max: number }, 
   return {
     decision: "repeat" as const,
     targetLoadKg: loadable && lastLoad > 0 ? lastLoad : null,
-    reps,
+    reps: bumpedReps,
     note: missedMin ? "Same as last time — aim to hit the full rep range." : null,
   };
 }
@@ -295,12 +366,19 @@ export const ruleBasedGenerator: WorkoutGenerator = {
       notes.push("Welcome back. Volume and loads are eased back for your first session after a break.");
     }
 
+    // The rank bump: off for beginners (or unknown experience), after serious pain and in the easing-back week.
+    const tier = experience === "beginner" || input.recentSeriousPain || returning ? 0 : clampTier(input.rankTier);
+    const mainLiftSets = Math.min(sets + 1, experience === "advanced" ? RANK_DIFFICULTY.maxSetsAdvanced : RANK_DIFFICULTY.maxSets);
+
     // Focus-only slots follow the base slots: any movement whose main muscles are in the focus.
     const focusSlots = focusMuscles.size === 0 ? 0 : focus === "full_body" ? FOCUS_EXTRA_FULL_BODY : FOCUS_EXTRA_SIDE;
     // Muscles in the focus not yet worked by a focus-only slot, so two slots spread across the chosen areas.
     let uncovered = new Set(focusMuscles);
 
     const exercises: PlannedExercise[] = [];
+    const rankBump = { reps: 0, sets: false, load: false };
+    /** Indexes of exercises that may take the rank bump's extra set (main lifts on a normal, non-deload decision). */
+    const extraSetFor: number[] = [];
     const planned: { slot: Slot; focused: boolean }[] = [...slots.map((slot) => ({ slot, focused: false })), ...Array.from({ length: focusSlots }, () => ({ slot: [] as Slot, focused: true }))];
     for (const { slot, focused } of planned) {
       let exercise: Exercise | null;
@@ -318,7 +396,13 @@ export const ruleBasedGenerator: WorkoutGenerator = {
       used.add(exercise.id);
       // Bodyweight movements can't be made easier with load, so they keep their own rep range.
       const baseReps = loadableWith(exercise, input.equipment) ? scheme.reps : exercise.targetReps;
-      const p = progressionFor(exercise, baseReps, input);
+      const p = progressionFor(exercise, baseReps, input, tier);
+      if (tier > 0) {
+        if (p.reps.max > baseReps.max && (p.decision === "new" || p.decision === "repeat")) rankBump.reps = Math.max(rankBump.reps, p.reps.max - baseReps.max);
+        if ("bigLoadStep" in p && p.bigLoadStep) rankBump.load = true;
+        const normal = p.decision === "new" || p.decision === "repeat" || p.decision === "increase_load" || p.decision === "increase_reps";
+        if (normal && rankAddsSet(tier) && mainLiftSets > sets && RANK_DIFFICULTY.extraSetMainLifts.includes(exercise.pattern) && baseReps.max < RANK_DIFFICULTY.holdRepCeiling) extraSetFor.push(exercises.length);
+      }
       exercises.push({
         exerciseId: exercise.id,
         name: exercise.name,
@@ -333,7 +417,26 @@ export const ruleBasedGenerator: WorkoutGenerator = {
     }
 
     const secondsPerRep = 4;
-    const workSeconds = exercises.reduce((a, e) => a + e.sets * (((e.targetReps.min + e.targetReps.max) / 2) * secondsPerRep * (EXERCISES.find((x) => x.id === e.exerciseId)?.perSide ? 2 : 1) + e.restSeconds), 0);
+    const minutesOf = (list: PlannedExercise[]) => {
+      const workSeconds = list.reduce((a, e) => a + e.sets * (((e.targetReps.min + e.targetReps.max) / 2) * secondsPerRep * (EXERCISES.find((x) => x.id === e.exerciseId)?.perSide ? 2 : 1) + e.restSeconds), 0);
+      return Math.max(10, Math.round(workSeconds / 60) + 5);
+    };
+    // The rank bump's extra set goes on one main lift at a time, only while the session still fits the user's time.
+    const budget = input.sessionMinutes != null && input.sessionMinutes > 0 ? input.sessionMinutes : DEFAULT_SESSION_MINUTES;
+    for (const i of extraSetFor) {
+      const next = exercises.map((e, j) => (j === i ? { ...e, sets: mainLiftSets } : e));
+      if (minutesOf(next) > budget) continue;
+      exercises[i] = next[i]!;
+      rankBump.sets = true;
+    }
+    if (rankBump.reps > 0 || rankBump.sets || rankBump.load) {
+      const parts = [
+        rankBump.reps > 0 ? `+${rankBump.reps} rep${rankBump.reps > 1 ? "s" : ""} on your rep targets` : null,
+        rankBump.sets ? "+1 set on main lifts" : null,
+        rankBump.load ? "a slightly bigger load step" : null,
+      ].filter(Boolean);
+      notes.push(`${RANKS[tier]!.name} rank: ${parts.join(", ")}. A small step up for your level. Ease off if it feels like too much.`);
+    }
     const focusLabel = focus === "full_body" ? "Full Body" : focus === "upper" ? "Upper Body" : "Lower Body";
     // Name the chosen areas only when this session actually leans on them.
     const leaning = focusMuscles.size > 0 ? areas.filter((a) => FOCUS_MUSCLES[a].some((m) => focusMuscles.has(m))).map((a) => FOCUS_LABEL.get(a)!) : [];
@@ -346,7 +449,7 @@ export const ruleBasedGenerator: WorkoutGenerator = {
       title: leaning.length > 0 ? `${focusLabel} · ${leaning.join(" + ")} focus · ${scheme.label}` : `${focusLabel} · ${scheme.label}`,
       focus,
       exercises,
-      estimatedMinutes: Math.max(10, Math.round(workSeconds / 60) + 5),
+      estimatedMinutes: minutesOf(exercises),
       notes,
     };
   },

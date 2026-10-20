@@ -12,7 +12,7 @@ import { cameraErrorStatus, cameraScreenModel, loadingMessage, type CameraStatus
 import { livePoseSupport } from '@/lib/pose/support';
 import { formWord } from '@/lib/workoutSession';
 import { LiveCameraView, type LiveCameraViewProps } from './LiveCameraView';
-import { CAMERA_START_TIMEOUT_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
+import { CAMERA_START_TIMEOUT_MS, INTERRUPTED_GIVEUP_MS, MODEL_LOAD_TIMEOUT_MS, PoseCameraFeed } from './PoseCameraFeed';
 import { MEDIAPIPE_VERSION, poseEngineHtml, skeletonIndexEdges } from './poseEngineHtml';
 import { skeletonPalette } from './skeletonState';
 import { hudToneColor } from './skeletonTone';
@@ -132,7 +132,8 @@ describe('cameraScreenModel', () => {
   });
 
   it('loading, searching, paused and interrupted states', () => {
-    expect(cameraScreenModel(LIVE, { kind: 'loading' }, null, false).feedback!.message).toMatch(/Getting your camera coach ready/);
+    // Loading is a card over the video (progress + setup tip), not a one-line strip.
+    expect(cameraScreenModel(LIVE, { kind: 'loading' }, null, false)).toMatchObject({ overlay: { kind: 'loading', title: 'Getting your camera coach ready', tip: true }, feedback: null });
     expect(cameraScreenModel(LIVE, READY, null, false).feedback!.message).toBe('Looking for you…');
     expect(cameraScreenModel(LIVE, READY, readout(null), true).feedback!.message).toMatch(/^Paused/);
     expect(cameraScreenModel({ kind: 'interrupted' }, READY, null, false).feedback).toMatchObject({ tone: 'adjust' });
@@ -446,9 +447,9 @@ describe('native camera feed', () => {
     } finally {
       jest.useRealTimers();
     }
-    expect(loadingMessage({ kind: 'loading', stage: 'model', pct: 42 })).toBe('Downloading your camera coach — 42%. This happens once; next time it starts quickly.');
-    expect(loadingMessage({ kind: 'loading', stage: 'starting', pct: 100 })).toBe('Almost ready — starting your camera coach…');
-    expect(loadingMessage({ kind: 'loading' })).toBe('Getting your camera coach ready…');
+    expect(loadingMessage({ kind: 'loading', stage: 'model', pct: 42 })).toBe('First time only — about 10 MB. After this it starts in seconds.');
+    expect(loadingMessage({ kind: 'loading', stage: 'starting', pct: 100 })).toBe('Starting your camera coach…');
+    expect(loadingMessage({ kind: 'loading' })).toBe('Just a moment…');
   });
 
   it('maps engine camera errors and offline model failures to honest states', async () => {
@@ -742,6 +743,54 @@ describe('stall watchdog and the model swap', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('frames that never come back end in "the camera stopped" with Try again, and a late frame clears it', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await live();
+      await silence(3000);
+      expect(h.onCamera).toHaveBeenCalledWith(INTERRUPTED);
+      await silence(INTERRUPTED_GIVEUP_MS + 1000);
+      expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'stalled' });
+      expect(h.onCamera.mock.calls.filter((c) => c[0].reason === 'stalled')).toHaveLength(1);
+      expect(cameraScreenModel({ kind: 'unavailable', reason: 'stalled' }, READY, null, false).overlay).toMatchObject({ title: 'The camera stopped', action: 'retry', actionLabel: 'Try again' });
+      await engine({ t: 'frame', ts: 90_000, w: 640, h: 480, ms: 20, b: 120, people: [standing()] });
+      expect(h.onCamera).toHaveBeenLastCalledWith({ kind: 'live' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a camera that said why it cannot open (busy) keeps that message instead of "didn\'t start"', async () => {
+    jest.useFakeTimers();
+    try {
+      mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+      const h = handlers();
+      await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+      await engine({ t: 'camera', kind: 'error', name: 'NotReadableError' });
+      await silence(CAMERA_START_TIMEOUT_MS + 1000);
+      expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'in_use' });
+      expect(h.onCamera).not.toHaveBeenCalledWith({ kind: 'unavailable', reason: 'start_timeout' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a WebView whose renderer the system killed (low memory) ends in Try again, not a blank view', async () => {
+    mocked.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn()]);
+    const h = handlers();
+    await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+    await act(async () => (mockWeb.props as unknown as { onRenderProcessGone: () => void }).onRenderProcessGone());
+    expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'stalled' });
+  });
+
+  it('a permission request that fails outright ends in the denied message, not a spinner', async () => {
+    mocked.mockReturnValue([{ granted: false, canAskAgain: true }, jest.fn().mockRejectedValue(new Error('boom'))]);
+    const h = handlers();
+    await render(<PoseCameraFeed active session={LivePoseSession.for('bodyweight_squat')!} retryToken={0} {...h} />);
+    await act(async () => {});
+    expect(h.onCamera).toHaveBeenLastCalledWith({ kind: 'denied', canAskAgain: true });
   });
 
   it('the lite model message alone also ends the grace', async () => {

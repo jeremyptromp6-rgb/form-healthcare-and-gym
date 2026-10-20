@@ -8,12 +8,15 @@ import { WeekSummary } from '@/components/progress/WeekSummary';
 import { ExerciseLibrary } from '@/components/train/ExerciseLibrary';
 import { CameraCoachingRow, TodayView } from '@/components/train/TodayView';
 import { useFeature } from '@/lib/features';
+import { usePrefetchPoseModels } from '@/lib/pose/prefetch';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useExercises, useRefetchOnFocus, useStartSession, useTodayWorkout, useWorkouts } from '@/lib/queries';
 import { sessionTotals } from '@/lib/workoutSession';
 import { colors, space } from '@/theme/tokens';
 
 export default function Train() {
+  // Get the camera coach's model onto the phone while the user browses, so the camera opens fast.
+  usePrefetchPoseModels();
   const today = useTodayWorkout();
   const active = useActiveSession();
   const library = useExercises();

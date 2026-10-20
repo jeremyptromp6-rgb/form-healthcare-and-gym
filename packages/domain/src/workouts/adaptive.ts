@@ -1,5 +1,5 @@
 import { EXERCISE_BY_ID } from "./exercises";
-import { loadableWith, ruleBasedGenerator, type GenerationInput, type PlannedExercise, type WorkoutGenerator, type WorkoutPlan } from "./generator";
+import { isRankBumpNote, loadableWith, ruleBasedGenerator, type GenerationInput, type PlannedExercise, type WorkoutGenerator, type WorkoutPlan } from "./generator";
 
 /**
  * Adaptive training (FORM Pro) — "progress when earned".
@@ -109,12 +109,24 @@ export const adaptiveGenerator = {
   version: 1,
   generate(input: AdaptiveInput): WorkoutPlan {
     const base = ruleBasedGenerator.generate(input);
-    let exercises = base.exercises.map((e) => adapt(e, input));
+    // The same plan without the rank bump: where adapting turns an exercise into a deload or hold, it gets these targets back.
+    const plain = input.rankTier ? new Map(ruleBasedGenerator.generate({ ...input, rankTier: null }).exercises.map((e) => [e.exerciseId, e])) : null;
+    const withoutBump = (e: PlannedExercise): PlannedExercise => {
+      const p = plain?.get(e.exerciseId);
+      return p ? { ...e, sets: p.sets, targetReps: p.targetReps } : e;
+    };
+    let exercises = base.exercises.map((e) => {
+      const a = adapt(e, input);
+      return a.progression !== e.progression && (a.progression === "deload" || a.progression === "hold_for_form" || a.progression === "hold_for_rom") ? withoutBump(a) : a;
+    });
     const notes = [...base.notes];
     const { plannedDays, completedDays } = input.consistency;
     const lowConsistency = plannedDays >= 2 && completedDays / plannedDays < ADAPTIVE_RULES.lowConsistencyShare && !input.recentSeriousPain;
     if (lowConsistency) {
+      // Training less often than planned: the rank bump steps aside too.
+      exercises = exercises.map(withoutBump);
       exercises = exercises.map((e) => (e.sets > 2 ? { ...e, sets: e.sets - 1 } : e));
+      for (let i = notes.length - 1; i >= 0; i--) if (isRankBumpNote(notes[i]!)) notes.splice(i, 1);
       notes.push(`You've trained ${completedDays} of ${plannedDays} planned days in the last two weeks. One set fewer per exercise today, same loads — showing up matters more than volume.`);
     }
     return { ...base, generator: { id: this.id, version: this.version }, exercises, notes };

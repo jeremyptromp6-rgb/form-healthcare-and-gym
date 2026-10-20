@@ -156,6 +156,16 @@ export function awardWorkoutXp(db: Db, e: { userId: string; workoutId: string; l
   });
 }
 
+/**
+ * Daily steps XP: brings the ledger total for that date to `target` (callers only ever raise it, so it is an
+ * award and then positive adjustments). Not a workout, a streak day or a quest day.
+ */
+export function awardStepsXp(db: Db, e: { userId: string; localDate: string; target: number; steps: number; now: Date }): void {
+  trackingLevel(db, e.userId, e.now, () => {
+    settleReference(db, { userId: e.userId, source: "steps", reference: e.localDate, target: e.target, localDate: e.localDate, detail: { steps: e.steps }, now: e.now });
+  });
+}
+
 /** An achievement's one-time reward, from its achievement.unlocked domain event. */
 export function awardAchievementXp(db: Db, e: { userId: string; achievementId: string; title: string; xp: number; localDate: string; domainEventId: number; now: Date }): void {
   trackingLevel(db, e.userId, e.now, () => {
@@ -303,6 +313,7 @@ const SOURCE_LABEL: Record<XpSource, string> = {
   decay: "Missed training day",
   reset: "Progress reset",
   correction: "Correction",
+  steps: "Daily steps",
 };
 
 function ledgerLabel(r: Row, detail: Record<string, unknown>): string {

@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button, InlineMessage, ProgressBar, Row, StateView, type IconName } from '@/components/ui';
 import { fitBox, feedAspect, isCompactCamera, panelMaxHeight, PANEL, topBarReserve, type FeedFit } from '@/lib/pose/cameraLayout';
-import { trackingLabel, type CameraAction, type CameraScreenModel, type LiveReadout } from '@/lib/pose/status';
+import { trackingLabel, WAITING_TIP, type CameraAction, type CameraScreenModel, type GetReadyStep, type LiveReadout } from '@/lib/pose/status';
 import { formWord } from '@/lib/workoutSession';
 import { a11y, colors, MAX_CONTENT_WIDTH, palettes, radius, space } from '@/theme/tokens';
 import { hudToneColor, type HudTone } from './skeletonTone';
@@ -21,6 +21,8 @@ export interface LiveCameraViewProps {
   model: CameraScreenModel;
   readout: LiveReadout | null;
   paused: boolean;
+  /** The "get into position" countdown, while it runs: shown over the video, and no count shows while the numbers run. */
+  getReady?: GetReadyStep | null;
   /** The camera feed element (platform-specific), rendered under the overlays. */
   feed: ReactNode;
   /**
@@ -64,7 +66,10 @@ export function LiveCameraView(p: LiveCameraViewProps) {
   const compact = isCompactCamera(win.height, win.fontScale);
   const m = compact ? PANEL.compact : PANEL.regular;
   const [slot, setSlot] = useState<{ w: number; h: number } | null>(null);
-  const rep = !p.paused ? (readout?.rep ?? null) : null;
+  const getReady = p.getReady ?? null;
+  // While the numbers count down nothing shows as counted (the brief "ready" that follows is just a label).
+  const countingDown = typeof getReady === 'number';
+  const rep = !p.paused && !countingDown ? (readout?.rep ?? null) : null;
   const tone = model.feedback ? toneOf(model.feedback.tone) : null;
   const tracking = !p.paused && !!readout?.trackable;
   const verified = rep?.verifiedReps ?? 0;
@@ -113,7 +118,27 @@ export function LiveCameraView(p: LiveCameraViewProps) {
                     </AppText>
                   </View>
                 ) : null}
-                {tracking ? (
+                {getReady !== null ? (
+                  <View style={styles.countdownWrap}>
+                    <View style={styles.countdown} testID="get-ready">
+                      {getReady === 'ready' ? (
+                        <AppText variant="heading" color={hud.text}>
+                          Ready
+                        </AppText>
+                      ) : (
+                        <>
+                          <AppText variant="label" color={hud.textMuted}>
+                            Get into position
+                          </AppText>
+                          <AppText variant="valueLg" color={hud.text}>
+                            {String(getReady)}
+                          </AppText>
+                        </>
+                      )}
+                    </View>
+                  </View>
+                ) : null}
+                {tracking && !countingDown ? (
                   <View style={styles.detected}>
                     <View style={styles.detectedDot} />
                     <Ionicons name="body-outline" size={14} color={hud.text} />
@@ -126,13 +151,17 @@ export function LiveCameraView(p: LiveCameraViewProps) {
             ) : null}
             {model.overlay ? (
               <ScrollView style={styles.overlay} contentContainerStyle={[styles.overlayContent, { paddingTop: reserve }]}>
-                <StateView
-                  kind={model.overlay.kind}
-                  title={model.overlay.title || undefined}
-                  message={model.overlay.message || undefined}
-                  actionLabel={model.overlay.actionLabel ?? undefined}
-                  onAction={model.overlay.action ? () => p.onAction(model.overlay!.action!) : undefined}
-                />
+                {model.overlay.kind === 'loading' && model.overlay.title ? (
+                  <LoadingCard title={model.overlay.title} message={model.overlay.message} progress={model.overlay.progress ?? null} tip={!!model.overlay.tip} />
+                ) : (
+                  <StateView
+                    kind={model.overlay.kind}
+                    title={model.overlay.title || undefined}
+                    message={model.overlay.message || undefined}
+                    actionLabel={model.overlay.actionLabel ?? undefined}
+                    onAction={model.overlay.action ? () => p.onAction(model.overlay!.action!) : undefined}
+                  />
+                )}
                 {model.overlay.action === 'start' ? (
                   <AppText variant="caption" color={colors.textMuted} style={{ textAlign: 'center', paddingHorizontal: space.lg }}>
                     Setup: {p.setupText}
@@ -243,6 +272,38 @@ export function LiveCameraView(p: LiveCameraViewProps) {
   );
 }
 
+/** First-run waiting: what is happening, how far along it is (when it is known) and what to do meanwhile. */
+function LoadingCard({ title, message, progress, tip }: { title: string; message: string; progress: number | null; tip: boolean }) {
+  const pct = progress === null ? null : Math.round(progress * 100);
+  return (
+    <View style={styles.loadCard} accessibilityLiveRegion="polite">
+      <Ionicons name="camera-outline" size={40} color={colors.primary} />
+      <AppText variant="sectionTitle" header style={{ textAlign: 'center' }}>
+        {title}
+      </AppText>
+      <AppText variant="body" color={colors.textMuted} style={{ textAlign: 'center' }}>
+        {message}
+      </AppText>
+      {pct === null ? null : (
+        <View style={{ alignSelf: 'stretch', gap: space.xs }}>
+          <ProgressBar value={progress ?? 0} label="Camera coach download" />
+          <AppText variant="label" color={colors.textMuted} style={{ textAlign: 'center', fontVariant: ['tabular-nums'] }}>
+            {`${pct}%`}
+          </AppText>
+        </View>
+      )}
+      {tip ? (
+        <View style={styles.loadTip}>
+          <Ionicons name="information-circle" size={18} color={colors.textMuted} />
+          <AppText variant="caption" color={colors.textMuted} style={{ flex: 1 }}>
+            {WAITING_TIP}
+          </AppText>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /** A round glass button for the top bar: it floats over the video, so it uses the Evening palette. */
 function HudButton({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
   return (
@@ -273,6 +334,10 @@ const styles = StyleSheet.create({
   counter: { pointerEvents: 'none', position: 'absolute', right: space.md, minWidth: 76, alignItems: 'center', paddingTop: space.xs, paddingBottom: space.sm, paddingHorizontal: space.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: hud.hairline, backgroundColor: `${hud.bg}D9` },
   detected: { pointerEvents: 'none', position: 'absolute', bottom: space.md, left: space.md, maxWidth: '85%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: hud.hairline, backgroundColor: glass },
   detectedDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: hudToneColor(hud, 'ready') },
+  countdownWrap: { pointerEvents: 'none', ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  countdown: { minWidth: 120, alignItems: 'center', gap: space.xs, paddingVertical: space.md, paddingHorizontal: space.xl, borderRadius: radius.lg, borderWidth: 1, borderColor: hud.hairline, backgroundColor: `${hud.bg}D9` },
+  loadCard: { alignItems: 'center', gap: space.md, alignSelf: 'center', width: '100%', maxWidth: 340, paddingHorizontal: space.lg },
+  loadTip: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, padding: space.md, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.hairline, backgroundColor: colors.card },
   overlay: { ...StyleSheet.absoluteFill, backgroundColor: colors.surface },
   overlayContent: { flexGrow: 1, justifyContent: 'center', gap: space.sm, paddingBottom: space.md },
   // The bottom panel: the strip, the stats and the button. It keeps its natural height until the window can't spare it.

@@ -1,10 +1,10 @@
 import { fromMediaPipePose, LivePoseSession } from '@form/domain';
 import { act, render, screen } from '@testing-library/react-native';
 import { useCameraPermissions } from 'expo-camera';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { MODEL_BUDGET_MS, POSE_CONFIDENCE } from '@/lib/pose/poseModels';
 import { config } from '@/lib/config';
-import type { LiveReadout, PoseDiag } from '@/lib/pose/status';
+import { cameraScreenModel, type LiveReadout, type PoseDiag } from '@/lib/pose/status';
 import { peopleFromLm, toEngineMessage } from '@/lib/pose/nativePose';
 import { NATIVE_LIVE_FALLBACK_MS } from './NativePoseFeed';
 import { PoseCameraFeed } from './PoseCameraFeed';
@@ -259,10 +259,10 @@ describe('native pose feed', () => {
     expect(h.onPose).toHaveBeenCalledWith({ kind: 'loading', stage: 'starting', pct: undefined });
     expect(h.onCamera).toHaveBeenCalledWith({ kind: 'live' });
     expect(h.onPose).toHaveBeenCalledWith({ kind: 'ready', backend: 'CPU' });
-    await fire('onCamera', { kind: 'error', name: 'NotReadableError' });
-    expect(h.onCamera).toHaveBeenCalledWith({ kind: 'unavailable', reason: 'in_use' });
-    // Even a non-fatal native failure never reaches the user: the WebView engine takes over.
-    await fire('onPose', { kind: 'failed', offline: true, message: 'x', fatal: false });
+    await fire('onCamera', { kind: 'error', name: 'NotAllowedError' });
+    expect(h.onCamera).toHaveBeenCalledWith({ kind: 'denied', canAskAgain: true });
+    // A fatal native failure never reaches the user: the WebView engine takes over.
+    await fire('onPose', { kind: 'failed', message: 'x', fatal: true });
     expect(h.onPose).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }));
     expect(screen.queryByTestId('camera-view-native')).toBeNull();
     expect(screen.getByTestId('camera-view')).toBeTruthy();
@@ -499,6 +499,148 @@ describe('native pose feed', () => {
     await render(<PoseCameraFeed active session={session} retryToken={0} {...handlers()} />);
     expect(mockNativeProps!.diagnostics).toBe(false);
     expect(mockNativeProps!.onDiag).toBeUndefined();
+  });
+
+  describe('failure paths and the app going to the background', () => {
+    let appState: ((s: string) => void) | null = null;
+    beforeEach(() => {
+      appState = null;
+      jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, l: (s: string) => void) => {
+        appState = l;
+        return { remove: jest.fn() };
+      }) as unknown as typeof AppState.addEventListener);
+    });
+    afterEach(() => jest.restoreAllMocks());
+    const lifecycle = (s: 'active' | 'background') => act(async () => appState!(s));
+    const failedOverlay = (message: string) => cameraScreenModel({ kind: 'live' }, { kind: 'failed', message, retryable: true }, null, false).overlay;
+
+    it('offline on the first run: the download failure is shown as it is, with Try again, and is not held against the native camera', async () => {
+      jest.useFakeTimers();
+      try {
+        const { session } = fakeSession();
+        const h = handlers();
+        const { rerender } = await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+        await fire('onPose', { kind: 'failed', offline: true, message: 'No internet connection', fatal: false });
+        // Not even the silent-camera timer hands over after an answer like that.
+        await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 1000));
+        const message = 'Camera coaching needs an internet connection the first time it loads.';
+        expect(h.onPose).toHaveBeenCalledWith({ kind: 'failed', message, retryable: true });
+        expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+        expect(screen.queryByTestId('camera-view')).toBeNull();
+        expect(h.onEngine).not.toHaveBeenCalledWith('webview');
+        expect(mockStore.size).toBe(0);
+        expect(mockReport).not.toHaveBeenCalled();
+        expect(failedOverlay(message)).toMatchObject({ kind: 'error', action: 'retry', actionLabel: 'Try again' });
+        // Try again starts a fresh native session.
+        await rerender(<PoseCameraFeed active session={session} retryToken={1} {...h} />);
+        expect(mockMounts).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('a download that failed for another reason (not offline) hands over quietly: no message', async () => {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'live' });
+      await fire('onPose', { kind: 'failed', offline: false, message: 'Model download failed (HTTP 503)', fatal: false });
+      expect(h.onPose).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed' }));
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(JSON.parse([...mockStore.values()][0] ?? '{}')).toMatchObject({ reason: 'failed:Model download failed (HTTP 503)' });
+    });
+
+    it('a camera error CameraX reports as NotReadableError (every unknown one) hands over to the WebView engine, remembered', async () => {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'error', name: 'NotReadableError' });
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(h.onEngine).toHaveBeenLastCalledWith('webview');
+      expect(h.onCamera).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'unavailable' }));
+      expect(JSON.parse([...mockStore.values()][0] ?? '{}')).toMatchObject({ reason: 'camera:NotReadableError' });
+    });
+
+    it('a refused camera permission is shown as it is (a real user action), with no handover', async () => {
+      jest.useFakeTimers();
+      try {
+        const { session } = fakeSession();
+        const h = handlers();
+        await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+        await fire('onCamera', { kind: 'error', name: 'NotAllowedError' });
+        await act(async () => jest.advanceTimersByTime(NATIVE_LIVE_FALLBACK_MS + 1000));
+        expect(h.onCamera).toHaveBeenCalledWith({ kind: 'denied', canAskAgain: true });
+        expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+        expect(mockStore.size).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('a camera CameraX cannot find or support gets the WebView engine\'s turn', async () => {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'error', name: 'NotFoundError' });
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(screen.getByTestId('camera-view')).toBeTruthy();
+      expect(h.onCamera).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'unavailable' }));
+      expect(JSON.parse([...mockStore.values()][0] ?? '{}')).toMatchObject({ reason: 'camera:NotFoundError' });
+    });
+
+    it('going to the background stops the camera; coming back starts it fresh on the same engine, nothing handed over', async () => {
+      const { session } = fakeSession();
+      const h = handlers();
+      await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      await fire('onCamera', { kind: 'live' });
+      await fire('onPose', { kind: 'ready', backend: 'GPU', variant: 'full', rung: 'mask' });
+      const props = mockNativeProps!;
+      h.onCamera.mockClear();
+      h.onPose.mockClear();
+      await lifecycle('background');
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(h.onReadout).toHaveBeenLastCalledWith(null);
+      // The screen is told to start over, so on return it never shows a stale "live".
+      expect(h.onCamera).toHaveBeenCalledWith({ kind: 'requesting' });
+      expect(h.onPose).toHaveBeenCalledWith({ kind: 'idle' });
+      await lifecycle('active');
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+      expect(mockMounts).toBe(2);
+      expect(mockNativeProps!.modelUrl).toBe(props.modelUrl);
+      expect(screen.queryByTestId('camera-view')).toBeNull();
+      expect(mockStore.size).toBe(0);
+      await fire('onCamera', { kind: 'live' });
+      expect(h.onCamera).toHaveBeenLastCalledWith({ kind: 'live' });
+      await fire('onPose', { kind: 'ready', backend: 'GPU', variant: 'full', rung: 'mask' });
+      expect(h.onPose).toHaveBeenLastCalledWith({ kind: 'ready', backend: 'GPU' });
+    });
+
+    it('a camera left off (inactive) stays off across a background trip', async () => {
+      const h = handlers();
+      await render(<PoseCameraFeed active={false} session={fakeSession().session} retryToken={0} {...h} />);
+      await lifecycle('background');
+      await lifecycle('active');
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      expect(h.onCamera).not.toHaveBeenCalled();
+    });
+
+    it('permission granted in the phone\'s settings is picked up on return, and the feed starts', async () => {
+      const getPermission = jest.fn().mockResolvedValue({ granted: true, canAskAgain: true });
+      permission.mockReturnValue([{ granted: false, canAskAgain: false }, jest.fn(), getPermission]);
+      const { session } = fakeSession();
+      const h = handlers();
+      const { rerender } = await render(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      expect(h.onCamera).toHaveBeenCalledWith({ kind: 'denied', canAskAgain: false });
+      expect(screen.queryByTestId('camera-view-native')).toBeNull();
+      await lifecycle('active');
+      expect(getPermission).toHaveBeenCalled();
+      permission.mockReturnValue([{ granted: true, canAskAgain: true }, jest.fn(), getPermission]);
+      await rerender(<PoseCameraFeed active session={session} retryToken={0} {...h} />);
+      expect(screen.getByTestId('camera-view-native')).toBeTruthy();
+      expect(h.onCamera).toHaveBeenLastCalledWith({ kind: 'requesting' });
+    });
   });
 
   it('the WebView engine reports a minimal PoseDiag once a second', async () => {

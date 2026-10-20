@@ -30,6 +30,7 @@ import { cameraReportRoutes, recentCameraReports } from "./modules/system/camera
 import { clientErrorRoutes } from "./modules/system/clientErrors";
 import { systemRoutes } from "./modules/system/routes";
 import { userRoutes } from "./modules/users/routes";
+import { stepsRoutes } from "./modules/steps/routes";
 import { waterRoutes } from "./modules/water/routes";
 import { trainingRoutes } from "./modules/workouts/trainingRoutes";
 import { workoutRoutes } from "./modules/workouts/routes";
@@ -170,6 +171,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
     analyticsRoutes(secured, ctx);
     privacyRoutes(secured, ctx);
     waterRoutes(secured, ctx);
+    stepsRoutes(secured, ctx);
     homeRoutes(secured, ctx);
     coachRoutes(secured, ctx);
     billingRoutes(secured, ctx);

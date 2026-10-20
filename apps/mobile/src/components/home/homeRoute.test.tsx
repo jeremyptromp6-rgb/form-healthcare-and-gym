@@ -18,6 +18,7 @@ jest.mock('@/components/home/HomeView', () => {
     ),
   };
 });
+jest.mock('@/lib/useSteps', () => ({ useSteps: () => ({ status: 'unavailable' }) }));
 jest.mock('@/components/pro/ProWelcome', () => ({ ProWelcomeHost: () => null }));
 jest.mock('@/lib/queries', () => ({
   useHome: () => ({ data: { coach: { mode: mockCoachMode } }, isError: false, isRefetching: false, error: null, refetch: mockHomeRefetch }),

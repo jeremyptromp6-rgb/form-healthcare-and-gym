@@ -43,14 +43,18 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: (reason: stri
   const live = useRef(false);
   // The same for a model that reported ready but never delivers a frame result.
   const framed = useRef(false);
+  // The native side already said why it can't go on (a busy or blocked camera, a model that wouldn't
+  // download): silence is no longer the problem, and the WebView engine would hit the same wall.
+  const answered = useRef(false);
   const readyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!running) return;
     live.current = false;
     framed.current = false;
+    answered.current = false;
     readyTimer.current = null;
     const t = setTimeout(() => {
-      if (!live.current) handOver('no_live');
+      if (!live.current && !answered.current) handOver('no_live');
     }, NATIVE_LIVE_FALLBACK_MS);
     return () => {
       clearTimeout(t);
@@ -61,18 +65,40 @@ export function NativePoseFeed(p: PoseCameraFeedProps & { onFatal: (reason: stri
 
   const onCamera = useCallback(
     (e: { nativeEvent: NativeCameraEvent }) => {
-      if (e.nativeEvent.kind === 'live') live.current = true;
-      handle(toEngineMessage('camera', e.nativeEvent));
+      const ev = e.nativeEvent;
+      if (ev.kind === 'live') live.current = true;
+      if (ev.kind === 'error') {
+        // Every CameraX problem except a permission refusal (the native side maps all unknown errors to
+        // NotReadableError) hands over: the WebView engine gets its turn, and if the camera really is busy
+        // it says so itself. Only a refused permission is a real user action, so it is shown as it is.
+        if (ev.name !== 'NotAllowedError') {
+          handOver(`camera:${ev.name ?? 'unknown'}`);
+          return;
+        }
+        answered.current = true;
+      }
+      handle(toEngineMessage('camera', ev));
     },
-    [handle],
+    [handle, handOver],
   );
   const onPose = useCallback(
     (e: { nativeEvent: NativePoseEvent }) => {
       const ev = e.nativeEvent;
-      // Any native failure (a failed model download included) hands over to the WebView engine, which
-      // works on every phone: the user never sees "couldn't start" from the native engine.
       if (ev.kind === 'failed') {
-        handOver(`${ev.fatal ? 'fatal' : 'failed'}:${ev.message ?? 'unknown'}`);
+        // A fatal native failure (the engine can't start on this phone) hands over to the WebView engine,
+        // which works on every phone: the user never sees "couldn't start" from the native engine.
+        if (ev.fatal) {
+          handOver(`fatal:${ev.message ?? 'unknown'}`);
+          return;
+        }
+        // Truly offline on the first run: say so, with Try again (the WebView engine needs the internet too),
+        // and don't remember this build as a native failure. Any other download problem hands over quietly.
+        if (ev.offline) {
+          answered.current = true;
+          handle(toEngineMessage('pose', ev));
+          return;
+        }
+        handOver(`failed:${ev.message ?? 'unknown'}`);
         return;
       }
       if (ev.kind === 'ready' && !framed.current && !readyTimer.current) {

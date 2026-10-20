@@ -4,6 +4,7 @@ import {
   bodyQuestInsights,
   buildWeeklyReport,
   formIntelligence,
+  isRankBumpNote,
   ruleBasedGenerator,
   type AdaptiveInput,
   type BodyQuestResult,
@@ -75,6 +76,18 @@ describe("adaptive training — progress when earned", () => {
     const free = ruleBasedGenerator.generate(i);
     expect(plan.exercises.every((e, n) => e.sets === Math.max(2, free.exercises[n]!.sets - (free.exercises[n]!.sets > 2 ? 1 : 0)))).toBe(true);
     expect(plan.notes.join(" ")).toContain("2 of 6 planned days");
+  });
+
+  it("sets the rank bump aside for deloads, holds and low consistency", () => {
+    const short = session({ sets: [{ reps: 6, loadKg: 60 }, { reps: 5, loadKg: 60 }, { reps: 5, loadKg: 60 }], formScore: 85 });
+    const stalled = { ...inputWith([short, { ...short, localDate: "2026-10-01" }]), rankTier: 6 };
+    const plain = planned({ ...stalled, rankTier: 0 });
+    expect(planned(stalled)).toMatchObject({ progression: "deload", sets: plain.sets, targetReps: plain.targetReps });
+    const tired = { ...inputWith([session()], { plannedDays: 6, completedDays: 2 }), rankTier: 6 };
+    const noRank = adaptiveGenerator.generate({ ...tired, rankTier: 0 });
+    expect(adaptiveGenerator.generate(tired).exercises.map((e) => [e.sets, e.targetReps])).toEqual(noRank.exercises.map((e) => [e.sets, e.targetReps]));
+    expect(adaptiveGenerator.generate(tired).notes.some(isRankBumpNote)).toBe(false);
+    expect(adaptiveGenerator.generate({ ...tired, consistency: { plannedDays: 6, completedDays: 6 } }).notes.some(isRankBumpNote)).toBe(true);
   });
 
   it("never invents form: without camera data it progresses on performance and asks for a tracked set", () => {

@@ -61,7 +61,7 @@ describe('cameraScreenModel stance hint', () => {
 
   it('does not override pause, loading or a missing readout', () => {
     expect(model(readout({ stance: 'front-on' }), true).feedback?.message).toMatch(/^Paused/);
-    expect(cameraScreenModel(LIVE, { kind: 'loading', stage: 'starting' }, readout({ stance: 'front-on' }), false).feedback?.message).toMatch(/Almost ready/);
+    expect(cameraScreenModel(LIVE, { kind: 'loading', stage: 'starting' }, readout({ stance: 'front-on' }), false).overlay?.title).toBe('Almost ready');
     expect(model(null).feedback?.message).toBe('Looking for you…');
   });
 });

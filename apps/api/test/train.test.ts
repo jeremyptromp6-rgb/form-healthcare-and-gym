@@ -55,6 +55,33 @@ describe("today's workout", () => {
     for (const e of regen.plan.exercises) expect(canPerform(EXERCISE_BY_ID.get(e.exerciseId)!, ["bodyweight"])).toBe(true);
   });
 
+  it("scales difficulty a little with rank: a high-rank user's plan has the bump, a new user's doesn't", async () => {
+    const { app: a, ctx } = await makeApp();
+    app = a;
+    const fresh = await registerUser(app);
+    const ranked = await registerUser(app);
+    for (const u of [fresh, ranked]) await onboard(app, u.auth);
+    const addXp = (userId: string, xp: number) =>
+      ctx.db.prepare("INSERT INTO xp_events (user_id, source, source_key, kind, xp, idempotency_key, created_at) VALUES (?, 'workout', ?, 'award', ?, ?, 'n')").run(userId, `k${xp}`, xp, `${userId}:${xp}`);
+    addXp(ranked.id, 8300); // Iron (level 20)
+
+    const base = (await get(fresh.auth, "/workouts/today")).plan;
+    expect(base.notes.some((n: string) => / rank: /.test(n))).toBe(false);
+    const iron = (await get(ranked.auth, "/workouts/today")).plan;
+    expect(iron.notes.find((n: string) => / rank: /.test(n))).toMatch(/^Iron rank: \+3 reps on your rep targets, \+1 set on main lifts\./);
+    expect(iron.exercises.map((e: { exerciseId: string }) => e.exerciseId)).toEqual(base.exercises.map((e: { exerciseId: string }) => e.exerciseId));
+    base.exercises.forEach((e: { targetReps: { max: number }; sets: number }, i: number) => {
+      expect(iron.exercises[i].targetReps.max).toBe(e.targetReps.max + 3);
+      expect(iron.exercises[i].sets - e.sets).toBeLessThanOrEqual(1);
+    });
+
+    // Prestige counts as Champion: the same targets as Iron's reps cap, nothing beyond.
+    addXp(ranked.id, 110000);
+    const champion = (await post(ranked.auth, "/workouts/today/regenerate")).json().plan;
+    expect(champion.notes.find((n: string) => / rank: /.test(n))).toMatch(/^Champion rank: \+3 reps/);
+    expect(champion.exercises.map((e: { targetReps: unknown; sets: number }) => [e.targetReps, e.sets])).toEqual(iron.exercises.map((e: { targetReps: unknown; sets: number }) => [e.targetReps, e.sets]));
+  });
+
   it("works for a user who hasn't finished personalizing (bodyweight defaults)", async () => {
     ({ app } = await makeApp());
     const u = await registerUser(app);
