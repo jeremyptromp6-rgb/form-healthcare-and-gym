@@ -1,37 +1,31 @@
 import type { WorkoutSession } from './types';
 
 /**
- * A live set: the user taps "Start set", counts reps with +1 taps and presses Done. The timer is timestamps,
- * never an interval counter, so it keeps its time while the app is in the background, and the workout's
- * pauses are taken out of it (the same pause data the workout clock uses).
+ * Time between sets, for fair XP without any extra tapping: a set checked off claims "live" with the seconds
+ * since the previous set was saved (or since the workout screen opened). The server keeps it live only when
+ * that is plausible for the reps (1.5 s per rep), so ticking off a pile of sets at once falls back to manual.
+ *
+ * Everything here is on the device's own clock (Date.now). Server timestamps are never compared with it, so a
+ * phone clock that disagrees with the server can't unfairly turn an honest set into a manual one; the only server
+ * numbers used are the workout's total paused milliseconds, which are durations.
  */
-export interface LiveSet {
-  exerciseId: string;
-  /** Date.now() when the set started. */
-  startedAtMs: number;
-  /** The session's total paused time when the set started; later pauses are taken off the clock. */
-  pausedMsAtStart: number;
-  reps: number;
+export interface SetClock {
+  /** Date.now() of the previous set's save, or of the screen opening before the first one. */
+  anchorMs: number;
+  /** The session's total paused time at that moment; later pauses are taken off the clock. */
+  pausedMsAtAnchor: number;
 }
 
 /** The longest live set the server accepts, seconds. */
 export const LIVE_SET_MAX_SECONDS = 3600;
 
-/** The most reps a set can hold (the server's limit). */
-export const LIVE_SET_MAX_REPS = 200;
-
-export function startLiveSet(exerciseId: string, session: Pick<WorkoutSession, 'pausedMs'>, nowMs: number): LiveSet {
-  return { exerciseId, startedAtMs: nowMs, pausedMsAtStart: session.pausedMs, reps: 0 };
+export function startSetClock(session: Pick<WorkoutSession, 'pausedMs'>, nowMs: number): SetClock {
+  return { anchorMs: nowMs, pausedMsAtAnchor: session.pausedMs };
 }
 
-/** Seconds the set has really run: workout pauses excluded, frozen while the workout is paused. */
-export function liveSetSeconds(live: LiveSet, session: Pick<WorkoutSession, 'pausedMs' | 'pausedAt'>, nowMs: number): number {
-  const end = session.pausedAt ? new Date(session.pausedAt).getTime() : nowMs;
-  const pausedSince = Math.max(0, session.pausedMs - live.pausedMsAtStart);
-  return Math.max(0, Math.floor((end - live.startedAtMs - pausedSince) / 1000));
-}
-
-/** The seconds to send with a finished live set: whole seconds in the server's 1..3600 range. */
-export function liveSecondsToSend(seconds: number): number {
-  return Math.min(LIVE_SET_MAX_SECONDS, Math.max(1, Math.round(seconds)));
+/** Whole seconds since the anchor with pauses excluded, in the server's 1..3600 range. */
+export function secondsSinceSet(clock: SetClock, session: Pick<WorkoutSession, 'pausedMs'>, nowMs: number): number {
+  const paused = Math.max(0, session.pausedMs - clock.pausedMsAtAnchor);
+  const seconds = Math.floor((nowMs - clock.anchorMs - paused) / 1000);
+  return Math.min(LIVE_SET_MAX_SECONDS, Math.max(1, Number.isFinite(seconds) ? seconds : 1));
 }

@@ -127,24 +127,24 @@ describe('ActiveWorkoutView', () => {
     expect(screen.getByRole('header', { name: 'Bicep Curl' })).toBeTruthy();
     expect(screen.getByText('Set 1 of 3 · 8–12 reps @ 12 kg')).toBeTruthy();
     expect(screen.getByText('Last time: 12 × 10 kg · 11 × 10 kg')).toBeTruthy();
-    expect(screen.getByText('Start a set to count reps live, or use the camera to have them verified. Both earn full XP; reps you type in afterwards earn less.')).toBeTruthy();
+    expect(screen.getByText(/Tick each set off when you finish it, or use the camera/)).toBeTruthy();
     expect(screen.getByLabelText('Workout time 15:00')).toBeTruthy();
   });
 
-  it('adjusts reps and weight with large steppers and logs the set', async () => {
+  it('adjusts reps and weight with large steppers and logs the set from its check', async () => {
     const p = await renderActive(session());
     await fireEvent.press(screen.getByRole('button', { name: 'Increase Reps' }));
     expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 13, loadKg: 12 });
     await fireEvent.press(screen.getByRole('button', { name: 'Decrease Weight' }));
     expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 12, loadKg: 11 });
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Complete set 1, / }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
   });
 
   it('hides the weight control for bodyweight moves', async () => {
     await renderActive(session(), { index: 1, draft: { reps: 10, loadKg: 0 } });
     expect(screen.queryByRole('button', { name: 'Increase Weight' })).toBeNull();
-    expect(screen.getByText(/Start a set to count reps live/)).toBeTruthy();
+    expect(screen.getByText(/Tick each set off when you finish it/)).toBeTruthy();
   });
 
   it('offers camera tracking only when the build supports it', async () => {
@@ -167,7 +167,7 @@ describe('ActiveWorkoutView', () => {
     const p = await renderActive(session({ rest: { endsAt: '2026-09-28T10:21:30Z', seconds: 90, remainingSeconds: 90 } }));
     expect(screen.getByLabelText('90 seconds of rest left')).toBeTruthy();
     // Logging stays available while resting (pro-logger norm); the timer floats above the table.
-    expect(screen.getByRole('button', { name: 'Log without timer' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Complete set 1, / })).toBeTruthy();
     expect(screen.getByRole('button', { name: '+15 s' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: '+30 s' }));
     expect(p.onAddRest).toHaveBeenCalledWith(120);
@@ -182,7 +182,7 @@ describe('ActiveWorkoutView', () => {
     await fireEvent.press(resumeButtons[0]!);
     expect(p.onResume).toHaveBeenCalled();
     // The pause overlay is modal: assistive tech can't reach the set controls behind it.
-    expect(screen.queryByRole('button', { name: 'Log without timer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Complete set 1, / })).toBeNull();
   });
 
   it('navigates between exercises, deletes sets and ends the workout', async () => {

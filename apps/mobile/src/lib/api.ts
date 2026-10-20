@@ -304,7 +304,7 @@ export interface NewSet {
   restSeconds?: number;
   /** A warm-up set: recorded, but earns and counts nothing. */
   warmup?: boolean;
-  /** How the set was recorded. Live sets send the seconds their timer ran; the server decides what it trusts. Absent = manual. */
+  /** How the set was recorded. Checked-off sets send the seconds since the previous set; the server decides what it trusts. Absent = manual. */
   mode?: 'live' | 'manual' | 'camera';
   liveSeconds?: number;
   /** Camera trace (angles + form features); the server verifies reps, form and ROM from it. */

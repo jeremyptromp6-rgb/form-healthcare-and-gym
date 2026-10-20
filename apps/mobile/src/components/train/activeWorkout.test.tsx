@@ -92,6 +92,9 @@ async function renderView(s: WorkoutSession, over: Partial<ActiveWorkoutViewProp
   return props;
 }
 
+/** A pending row's check: "Complete set N, <reps> reps at <load>". */
+const checkOf = (n: number) => new RegExp(`^Complete set ${n}, `);
+
 const resting = () => session({ rest: { endsAt: '2026-09-28T10:21:30Z', seconds: 90, remainingSeconds: 90 } });
 
 describe('ActiveWorkoutView as one logger', () => {
@@ -105,7 +108,7 @@ describe('ActiveWorkoutView as one logger', () => {
     expect(screen.getAllByLabelText('Set 1 reps')[0]).toBeTruthy();
     expect(screen.getByLabelText('Set 1 weight in kilograms')).toBeTruthy();
     expect(screen.getAllByLabelText('Set 1 reps')).toHaveLength(2); // Bicep Curl and Push-Up
-    expect(screen.getByRole('button', { name: 'Complete set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Complete set 1, 12 reps at 12 kg' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Log set 1 of Push-Up' })).toBeTruthy();
     // Only the focused exercise is a header; the others are compact, pressable rows.
     expect(screen.getAllByRole('header')).toHaveLength(1);
@@ -119,18 +122,50 @@ describe('ActiveWorkoutView as one logger', () => {
     const p = await renderView(session());
     await fireEvent.changeText(screen.getByLabelText('Set 1 weight in kilograms'), '22,5');
     await fireEvent.changeText(screen.getAllByLabelText('Set 1 reps')[0]!, '9');
-    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
     expect(p.onLogSet).toHaveBeenCalledWith({ reps: 9, loadKg: 22.5 });
     // The whole typed set was also pushed into the parent's draft, last.
     expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 9, loadKg: 22.5 });
   });
 
-  it('logs the draft when the Log set button is pressed (no arguments)', async () => {
+  it('shows every planned set of the focused exercise prefilled, each with its own check', async () => {
+    await renderView(session());
+    for (const n of [1, 2, 3]) {
+      const check = screen.getByRole('button', { name: `Complete set ${n}, 12 reps at 12 kg` });
+      expect(check.props.accessibilityState).toMatchObject({ disabled: false });
+      expect(screen.getAllByLabelText(`Set ${n} reps`)[0]!.props.value).toBe('12');
+    }
+    expect(screen.queryByRole('button', { name: 'Log without timer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Start set/ })).toBeNull();
+  });
+
+  it('logs a later pending row with its own edited numbers', async () => {
     const p = await renderView(session());
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.changeText(screen.getByLabelText('Set 3 reps'), '8');
+    await fireEvent.changeText(screen.getByLabelText('Set 3 weight in kilograms'), '14');
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(3) }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
-    expect(p.onLogSet).toHaveBeenCalledWith();
+    expect(p.onLogSet).toHaveBeenCalledWith({ reps: 8, loadKg: 14 });
+    // Kept as the draft, so a failed save is retried as this same set.
+    expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 8, loadKg: 14 });
+  });
+
+  it('adds one more pending set with Add set', async () => {
+    await renderView(session());
+    expect(screen.queryByRole('button', { name: checkOf(4) })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Add set' }));
+    expect(screen.getByRole('button', { name: 'Complete set 4, 12 reps at 12 kg' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: checkOf(5) })).toBeNull();
+  });
+
+  it('adds a pending set after the plan is done too', async () => {
+    const done = [logged(12, 12, 'a'), logged(12, 12, 'b'), logged(12, 12, 'c')];
+    await renderView(session({ exercises: [ex({ loggedSets: done })] }));
+    expect(screen.getByRole('button', { name: checkOf(4) })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: checkOf(5) })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Add set' }));
+    expect(screen.getByRole('button', { name: checkOf(5) })).toBeTruthy();
   });
 
   it('logs another exercise straight from its row with the edited values', async () => {
@@ -153,23 +188,24 @@ describe('ActiveWorkoutView as one logger', () => {
   it('leaves other exercises display-only without onLogSetAt', async () => {
     await renderView(session(), { onLogSetAt: undefined });
     expect(screen.queryByRole('button', { name: /Log set 1 of/ })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Complete set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: checkOf(1) })).toBeTruthy();
   });
 
-  it('only lets the next set be completed; later planned sets are display-only', async () => {
+  it('lets every unlogged set of the focused exercise be checked; logged ones are done rows', async () => {
     await renderView(session({ exercises: [ex({ loggedSets: [logged(12, 12, 'a')] }), ex({ exerciseId: 'push_up', name: 'Push-Up' })] }));
-    // Focused Bicep Curl: set 1 done, set 2 active, set 3 queued.
+    // Focused Bicep Curl: set 1 done, sets 2 and 3 pending (prefilled from the last set).
     expect(screen.getByLabelText('Set 1 done')).toBeTruthy();
     expect(screen.getByLabelText('Set 2 reps')).toBeTruthy();
-    expect(screen.queryByLabelText('Set 3 reps')).toBeNull();
+    expect(screen.getByLabelText('Set 3 reps')).toBeTruthy();
     expect(screen.getByText('Set 2 of 3 · 8–12 reps @ 12 kg')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Complete set 2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Complete set 2, 12 reps at 12 kg' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Complete set 3, 12 reps at 12 kg' })).toBeTruthy();
   });
 
   it('floats the rest timer with +15 s, +30 s and Skip, keeping logging available', async () => {
     const p = await renderView(resting());
     expect(screen.getByLabelText('90 seconds of rest left')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Log without timer' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: checkOf(1) })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Increase Reps' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: '+15 s' }));
     expect(p.onAddRest).toHaveBeenLastCalledWith(105);
@@ -177,7 +213,7 @@ describe('ActiveWorkoutView as one logger', () => {
     expect(p.onAddRest).toHaveBeenLastCalledWith(120);
     await fireEvent.press(screen.getByRole('button', { name: 'Skip rest' }));
     expect(p.onSkipRest).toHaveBeenCalledTimes(1);
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
   });
 
@@ -239,7 +275,7 @@ describe('ActiveWorkoutView as one logger', () => {
     const p = await renderView(session(), { logError: 'Not saved — no connection.', logErrorIndex: 1 });
     expect(screen.getAllByText('Not saved — no connection.')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Retry — save this set' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Log without timer' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: checkOf(1) })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
     expect(p.onLogSetAt).toHaveBeenCalledWith(1, { reps: 15, loadKg: 0 });
   });
@@ -247,23 +283,23 @@ describe('ActiveWorkoutView as one logger', () => {
   it('disables logging while paused', async () => {
     await renderView(session({ status: 'paused', pausedAt: '2026-09-28T10:15:00Z' }));
     // The modal overlay hides the table from assistive tech; the disabled state is still set on the check.
-    const check = screen.getByRole('button', { name: 'Complete set 1', includeHiddenElements: true });
+    const check = screen.getByRole('button', { name: checkOf(1), includeHiddenElements: true });
     expect(check.props.accessibilityState.disabled).toBe(true);
   });
 
   it('shows every active row busy and blocked while a set is being saved, not just the focused one', async () => {
     await renderView(session(), { logging: true });
-    for (const name of ['Complete set 1', 'Log set 1 of Push-Up']) {
+    for (const name of [checkOf(1), checkOf(2), 'Log set 1 of Push-Up']) {
       const check = screen.getByRole('button', { name });
       expect(check.props.accessibilityState).toMatchObject({ disabled: true, busy: true });
     }
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
-    expect(screen.getByRole('button', { name: 'Complete set 1' }).props.accessibilityState.busy).toBe(true);
+    expect(screen.getByRole('button', { name: checkOf(1) }).props.accessibilityState.busy).toBe(true);
   });
 
   it('leaves the active rows idle when nothing is being saved', async () => {
     await renderView(session());
-    for (const name of ['Complete set 1', 'Log set 1 of Push-Up']) {
+    for (const name of [checkOf(1), checkOf(3), 'Log set 1 of Push-Up']) {
       expect(screen.getByRole('button', { name }).props.accessibilityState).toMatchObject({ disabled: false, busy: false });
     }
   });
@@ -292,12 +328,12 @@ describe('ActiveWorkoutView as one logger', () => {
       return <ActiveWorkoutView {...base} />;
     }
 
-    it('logs what was typed when the big Log set button is pressed without the field blurring', async () => {
+    it('logs what was typed when the check is pressed without the field blurring', async () => {
       const onLog = jest.fn();
       await render(<Harness onLog={onLog} />);
       await fireEvent.changeText(screen.getByLabelText('Set 1 weight in kilograms'), '22.5');
       await fireEvent.changeText(screen.getAllByLabelText('Set 1 reps')[0]!, '9');
-      await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' })); // no blur in between
+      await fireEvent.press(screen.getByRole('button', { name: checkOf(1) })); // no blur in between
       expect(onLog).toHaveBeenCalledTimes(1);
       expect(onLog).toHaveBeenCalledWith({ reps: 9, loadKg: 22.5 });
     });
@@ -353,7 +389,7 @@ describe('ActiveWorkoutView completion animation', () => {
 
   it('plays when the active set is logged: the same row turns done instead of being replaced', async () => {
     const { rerender } = await render(<ActiveWorkoutView {...props(session())} />);
-    expect(screen.getByRole('button', { name: 'Complete set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: checkOf(1) })).toBeTruthy();
     const timing = jest.spyOn(Animated, 'timing');
     const withSet = session({ exercises: [ex({ loggedSets: [logged(12, 12, 'a')] }), ex({ exerciseId: 'push_up', name: 'Push-Up', loadable: false, targetLoadKg: null, previous: null })] });
     await rerender(<ActiveWorkoutView {...props(withSet)} />);
@@ -386,7 +422,7 @@ describe('ActiveWorkoutView warm-ups, previous and notes', () => {
     // Working set 1 lines up with last time's first set (12 × 10), not with the warm-up.
     expect(screen.getAllByText('12 × 10').length).toBeGreaterThan(0);
     // Planned sets are working sets: 3 planned + 1 warm-up gives 4 rows (one is the active one).
-    expect(screen.getByRole('button', { name: 'Complete set 2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: checkOf(2) })).toBeTruthy();
     expect(screen.getByText('Set 2 of 3 · 8–12 reps @ 12 kg')).toBeTruthy();
   });
 
@@ -394,9 +430,8 @@ describe('ActiveWorkoutView warm-ups, previous and notes', () => {
     await renderView(session({ exercises: [ex()] }), { draft: { reps: 10, loadKg: 5, warmup: true } });
     expect(screen.getByText('Warm-up set')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Complete warm-up set' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Log warm-up without timer' })).toBeTruthy();
-    // 3 planned working sets still follow the warm-up row.
-    expect(screen.getAllByText('8–12')).toHaveLength(3);
+    // 3 planned working sets still follow the warm-up row, each checkable.
+    for (const n of [1, 2, 3]) expect(screen.getByRole('button', { name: `Complete set ${n}, 12 reps at 12 kg` })).toBeTruthy();
   });
 
   it('marks the next set as a warm-up and carries the flag into the logged draft', async () => {

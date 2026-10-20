@@ -6,8 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseArt } from '@/components/art/ExerciseArt';
 import { AppText, Button, Divider, ExerciseRow, Field, IconButton, InlineMessage, Row, StatStrip } from '@/components/ui';
 import { barKgOf, useBarWeight } from '@/lib/barWeight';
-import { liveSecondsToSend, startLiveSet, type LiveSet } from '@/lib/liveSet';
-import type { SessionExercise, SetMode, WorkoutSession } from '@/lib/types';
+import type { SessionExercise, WorkoutSession } from '@/lib/types';
 import { formatVolume, loadFromDisplay, loadStep, loadToDisplay, loadUnit, lbToKg, snapLoadKg, useUnits, type Units } from '@/lib/units';
 import {
   sessionTotals,
@@ -23,20 +22,13 @@ import {
   workingSets,
 } from '@/lib/workoutSession';
 import { colors, MAX_CONTENT_WIDTH, radius, space } from '@/theme/tokens';
-import { LiveSetPanel } from './LiveSetPanel';
 import { PlateCalculatorSheet } from './PlateCalculatorSheet';
 import { RestTimerPill } from './RestTimerPill';
 import { SetRow, SetTableHeader } from './SetRow';
 import { Stepper } from './Stepper';
 
-/**
- * The next set being entered. `warmup` marks it a warm-up set (absent means a working set). `mode` and `liveSeconds`
- * come from a finished live set (absent = typed in, i.e. manual); changing the reps by hand drops them.
- */
-export type Draft = { reps: number; loadKg: number; warmup?: boolean; mode?: SetMode; liveSeconds?: number };
-
-/** The draft as typed in by hand: reps and load only, no live timer. */
-const typedIn = (d: Draft): Draft => ({ reps: d.reps, loadKg: d.loadKg, ...(d.warmup ? { warmup: true } : {}) });
+/** The next set being entered. `warmup` marks it a warm-up set (absent means a working set). */
+export type Draft = { reps: number; loadKg: number; warmup?: boolean };
 
 /** Longest workout note the server keeps. */
 const NOTES_MAX = 500;
@@ -49,8 +41,8 @@ export interface ActiveWorkoutViewProps {
   onChangeDraft: (draft: Draft) => void;
   loadStepKg: number;
   /**
-   * Logs the focused exercise's next set. The set row's check passes the numbers it just committed
-   * (the parent's draft can lag a keystroke in the same tick); the 'Log set N' button passes nothing
+   * Logs the focused exercise's next set. A set row's check passes the numbers it just committed
+   * (the parent's draft can lag a keystroke in the same tick); the Retry button passes nothing
    * and logs `draft`.
    */
   onLogSet: (draft?: Draft) => void;
@@ -120,17 +112,6 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
   const { bar, setBar } = useBarWeight(units);
   const focusedEx = session.exercises[index];
   const barbell = !!focusedEx && focusedEx.loadable && usesBarbell(focusedEx.exerciseId);
-  // The live set being counted (one at a time, on one exercise). Local: it is a timer and a tap count until Done saves it.
-  const [live, setLive] = useState<LiveSet | null>(null);
-  const liveEx = live ? session.exercises.find((e) => e.exerciseId === live.exerciseId) : undefined;
-  const finishLive = (seconds: number) => {
-    if (!live) return;
-    const d: Draft = { reps: live.reps, loadKg: p.draft.loadKg, ...(p.draft.warmup ? { warmup: true } : {}), mode: 'live', liveSeconds: liveSecondsToSend(seconds) };
-    setLive(null);
-    // Kept as the draft too, so a failed save is retried as the same live set.
-    p.onChangeDraft(d);
-    p.onLogSet(d);
-  };
   const [warmQueue, setWarmQueue] = useState<WarmupQueue | null>(null);
   // What the queue's effect already did, so a re-render never repeats it: a send, the resume or a failure.
   const handled = useRef<{ queue: WarmupQueue; step: string } | null>(null);
@@ -238,7 +219,7 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                 const key = draftKey(e);
                 const rowDraft = rowDrafts[key] ?? nextSetDefaults(e, units);
                 const patchRow = (patch: Partial<Draft>) => setRowDrafts((prev) => ({ ...prev, [key]: { ...(prev[key] ?? nextSetDefaults(e, units)), ...patch } }));
-                const patchDraft = (patch: Partial<Draft>) => (focused ? p.onChangeDraft({ ...(patch.reps === undefined ? p.draft : typedIn(p.draft)), ...patch }) : patchRow(patch));
+                const patchDraft = (patch: Partial<Draft>) => (focused ? p.onChangeDraft({ ...p.draft, ...patch }) : patchRow(patch));
                 return (
                   <View key={`${e.exerciseId}-${i}`}>
                     {i > 0 ? <Divider /> : null}
@@ -252,15 +233,6 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                           showError={!!p.logError && errorIndex === i}
                           warmups={{ count: warmups.length, adding: warmActive && !warmFailed && warmQueue?.exerciseId === e.exerciseId, onAdd: addWarmups }}
                           plates={barbell ? { bar, onChangeBar: setBar } : null}
-                          liveSet={{
-                            live: live && live.exerciseId === e.exerciseId ? live : null,
-                            elsewhere: live && live.exerciseId !== e.exerciseId ? (liveEx?.name ?? 'another exercise') : null,
-                            onStart: () => setLive(startLiveSet(e.exerciseId, session, Date.now())),
-                            onAddRep: () => setLive((l) => (l ? { ...l, reps: l.reps + 1 } : l)),
-                            onUndoRep: () => setLive((l) => (l ? { ...l, reps: Math.max(0, l.reps - 1) } : l)),
-                            onDone: finishLive,
-                            onCancel: () => setLive(null),
-                          }}
                         />
                       ) : (
                         <>
@@ -295,7 +267,21 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                               ? (values) => p.onLogSetAt?.(i, { reps: values.reps ?? rowDraft.reps, loadKg: e.loadable ? (values.kg ?? rowDraft.loadKg) : 0 })
                               : undefined
                         }
-                        completeLabel={(n) => (focused ? `Complete set ${n}` : `Log set ${n} of ${e.name}`)}
+                        later={
+                          focused
+                            ? {
+                                // Rows after the next one start from the plan (a warm-up draft isn't a working weight).
+                                draft: p.draft.warmup ? nextSetDefaults(e, units) : p.draft,
+                                onComplete: (values) => {
+                                  const base = p.draft.warmup ? nextSetDefaults(e, units) : p.draft;
+                                  const d: Draft = { reps: values.reps ?? base.reps, loadKg: e.loadable ? (values.kg ?? base.loadKg) : p.draft.loadKg };
+                                  // Kept as the draft too, so a failed save is retried as this same set.
+                                  if (d.reps !== p.draft.reps || d.loadKg !== p.draft.loadKg || p.draft.warmup) p.onChangeDraft(d);
+                                  p.onLogSet(d);
+                                },
+                              }
+                            : undefined
+                        }
                         canMarkWarmup={focused}
                         deleteLabelled={focused}
                         onDeleteSet={p.onDeleteSet}
@@ -354,7 +340,6 @@ function FocusedHeader({
   showError,
   warmups,
   plates,
-  liveSet,
 }: {
   p: ActiveWorkoutViewProps;
   exercise: SessionExercise;
@@ -365,16 +350,6 @@ function FocusedHeader({
   warmups: { count: number; adding: boolean; onAdd: () => void };
   /** Barbell lifts: the plate calculator and the saved bar weight. */
   plates: { bar: number; onChangeBar: (bar: number) => void } | null;
-  /** Live set mode: the set being counted here (if any), the name of the exercise a live set is running on instead (if any), and the actions. */
-  liveSet: {
-    live: LiveSet | null;
-    elsewhere: string | null;
-    onStart: () => void;
-    onAddRep: () => void;
-    onUndoRep: () => void;
-    onDone: (seconds: number) => void;
-    onCancel: () => void;
-  };
 }) {
   const [platesOpen, setPlatesOpen] = useState(false);
   const setNumber = workingSets(exercise).length + 1;
@@ -407,40 +382,14 @@ function FocusedHeader({
         ) : null}
         <AppText variant="caption" color={colors.textFaint}>
           {exercise.cameraVerifiable
-            ? 'Start a set to count reps live, or use the camera to have them verified. Both earn full XP; reps you type in afterwards earn less.'
-            : 'Start a set to count reps live and earn full XP. Reps you type in afterwards earn less.'}
+            ? 'Tick each set off when you finish it, or use the camera to have your reps verified. Ticking off sets far faster than you could have done them earns less XP.'
+            : 'Tick each set off when you finish it. Ticking off sets far faster than you could have done them earns less XP.'}
         </AppText>
       </View>
 
       <View style={styles.entry}>
-        {liveSet.live ? (
-          <>
-            <LiveSetPanel
-              live={liveSet.live}
-              session={p.session}
-              nowMs={p.now.getTime()}
-              label={p.draft.warmup ? 'Warm-up set' : `Set ${setNumber}`}
-              onAddRep={liveSet.onAddRep}
-              onUndoRep={liveSet.onUndoRep}
-              onDone={liveSet.onDone}
-              onCancel={liveSet.onCancel}
-              disabled={paused}
-            />
-            {exercise.loadable ? (
-              <Stepper
-                label="Weight"
-                unit={loadUnit(units)}
-                value={loadToDisplay(p.draft.loadKg, units)}
-                step={loadStep(p.loadStepKg, units)}
-                max={loadToDisplay(1000, units)}
-                onChange={(v) => p.onChangeDraft({ ...p.draft, loadKg: loadFromDisplay(v, units) })}
-              />
-            ) : null}
-          </>
-        ) : (
-          <>
         <Row gap={space.lg} style={{ alignItems: 'flex-start' }}>
-          <Stepper label="Reps" value={p.draft.reps} onChange={(reps) => p.onChangeDraft({ ...typedIn(p.draft), reps })} />
+          <Stepper label="Reps" value={p.draft.reps} onChange={(reps) => p.onChangeDraft({ ...p.draft, reps })} />
           {exercise.loadable ? (
             <Stepper
               label="Weight"
@@ -470,31 +419,7 @@ function FocusedHeader({
         ) : null}
         {plates ? <PlateCalculatorSheet visible={platesOpen} onClose={() => setPlatesOpen(false)} loadKg={p.draft.loadKg} units={units} bar={plates.bar} onChangeBar={plates.onChangeBar} /> : null}
         {showError ? <InlineMessage tone="danger">{p.logError}</InlineMessage> : null}
-        {showError ? null : (
-          <Button
-            label={p.draft.warmup ? 'Start warm-up set' : `Start set ${setNumber}`}
-            icon="play"
-            onPress={liveSet.onStart}
-            disabled={paused || warmups.adding || p.logging || !!liveSet.elsewhere}
-            accessibilityHint="Starts a timer and a rep counter. Live sets earn full XP"
-          />
-        )}
-        {liveSet.elsewhere ? (
-          <AppText variant="caption" color={colors.textMuted}>
-            Finish the live set on {liveSet.elsewhere} first.
-          </AppText>
-        ) : null}
-        <Button
-          label={showError ? 'Retry — save this set' : p.draft.warmup ? 'Log warm-up without timer' : 'Log without timer'}
-          variant={showError ? 'primary' : 'secondary'}
-          icon="checkmark"
-          onPress={() => p.onLogSet()}
-          loading={p.logging}
-          disabled={paused}
-          accessibilityHint={showError ? undefined : 'Saves the reps you typed. Typed-in sets earn less XP than live or camera sets'}
-        />
-          </>
-        )}
+        {showError ? <Button label="Retry — save this set" icon="checkmark" onPress={() => p.onLogSet()} loading={p.logging} disabled={paused} /> : null}
       </View>
     </>
   );
@@ -514,7 +439,7 @@ function SetTable({
   busy,
   onPatch,
   onComplete,
-  completeLabel,
+  later,
   canMarkWarmup,
   deleteLabelled,
   onDeleteSet,
@@ -529,7 +454,11 @@ function SetTable({
   /** Changes the next set's draft (several fields at once when PREVIOUS is tapped). */
   onPatch: (patch: Partial<Draft>) => void;
   onComplete?: (values: { kg: number | null; reps: number | null }) => void;
-  completeLabel: (setNumber: number) => string;
+  /**
+   * The focused exercise only: the sets after the next one are checkable too, each starting from `draft`
+   * (checking one logs it as the next set). Without it they are display-only targets. It also offers "Add set".
+   */
+  later?: { draft: { reps: number; loadKg: number }; onComplete: (values: { kg: number | null; reps: number | null }) => void };
   /** Only the focused exercise lets the next set be marked a warm-up (keeps each switch label unique). */
   canMarkWarmup: boolean;
   /** Only the focused exercise offers delete (its label is just "Delete set N"), keeping each label unique. */
@@ -539,11 +468,14 @@ function SetTable({
 }) {
   const logged = exercise.loggedSets.length;
   const loggedWarmups = exercise.loggedSets.filter((s) => s.warmup).length;
+  // Extra rows the user added past the plan ("Add set").
+  const [added, setAdded] = useState(0);
   // The focused exercise always has a next set to log (even past the plan); others only while sets remain.
   const showActive = focused || !exerciseDone(exercise);
   const activeIsWarmup = showActive && !!onComplete && !!draft.warmup;
   // Planned sets are working sets: warm-ups (logged, or the one being entered) come on top of them.
-  const total = Math.max((exercise.sets ?? 0) + loggedWarmups + (activeIsWarmup ? 1 : 0), logged + (showActive ? 1 : 0));
+  const planned = (exercise.sets ?? 0) + loggedWarmups + (activeIsWarmup ? 1 : 0);
+  const total = Math.max(planned + (later ? added : 0), logged + (showActive ? 1 : 0));
   if (total === 0) return null;
   const prev = exercise.previous?.sets ?? [];
   const prevText = (working: number | null) => {
@@ -553,6 +485,8 @@ function SetTable({
   const targetReps = exercise.targetReps ? (exercise.targetReps.min === exercise.targetReps.max ? String(exercise.targetReps.min) : `${exercise.targetReps.min}–${exercise.targetReps.max}`) : null;
   const targetKg = exercise.targetLoadKg != null ? String(loadToDisplay(snapLoadKg(exercise.targetLoadKg, units), units)) : null;
   const unit = loadUnit(units);
+  const completeLabel = (n: number, d: { reps: number; loadKg: number }) =>
+    focused ? `Complete set ${n}, ${d.reps} ${d.reps === 1 ? 'rep' : 'reps'}${exercise.loadable ? ` at ${loadToDisplay(d.loadKg, units)} ${unit}` : ''}` : `Log set ${n} of ${exercise.name}`;
   // Working and warm-up sets seen so far in the walk down the table.
   let work = 0;
   let warm = 0;
@@ -628,18 +562,40 @@ function SetTable({
               onChangeKg={(v) => onPatch({ loadKg: loadFromDisplay(v, units) })}
               onChangeReps={(reps) => onPatch({ reps })}
               onComplete={onComplete && ((values) => onComplete({ kg: values.kg === null ? null : loadFromDisplay(values.kg, units), reps: values.reps }))}
-              completeLabel={isWarmup ? 'Complete warm-up set' : completeLabel(n)}
+              completeLabel={isWarmup ? 'Complete warm-up set' : completeLabel(n, draft)}
               busy={busy}
               disabled={paused}
             />
           );
         }
         const n = ++work;
+        if (later) {
+          // A planned set still to do: prefilled, editable on the spot, and checkable.
+          return (
+            <SetRow
+              key={rowKey}
+              number={n}
+              state="active"
+              loadable={exercise.loadable}
+              previous={prevText(n - 1)}
+              kg={null}
+              reps={null}
+              unit={unit}
+              kgValue={loadToDisplay(later.draft.loadKg, units)}
+              repsValue={later.draft.reps}
+              onComplete={(values) => later.onComplete({ kg: values.kg === null ? null : loadFromDisplay(values.kg, units), reps: values.reps })}
+              completeLabel={completeLabel(n, later.draft)}
+              busy={busy}
+              disabled={paused}
+            />
+          );
+        }
         return <SetRow key={rowKey} number={n} state="queued" loadable={exercise.loadable} unit={unit} previous={prevText(n - 1)} kg={targetKg} reps={targetReps} />;
       })}
+      {later ? <Button label="Add set" icon="add" variant="ghost" onPress={() => setAdded((a) => Math.max(a + 1, logged + 2 - planned))} disabled={paused} accessibilityHint="Adds one more set to this exercise" /> : null}
       {canMarkWarmup && onComplete ? (
         <AppText variant="caption" color={colors.textFaint}>
-          Tap the set number to mark a warm-up, or the previous value to reuse it. Warm-ups don&apos;t count towards XP, records or totals.
+          Tick a set when you finish it. Tap the set number to mark a warm-up, or the previous value to reuse it. Warm-ups don&apos;t count towards XP, records or totals.
         </AppText>
       ) : null}
     </View>

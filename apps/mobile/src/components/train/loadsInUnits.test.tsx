@@ -117,7 +117,7 @@ describe('ActiveWorkoutView loads in display units', () => {
     const p = await renderView(session(), { units: 'imperial' });
     await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
     expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 12, loadKg: 61.23 });
-    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Complete set 1, / }));
     expect(p.onLogSet).toHaveBeenCalledWith({ reps: 12, loadKg: 61.23 });
   });
 

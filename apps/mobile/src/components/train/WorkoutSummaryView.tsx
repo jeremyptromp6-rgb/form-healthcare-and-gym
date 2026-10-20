@@ -21,7 +21,7 @@ const FLAG_MESSAGE: Record<string, { tone: 'warning' | 'danger'; text: string }>
   partially_capped: { tone: 'warning', text: "Part of this session went past today's 2-hour cap, so it earned partial XP." },
 };
 /** How each set was recorded, as a small badge on its row. */
-const MODE_BADGE = { live: 'Live', camera: 'Camera', manual: 'Manual' } as const;
+const MODE_BADGE = { live: 'Logged', camera: 'Camera', manual: 'Manual' } as const;
 
 const PR_LABEL: Record<string, string> = {
   max_load: 'Heaviest load',
@@ -187,7 +187,7 @@ export function WorkoutSummaryView({
         </Card>
       ) : null}
 
-      {onDone && manualSets ? <InlineMessage tone="info">Manual sets earn less XP. Live and camera sets earn full XP.</InlineMessage> : null}
+      {onDone && manualSets ? <InlineMessage tone="info">Manual sets earn less XP (sets logged much faster than they could have been done count as manual). Logged and camera sets earn full XP.</InlineMessage> : null}
       {workout.flags.map((f) => (FLAG_MESSAGE[f] ? <InlineMessage key={f} tone={FLAG_MESSAGE[f].tone}>{FLAG_MESSAGE[f].text}</InlineMessage> : null))}
       {summary.prs.some((p) => p.status === 'needs_review') ? (
         <InlineMessage tone="info">A big jump from your previous best is held for review before it counts as a PR.</InlineMessage>

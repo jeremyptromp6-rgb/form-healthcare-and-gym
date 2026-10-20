@@ -13,6 +13,7 @@ import { useScreenAwake } from '@/lib/keepAwake';
 import { usePrefetchPoseModels } from '@/lib/pose/prefetch';
 import { livePoseSupport } from '@/lib/pose/support';
 import { useActiveSession, useCoachInsight, useCompleteSession, useDeleteSet, useExercises, useLogSet, useSessionAction, useSessionNotes, useStartRest, useUpdateSet } from '@/lib/queries';
+import { secondsSinceSet, startSetClock, type SetClock } from '@/lib/liveSet';
 import { onWorkoutCompleted } from '@/lib/reminders';
 import type { CompletionResult, PainLevel, WorkoutSession } from '@/lib/types';
 import { useUnits } from '@/lib/units';
@@ -90,6 +91,9 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   // A failed save keeps its client id, so "Retry" can never create a second copy of the set.
   // Keyed `${exerciseId}:${loggedCount}` so every exercise's pending set has its own id.
   const pending = useRef(new Map<string, string>());
+  // Device-clock time of the previous set (or of this screen opening): checking a set off sends the time since then (pauses excluded),
+  // so the server can tell a real set from a pile ticked at once. Never compared with server timestamps, so clock skew can't hurt.
+  const setClock = useRef<SetClock | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
   const [logErrorIndex, setLogErrorIndex] = useState<number | null>(null);
   const [finishing, setFinishing] = useState(false);
@@ -100,6 +104,12 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const [discardError, setDiscardError] = useState<string | null>(null);
   // The last pause / resume / rest / delete that failed, shown on the workout until the next try.
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClock.current ??= startSetClock(session, Date.now());
+    // Only the screen opening starts the clock; later sets restart it when they save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -131,13 +141,14 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
         targetLoadKg: target.targetLoadKg ?? undefined,
         restSeconds: target.restSeconds,
         ...(values.warmup ? { warmup: true } : {}),
-        // A set counted on the live timer says so (with its seconds); anything typed in is manual and earns less XP.
-        mode: values.mode === 'live' && values.liveSeconds ? 'live' : 'manual',
-        ...(values.mode === 'live' && values.liveSeconds ? { liveSeconds: values.liveSeconds } : {}),
+        // Checked off after the time since the last set; the server keeps it live only if that is plausible for the reps, else it counts as manual.
+        mode: 'live',
+        liveSeconds: secondsSinceSet((setClock.current ??= startSetClock(session, Date.now())), session, Date.now()),
       },
       {
         onSuccess: ({ session: next }) => {
           pending.current.delete(key);
+          setClock.current = startSetClock(next, Date.now());
           if (i !== index) {
             // Show what was just logged on another exercise.
             setSelected(i);
@@ -160,7 +171,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
     setActionError(null);
     mutate(failed(what));
   };
-  // The focused row's check passes the values it just typed; the Log button logs the current draft.
+  // A set row's check passes the values it just typed; Retry logs the current draft.
   const onLogSet = (typed?: Draft) => logAt(index, typed ?? draft);
 
   if (finishing) {

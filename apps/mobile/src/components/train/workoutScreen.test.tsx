@@ -3,6 +3,9 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
 import WorkoutScreen from '@/app/workout';
 
+/** A pending row's check: "Complete set N, <reps> reps at <load>". */
+const checkOf = (n: number) => new RegExp(`^Complete set ${n}, `);
+
 const NETWORK_MESSAGE = 'Not saved — no connection. Your set is kept; tap Retry.';
 
 function ex(over: Partial<SessionExercise> = {}): SessionExercise {
@@ -95,14 +98,15 @@ describe('WorkoutScreen logging', () => {
     await render(<WorkoutScreen />);
     await fireEvent.changeText(screen.getByLabelText('Set 1 weight in kilograms'), '22,5');
     await fireEvent.changeText(screen.getAllByLabelText('Set 1 reps')[0]!, '9');
-    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(mockLogMutate).toHaveBeenCalledTimes(1);
     expect(logBody(0)).toEqual({
       clientSetId: expect.any(String),
       exerciseId: 'bicep_curl',
       reps: 9,
       loadKg: 22.5,
-      mode: 'manual',
+      mode: 'live',
+      liveSeconds: expect.any(Number),
       targetReps: 12,
       targetLoadKg: 12,
       restSeconds: 90,
@@ -111,26 +115,35 @@ describe('WorkoutScreen logging', () => {
     expect(screen.getByRole('header', { name: 'Bicep Curl' })).toBeTruthy();
   });
 
-  it('logs the current draft from the Log set button', async () => {
+  it('logs the prefilled values when a set is ticked, and the stepped draft for the next one', async () => {
     succeed();
     await render(<WorkoutScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1, 12 reps at 12 kg' }));
     expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 12, loadKg: 12, restSeconds: 90 });
     await fireEvent.press(screen.getByRole('button', { name: 'Increase Reps' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1, 13 reps at 12 kg' }));
     expect(logBody(1)).toMatchObject({ exerciseId: 'bicep_curl', reps: 13, loadKg: 12 });
+  });
+
+  it('logs a later pending set as the next set with its own numbers', async () => {
+    succeed();
+    await render(<WorkoutScreen />);
+    await fireEvent.changeText(screen.getByLabelText('Set 3 reps'), '8');
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(3) }));
+    expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 8, loadKg: 12, mode: 'live' });
+    expect(logBody(0)).not.toHaveProperty('warmup');
   });
 
   it('logs a set marked as a warm-up with warmup: true, and a normal set without the field', async () => {
     succeed();
     await render(<WorkoutScreen />);
     await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
-    expect(screen.getByRole('button', { name: 'Log warm-up without timer' })).toBeTruthy();
-    await fireEvent.press(screen.getByRole('button', { name: 'Log warm-up without timer' }));
+    expect(screen.getByRole('button', { name: 'Complete warm-up set' })).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Complete warm-up set' }));
     expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 12, loadKg: 12, warmup: true });
     // The fixture session doesn't advance, so the draft is still a warm-up: switch it off. A working set carries no warmup field.
     await fireEvent.press(screen.getByRole('switch', { name: 'Warm-up for set 1' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(logBody(1)).not.toHaveProperty('warmup');
   });
 
@@ -163,7 +176,8 @@ describe('WorkoutScreen logging', () => {
       exerciseId: 'push_up',
       reps: 14,
       loadKg: 0,
-      mode: 'manual',
+      mode: 'live',
+      liveSeconds: expect.any(Number),
       targetReps: 15,
       targetLoadKg: undefined,
       restSeconds: 60,
@@ -179,7 +193,7 @@ describe('WorkoutScreen logging', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
     expect(logBody(1).clientSetId).toBe(logBody(0).clientSetId);
     // A different exercise gets its own id (and doesn't disturb Push-Up's pending one).
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(logBody(2).exerciseId).toBe('bicep_curl');
     expect(logBody(2).clientSetId).not.toBe(logBody(0).clientSetId);
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
@@ -189,7 +203,7 @@ describe('WorkoutScreen logging', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
     expect(logBody(4).clientSetId).toBe(logBody(0).clientSetId);
     // That success moved focus to Push-Up; its next attempt (same set number in this static fixture) is a fresh set.
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(logBody(5).exerciseId).toBe('push_up');
     expect(logBody(5).clientSetId).not.toBe(logBody(0).clientSetId);
   });
@@ -203,7 +217,7 @@ describe('WorkoutScreen logging', () => {
     expect(screen.queryByRole('button', { name: 'Retry — save this set' })).toBeNull();
     expect(screen.getByRole('header', { name: 'Bicep Curl' })).toBeTruthy();
     // A failed save on the focused exercise puts the error and Retry there instead.
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(screen.getAllByText(NETWORK_MESSAGE)).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Retry — save this set' })).toBeTruthy();
   });
@@ -408,7 +422,7 @@ describe('WorkoutScreen in pounds', () => {
     expect(screen.getByLabelText('Set 1 weight in pounds')).toBeTruthy();
     expect(screen.getByText('LB', { includeHiddenElements: true })).toBeTruthy(); // the column caption
     await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
-    await fireEvent.press(screen.getByRole('button', { name: 'Complete set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(logBody(0).loadKg).toBeCloseTo(61.2, 1);
     expect(logBody(0).loadKg).toBe(61.23);
   });
@@ -423,7 +437,7 @@ describe('WorkoutScreen in pounds', () => {
     await renderImperial();
     await fireEvent.changeText(screen.getByLabelText('Set 1 weight in pounds'), '135');
     await fireEvent.press(screen.getByRole('button', { name: 'Increase Weight' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(logBody(0).loadKg).toBe(63.5); // 140 lb
   });
 
@@ -436,35 +450,59 @@ describe('WorkoutScreen in pounds', () => {
   });
 });
 
-describe('WorkoutScreen live sets', () => {
-  it('saves a live set as live with its seconds, and asks the server to start the rest', async () => {
+describe('WorkoutScreen set timing for fair XP', () => {
+  const T0 = new Date('2026-10-01T09:00:00Z').getTime(); // deliberately unrelated to the fixture's server timestamps
+  let nowMs = T0;
+  let dateNow: jest.SpyInstance;
+  beforeEach(() => {
+    nowMs = T0;
+    dateNow = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
+  });
+  afterEach(() => dateNow.mockRestore());
+
+  it('sends mode live with the seconds since the screen opened for the first set, and asks the server to start the rest', async () => {
     succeed();
     await render(<WorkoutScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Start set 1' }));
-    for (let i = 0; i < 3; i++) await fireEvent.press(screen.getByRole('button', { name: '+1 rep' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Done' }));
+    nowMs = T0 + 90_000;
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
     expect(mockLogMutate).toHaveBeenCalledTimes(1);
-    expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 3, loadKg: 12, mode: 'live', restSeconds: 90 });
-    expect(logBody(0).liveSeconds).toBeGreaterThanOrEqual(1);
-    expect(logBody(0).liveSeconds).toBeLessThanOrEqual(3600);
+    expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', reps: 12, loadKg: 12, mode: 'live', liveSeconds: 90, restSeconds: 90 });
   });
 
-  it('retries a failed live save as the same live set, with the same client id', async () => {
+  it('counts from the previous set that saved, on any exercise, and never from server timestamps', async () => {
+    succeed();
+    // A logged set stamped by a server clock days away must not matter.
+    mockSession = { ...makeSession(), startedAt: '2026-01-01T00:00:00Z' };
+    await render(<WorkoutScreen />);
+    nowMs = T0 + 30_000;
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
+    expect(logBody(0)).toMatchObject({ exerciseId: 'bicep_curl', liveSeconds: 30 });
+    nowMs = T0 + 70_000;
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
+    expect(logBody(1)).toMatchObject({ mode: 'live', liveSeconds: 40 });
+    nowMs = T0 + 75_000;
+    await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
+    expect(logBody(2)).toMatchObject({ exerciseId: 'push_up', mode: 'live', liveSeconds: 5 });
+  });
+
+  it('does not restart the clock when a save fails', async () => {
     failOffline();
     await render(<WorkoutScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Start set 1' }));
-    for (let i = 0; i < 4; i++) await fireEvent.press(screen.getByRole('button', { name: '+1 rep' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Done' }));
+    nowMs = T0 + 20_000;
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
+    nowMs = T0 + 50_000;
     await fireEvent.press(screen.getByRole('button', { name: 'Retry — save this set' }));
-    expect(mockLogMutate).toHaveBeenCalledTimes(2);
-    expect(logBody(1)).toMatchObject({ reps: 4, mode: 'live', liveSeconds: logBody(0).liveSeconds, clientSetId: logBody(0).clientSetId });
+    expect(logBody(0).liveSeconds).toBe(20);
+    expect(logBody(1)).toMatchObject({ liveSeconds: 50, clientSetId: logBody(0).clientSetId });
   });
 
-  it('marks a typed-in set manual', async () => {
+  it('is never below 1 s (ticking sets off back to back) and never above the 3600 s the server takes', async () => {
     succeed();
     await render(<WorkoutScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
-    expect(logBody(0)).toMatchObject({ mode: 'manual' });
-    expect(logBody(0).liveSeconds).toBeUndefined();
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
+    expect(logBody(0)).toMatchObject({ mode: 'live', liveSeconds: 1 });
+    nowMs = T0 + 5 * 3600_000;
+    await fireEvent.press(screen.getByRole('button', { name: checkOf(1) }));
+    expect(logBody(1)).toMatchObject({ mode: 'live', liveSeconds: 3600 });
   });
 });
