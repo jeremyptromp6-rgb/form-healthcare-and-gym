@@ -3,7 +3,7 @@ import { ApiError } from '@/lib/api';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import { colors, elevation } from '@/theme/tokens';
+import { colors, elevation, glow, scheme } from '@/theme/tokens';
 import { Button, ChipGroup, ErrorState, ICON_BUBBLE, IconBubble, ListRow, Screen, Segmented, StateView, stateIcon } from './index';
 import { InTabsContext, TAB_BAR, tabBarBottomPadding } from './tabBar';
 
@@ -131,7 +131,8 @@ describe('button states', () => {
     await render(<Button label="Save" />);
     const s = look('Save');
     expect(s.backgroundColor).toBe(colors.primary);
-    expect(s.shadowOpacity).toBe(elevation.lifted.shadowOpacity);
+    // Dark mode adds the primary glow on top of the lift.
+    expect(s.shadowOpacity).toBe(scheme === 'dark' ? glow(colors.primary).shadowOpacity : elevation.lifted.shadowOpacity);
   });
 
   it('every variant keeps a 1px border so pressing never shifts the layout', async () => {

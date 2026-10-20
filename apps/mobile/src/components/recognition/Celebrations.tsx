@@ -1,13 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Modal, StyleSheet, View } from 'react-native';
+import { Animated, Easing, ImageBackground, Modal, StyleSheet, View } from 'react-native';
 import { Buddy } from '@/components/art/Buddy';
 import { TrophyArt } from '@/components/art/SceneArt';
 import { AppText, Button, type IconName } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { useCelebrations, useMarkCelebrationsSeen } from '@/lib/queries';
 import type { Celebration } from '@/lib/types';
-import { colors, radius, space } from '@/theme/tokens';
+import { colors, palettes, radius, space } from '@/theme/tokens';
 import { ACHIEVEMENT_ICON, STAGE_INFO } from './RecognitionViews';
 
 interface CelebrationCopy {
@@ -232,6 +233,11 @@ export function CelebrationHost({ exclude }: { exclude?: (c: Celebration) => boo
   return (
     <Modal transparent animationType="fade" visible onRequestClose={done}>
       <View style={styles.scrim} testID="celebration-scrim">
+        {/* A misty-forest photo behind a deep scrim: calm and bright enough to feel earned, dark enough for the card. */}
+        <View style={StyleSheet.absoluteFill} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
+          <ImageBackground source={heroPhoto('achievements')} resizeMode="cover" style={StyleSheet.absoluteFill} accessible={false} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: `${palettes.dark.bg}B3` }]} />
+        </View>
         <CelebrationCard celebration={current} position={{ index: shownInRun, total: shownInRun + pending.length }} onDone={done} />
       </View>
     </Modal>

@@ -1,6 +1,7 @@
 import { Linking, Pressable, View } from 'react-native';
 import { AppText, Card } from '@/components/ui';
 import type { PhotoCredit } from '@/lib/foodPhotoCredits';
+import type { HeroPhotoCredit } from '@/lib/heroPhotoCredits';
 import { colors, radius, space } from '@/theme/tokens';
 
 function Link({ label, url, food }: { label: string; url: string; food: string }) {
@@ -19,13 +20,37 @@ function Link({ label, url, food }: { label: string; url: string; food: string }
   );
 }
 
-/** Who took each food photo, under which licence, with links to the licence and the original file. */
-export function PhotoCreditsView({ credits }: { credits: readonly PhotoCredit[] }) {
+/** Who took each photo (screen photos under "App photos", then food photos), under which licence, with links to the licence and the original file. */
+export function PhotoCreditsView({ credits, appCredits = [] }: { credits: readonly PhotoCredit[]; appCredits?: readonly HeroPhotoCredit[] }) {
   return (
     <View style={{ gap: space.md }}>
       <AppText variant="body" color={colors.textMuted}>
-        Food photos come from Wikimedia Commons and are used under their free licences. Thank you to the photographers.
+        Photos come from Wikimedia Commons and are used under their free licences. Thank you to the photographers.
       </AppText>
+      {appCredits.length > 0 ? (
+        <>
+          <AppText variant="heading" header>
+            App photos
+          </AppText>
+          <Card style={{ gap: space.md }}>
+            {appCredits.map((c) => (
+              <View key={c.slot} style={{ gap: 2 }}>
+                <AppText variant="body">{c.title}</AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {c.author} · {c.license}
+                </AppText>
+                <View style={{ flexDirection: 'row', gap: space.lg }}>
+                  <Link label="License" url={c.licenseUrl} food={c.title} />
+                  <Link label="Source" url={c.source} food={c.title} />
+                </View>
+              </View>
+            ))}
+          </Card>
+          <AppText variant="heading" header>
+            Food photos
+          </AppText>
+        </>
+      ) : null}
       <Card style={{ gap: space.md }}>
         {credits.map((c) => (
           <View key={c.food} style={{ gap: 2 }}>

@@ -1,4 +1,4 @@
-import { Nunito_500Medium, Nunito_600SemiBold, Nunito_700Bold, Nunito_800ExtraBold, useFonts } from '@expo-google-fonts/nunito';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from '@expo-google-fonts/inter';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -88,8 +88,8 @@ export default function RootLayout() {
   useEffect(() => installFocusRing(), []);
   // Start waking the server the moment the app opens, so it is ready by the time anyone signs in.
   useEffect(() => wakeServer(), []);
-  // Nunito — soft, rounded and friendly — is the product typeface; if it fails to load, the system font is a fine fallback.
-  const [fontsLoaded, fontError] = useFonts({ Nunito_500Medium, Nunito_600SemiBold, Nunito_700Bold, Nunito_800ExtraBold });
+  // Inter — clean, sharp and very readable — is the product typeface; if it fails to load, the system font is a fine fallback.
+  const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   if (!fontsLoaded && !fontError) return <FullScreenLoading />;
   return (
     <QueryClientProvider client={queryClient}>

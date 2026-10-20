@@ -7,8 +7,9 @@ import { Buddy } from '@/components/art/Buddy';
 import { ExerciseArt } from '@/components/art/ExerciseArt';
 import { MealArt } from '@/components/art/MealArt';
 import { RANK_ORDER, RankEmblem } from '@/components/art/RankEmblem';
-import { FormMark, WelcomeArt } from '@/components/art/SceneArt';
-import { AppText, BreathingGlow, Button, Row, type IconName } from '@/components/ui';
+import { FormMark } from '@/components/art/SceneArt';
+import { AppText, Button, heroInk, PhotoHero, Row, type IconName } from '@/components/ui';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { colors, edgeLight, gradients, radius, shadow, space } from '@/theme/tokens';
 
 /** One feature: a picture, a title and a sentence, on a softly tinted card. */
@@ -68,48 +69,34 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScrollView contentContainerStyle={styles.page}>
-        {/* Hero — on phones the scene sits above the words; on wide screens it gets its own panel beside them. */}
-        <LinearGradient colors={gradients.heroMedia} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={[styles.hero, wide && styles.heroWide]}>
-          {wide ? null : (
-            <>
-              <WelcomeArt style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 260 }} />
-              <LinearGradient colors={[`${gradients.heroMedia[2]}00`, gradients.heroMedia[2]]} style={{ position: 'absolute', left: 0, right: 0, top: 200, height: 80 }} />
-            </>
-          )}
-          <View style={[{ gap: space.lg }, wide && { flex: 1, justifyContent: 'center' }]}>
-            <Row gap={space.sm} style={{ zIndex: 1 }}>
-              <FormMark size={38} />
-              <AppText variant="heading" style={{ letterSpacing: 4 }}>
-                FORM
-              </AppText>
-            </Row>
-            {wide ? null : (
-              <View style={{ alignSelf: 'flex-start', marginTop: 70, marginLeft: space.md - 26, alignItems: 'center', justifyContent: 'center' }}>
-                <BreathingGlow size={156} color={colors.accent} style={{ position: 'absolute' }} />
-                <Buddy mood="cheer" size={104} />
-              </View>
-            )}
-            <View style={{ gap: space.md, maxWidth: 620 }}>
-              <AppText variant="display" header style={wide ? { fontSize: 50, lineHeight: 56 } : undefined}>
-                Get stronger, eat well, and enjoy every step.
-              </AppText>
-              <AppText variant="body" color={colors.textMuted} style={{ fontSize: 17, lineHeight: 25 }}>
-                FORM is your cosy companion for training and food. It counts your reps, makes logging meals easy and celebrates the progress you really earn.
-              </AppText>
-            </View>
-            <View style={[styles.ctas, wide && { flexDirection: 'row' }]}>
-              <Button label="Get started — it's free" iconRight="arrow-forward" onPress={onGetStarted} style={wide ? { minWidth: 250 } : undefined} />
-              <Button label="I already have an account" variant="secondary" onPress={onSignIn} style={wide ? { minWidth: 240 } : undefined} />
-            </View>
+        {/* Hero — a full-bleed photo under a dark scrim, with the promise in plain words. */}
+        <PhotoHero source={heroPhoto('onboarding')} minHeight={wide ? 480 : 560} bleed={!wide} style={wide ? styles.heroWide : undefined}>
+          <Row gap={space.sm}>
+            <FormMark size={38} />
+            <AppText variant="heading" color={heroInk.text} style={{ letterSpacing: 4 }}>
+              FORM
+            </AppText>
+          </Row>
+          <View style={{ flex: 1 }} />
+          <View style={{ gap: space.md, maxWidth: 620 }}>
+            <AppText variant="display" header color={heroInk.text} style={wide ? { fontSize: 50, lineHeight: 56 } : undefined}>
+              Your journey starts here.
+            </AppText>
+            <AppText variant="heading" color={heroInk.primary}>
+              Train. Eat. Progress.
+            </AppText>
+            <AppText variant="bodyStrong" color={heroInk.text}>
+              Get stronger, eat well, and enjoy every step.
+            </AppText>
+            <AppText variant="body" color={heroInk.muted} style={{ fontSize: 17, lineHeight: 25 }}>
+              FORM is your cosy companion for training and food. It counts your reps, makes logging meals easy and celebrates the progress you really earn.
+            </AppText>
           </View>
-          {wide ? (
-            <View style={styles.heroArt}>
-              <WelcomeArt style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
-              <BreathingGlow size={220} color={colors.accent} style={{ position: 'absolute', left: -8, bottom: 26 }} />
-              <Buddy mood="cheer" size={132} style={{ position: 'absolute', left: 36, bottom: 70 }} />
-            </View>
-          ) : null}
-        </LinearGradient>
+          <View style={[styles.ctas, wide && { flexDirection: 'row' }]}>
+            <Button label="Get started — it's free" iconRight="arrow-forward" onPress={onGetStarted} style={wide ? { minWidth: 250 } : undefined} />
+            <Button label="I already have an account" variant="secondary" onPress={onSignIn} style={wide ? { minWidth: 240 } : undefined} />
+          </View>
+        </PhotoHero>
 
         {/* Features */}
         <SectionTitle eyebrow="Everything in one place" title="Train, eat and level up" />
@@ -206,9 +193,7 @@ export function WelcomeView({ onGetStarted, onSignIn }: { onGetStarted: () => vo
 
 const styles = StyleSheet.create({
   page: { padding: space.lg, gap: space.xxl, paddingBottom: space.xxxl, width: '100%', maxWidth: 1080, alignSelf: 'center' },
-  hero: { borderRadius: radius.xl, padding: space.xl, gap: space.lg, overflow: 'hidden', minHeight: 520, borderWidth: 1, borderColor: colors.border, ...shadow.lifted, ...edgeLight },
-  heroWide: { flexDirection: 'row', alignItems: 'stretch', padding: space.xxl, gap: space.xxl, minHeight: 480 },
-  heroArt: { width: 420, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.wash },
+  heroWide: { borderWidth: 1, borderColor: colors.border, ...shadow.lifted },
   ctas: { gap: space.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
   feature: { flexGrow: 1, flexBasis: 300, gap: space.sm, padding: space.lg, borderRadius: radius.lg, borderWidth: 1, ...edgeLight },

@@ -1,11 +1,12 @@
 import { router, type Href } from 'expo-router';
 import { useState } from 'react';
-import { Buddy } from '@/components/art/Buddy';
+import { View } from 'react-native';
 import { CoachChatView } from '@/components/coach/CoachViews';
-import { ErrorState, IconButton, Row, Screen, StateView } from '@/components/ui';
+import { AppText, ErrorState, heroInk, IconButton, PhotoHero, Row, Screen, StateView } from '@/components/ui';
 import { ProUpsellFor } from '@/components/pro/ProUpsellFor';
 import type { ApiError } from '@/lib/api';
 import { uuid } from '@/lib/dates';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { proFeatureOf } from '@/lib/pro';
 import type { PremiumFeatureId } from '@/lib/types';
 import { space } from '@/theme/tokens';
@@ -20,7 +21,8 @@ export default function CoachScreen() {
   const [error, setError] = useState<string | null>(null);
   const [clearError, setClearError] = useState<string | null>(null);
   const [proLocked, setProLocked] = useState<PremiumFeatureId | null>(null);
-  const close = <IconButton icon="close" label="Close coach" onPress={() => (router.canGoBack() ? router.back() : router.replace('/' as Href))} />;
+  const closeButton = (color?: string) => <IconButton icon="close" label="Close coach" color={color} onPress={() => (router.canGoBack() ? router.back() : router.replace('/' as Href))} />;
+  const close = closeButton();
 
   if (status.isError && !status.data) return <Screen title="Coach" right={close}><ErrorState error={status.error} onRetry={status.refetch} /></Screen>;
   if (messages.isError && !messages.data) return <Screen title="Coach" right={close}><ErrorState error={messages.error} onRetry={messages.refetch} /></Screen>;
@@ -44,12 +46,20 @@ export default function CoachScreen() {
     <Screen
       title="Coach"
       subtitle={status.data.mode === 'real_ai' ? 'AI coach · your data only' : 'Rule-based tips · your data only'}
-      right={
-        <Row gap={space.xs}>
-          {/* Pip, thinking it over, beside the way out: decoration only. */}
-          <Buddy mood="thinking" size={56} float={false} />
-          {close}
-        </Row>
+      hero={
+        <PhotoHero source={heroPhoto('coach')} minHeight={200}>
+          <Row gap={space.sm} style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <AppText variant="label" color={heroInk.muted}>
+                {status.data.mode === 'real_ai' ? 'AI coach · your data only' : 'Rule-based tips · your data only'}
+              </AppText>
+              <AppText variant="screenTitle" header color={heroInk.text}>
+                Coach
+              </AppText>
+            </View>
+            {closeButton(heroInk.text)}
+          </Row>
+        </PhotoHero>
       }>
       <CoachChatView
         turns={messages.data.messages}

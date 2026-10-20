@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "form",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#FBF5EC",
+    "backgroundColor": "#F5F8F7",
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "app.form.fitness"
@@ -15,7 +15,7 @@
     "android": {
       "package": "app.form.fitness",
       "adaptiveIcon": {
-        "backgroundColor": "#FBF5EC",
+        "backgroundColor": "#F5F8F7",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -31,11 +31,11 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FBF5EC",
+          "backgroundColor": "#F5F8F7",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 280,
           "dark": {
-            "backgroundColor": "#17110E",
+            "backgroundColor": "#0B0F0E",
             "image": "./assets/images/splash-icon-dark.png"
           }
         }

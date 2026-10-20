@@ -6,12 +6,19 @@ describe('WelcomeView', () => {
     const onGetStarted = jest.fn();
     const onSignIn = jest.fn();
     await render(<WelcomeView onGetStarted={onGetStarted} onSignIn={onSignIn} />);
+    expect(screen.getByText('Your journey starts here.')).toBeTruthy();
+    expect(screen.getByText('Train. Eat. Progress.')).toBeTruthy();
     expect(screen.getByText('Get stronger, eat well, and enjoy every step.')).toBeTruthy();
     expect(screen.getByText('Seven ranks to climb')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: "Get started — it's free" }));
     expect(onGetStarted).toHaveBeenCalledTimes(1);
     await fireEvent.press(screen.getByRole('button', { name: 'I already have an account' }));
     expect(onSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens on a photo hero, with no mascot in it', async () => {
+    const { toJSON } = await render(<WelcomeView onGetStarted={jest.fn()} onSignIn={jest.fn()} />);
+    expect(JSON.stringify(toJSON())).toContain('assets/hero/onboarding.jpg');
   });
 
   it('has no demo screens with sample data', async () => {

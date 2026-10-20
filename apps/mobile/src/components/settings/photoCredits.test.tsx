@@ -7,7 +7,23 @@ const credits = [
   { food: 'Apple, raw', author: 'John Roe', license: 'CC0', licenseUrl: '', source: 'https://commons.wikimedia.org/wiki/File:Apple.jpg' },
 ];
 
+const appCredits = [{ slot: 'home' as const, title: 'Yoga sunrise', author: 'Dave Contreras', license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', source: 'https://commons.wikimedia.org/wiki/File:Yoga.jpg' }];
+
 describe('PhotoCreditsView', () => {
+  it('lists the app photos in their own section, with links', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await render(<PhotoCreditsView credits={credits} appCredits={appCredits} />);
+    expect(screen.getByText('App photos')).toBeTruthy();
+    expect(screen.getByText('Dave Contreras · CC0')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('link', { name: 'Source for Yoga sunrise' }));
+    expect(open).toHaveBeenCalledWith('https://commons.wikimedia.org/wiki/File:Yoga.jpg');
+  });
+
+  it('shows no app photos section without app credits', async () => {
+    await render(<PhotoCreditsView credits={credits} />);
+    expect(screen.queryByText('App photos')).toBeNull();
+  });
+
   it('lists each photo with its author and licence', async () => {
     await render(<PhotoCreditsView credits={credits} />);
     expect(screen.getByText('Banana, raw')).toBeTruthy();

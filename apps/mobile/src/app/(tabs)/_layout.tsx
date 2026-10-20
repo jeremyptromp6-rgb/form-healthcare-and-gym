@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CelebrationHost } from '@/components/recognition/Celebrations';
 import { stateIcon, type IconName } from '@/components/ui';
 import { InTabsContext, TAB_BAR, tabBarBottomPadding } from '@/components/ui/tabBar';
-import { breakpoints, colors, edgeLight, elevation, fonts, scheme } from '@/theme/tokens';
+import { breakpoints, colors, edgeLight, elevation, fonts } from '@/theme/tokens';
 
 // One name per tab: the icon rule (outline at rest, filled when active) comes from `stateIcon`.
 const TABS: { name: string; title: string; icon: IconName }[] = [
@@ -16,8 +16,8 @@ const TABS: { name: string; title: string; icon: IconName }[] = [
   { name: 'profile', title: 'Profile', icon: 'person-circle' },
 ];
 
-// The active colour has to read at 12px: in light mode the coral is 4.1:1 on the bar, its deep shade 5.3:1.
-const ACTIVE = scheme === 'dark' ? colors.primary : colors.primaryDeep;
+// The active colour has to read at 12px: the teal passes 4.5:1 on the bar in both moods.
+const ACTIVE = colors.primary;
 
 /**
  * Bottom tabs on phones; a side rail on wide screens (tablets, desktop web). The phone bar is
@@ -70,7 +70,7 @@ export default function TabLayout() {
                 wide ? (
                   <Ionicons name={stateIcon(t.icon, focused)} size={size} color={color} />
                 ) : (
-                  // The active tab: a soft coral pill behind a filled icon.
+                  // The active tab: a soft teal pill behind a filled icon.
                   <View style={[styles.pill, focused && styles.pillActive]}>
                     <Ionicons name={stateIcon(t.icon, focused)} size={Math.min(size, 24)} color={color} />
                   </View>

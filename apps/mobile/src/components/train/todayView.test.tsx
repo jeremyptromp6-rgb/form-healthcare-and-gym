@@ -1,7 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import type { PlannedExercise, WorkoutPlan } from '@/lib/types';
-import { imagery } from '@/theme/imagery';
-import { space } from '@/theme/tokens';
 import { CameraCoachingRow, TodayView, type TodayViewProps } from './TodayView';
 
 const ex = (over: Partial<PlannedExercise> & Pick<PlannedExercise, 'exerciseId' | 'name'>): PlannedExercise => ({
@@ -40,27 +38,14 @@ const base: TodayViewProps = {
   camera: { verifying: true, message: 'Counts every full-range rep on this device.' },
 };
 
-// A plain object, so one test can put a photo in the train slot.
-jest.mock('@/theme/imagery', () => ({ imagery: { home: null, train: null, nutrition: null, progress: null, onboarding: null, record: null } }));
-
 // @testing-library/react-native v14: render and events are async.
 describe('TodayView', () => {
-  describe('Pip clearance beside the hero title', () => {
-    const clearance = `"paddingRight":${76 + space.sm}`; // Pip's width plus a gap
-    afterEach(() => {
-      (imagery as { train: unknown }).train = null;
-    });
-
-    it('is kept while Pip is drawn (no photo in the train slot)', async () => {
-      const { toJSON } = await render(<TodayView {...base} />);
-      expect(JSON.stringify(toJSON())).toContain(clearance);
-    });
-
-    it('is dropped when a photo replaces the drawn hero, because Pip is not shown', async () => {
-      (imagery as { train: unknown }).train = 1;
-      const { toJSON } = await render(<TodayView {...base} />);
-      expect(JSON.stringify(toJSON())).not.toContain(clearance);
-    });
+  it('puts the workout photo behind the title, hidden from screen readers', async () => {
+    const { toJSON } = await render(<TodayView {...base} />);
+    const tree = JSON.stringify(toJSON());
+    expect(tree).toContain('assets/hero/workout.jpg');
+    expect(tree).toContain('"accessibilityElementsHidden":true');
+    expect(screen.getByText('Full body A')).toBeTruthy();
   });
 
   it('has exactly one Start workout button in the hero and starts on press', async () => {

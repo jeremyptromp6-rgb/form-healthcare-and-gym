@@ -52,8 +52,8 @@ describe.each(['light', 'dark'] as const)('%s depth tokens', (tone) => {
     expect(allElevations[tone].flat.shadowOpacity).toBe(0);
   });
 
-  it('casts a warm shadow in light mode and a black one in dark mode', () => {
-    expect(allElevations[tone].card.shadowColor).toBe(tone === 'light' ? '#7A4A26' : '#000000');
+  it('casts a cool shadow in light mode and a black one in dark mode', () => {
+    expect(allElevations[tone].card.shadowColor).toBe(tone === 'light' ? '#0B2A22' : '#000000');
   });
 });
 
@@ -67,10 +67,10 @@ describe('launch-scheme depth tokens', () => {
   it('has an edge light and a glow that only show in dark mode', () => {
     if (scheme === 'dark') {
       expect(edgeLight.borderTopColor).toBe(launchColors.edge);
-      expect(glow('#E5825A').shadowColor).toBe('#E5825A');
+      expect(glow('#10B981').shadowColor).toBe('#10B981');
     } else {
       expect(edgeLight).toEqual({});
-      expect(glow('#E5825A')).toEqual({});
+      expect(glow('#10B981')).toEqual({});
     }
   });
 });

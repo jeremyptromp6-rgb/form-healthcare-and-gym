@@ -1,9 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { defaultMealType } from '@form/domain';
-import { AppText, Badge, Button, Card, Divider, FuelSummary, IconBubble, IconButton, InlineMessage, ListRow, Row, SectionHeader, StateView, WaterLine, type FuelMacro, type IconName } from '@/components/ui';
-import { Buddy } from '@/components/art/Buddy';
+import { AppText, Badge, Button, Card, Divider, FuelSummary, heroInk, IconBubble, IconButton, InlineMessage, ListRow, PhotoHero, Row, SectionHeader, StateView, WaterLine, type FuelMacro, type IconName } from '@/components/ui';
 import { MealArt } from '@/components/art/MealArt';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { dayHeadline, entryBadge, formatLiters, MEAL_LABEL, MEALS, portionLabel, proteinNudge } from '@/lib/eat';
 import type { FoodLog, MealType, NutritionDay } from '@/lib/types';
 import { a11y, colors, radius, space } from '@/theme/tokens';
@@ -53,24 +53,20 @@ export function EatDayView(p: EatDayViewProps) {
 
   return (
     <View style={{ gap: space.lg }}>
-      <Row style={styles.dayPill}>
-        {p.onPrev ? <IconButton icon="chevron-back" label="Previous day" onPress={p.onPrev} color={colors.text} /> : <View style={{ width: 44 }} />}
-        <AppText variant="heading" header accessibilityLabel={`Showing ${p.title}`}>
-          {p.title}
+      <PhotoHero source={heroPhoto('nutrition')} minHeight={240} bleed={false}>
+        <Row style={styles.dayPill}>
+          {p.onPrev ? <IconButton icon="chevron-back" label="Previous day" onPress={p.onPrev} color={heroInk.text} /> : <View style={{ width: 44 }} />}
+          <AppText variant="heading" header color={heroInk.text} accessibilityLabel={`Showing ${p.title}`}>
+            {p.title}
+          </AppText>
+          {p.onNext ? <IconButton icon="chevron-forward" label="Next day" onPress={p.onNext} color={heroInk.text} /> : <View style={{ width: 44 }} />}
+        </Row>
+        <AppText variant="title" header color={heroInk.text}>
+          {dayHeadline(day)}
         </AppText>
-        {p.onNext ? <IconButton icon="chevron-forward" label="Next day" onPress={p.onNext} color={colors.text} /> : <View style={{ width: 44 }} />}
-      </Row>
+      </PhotoHero>
 
       <Card style={{ gap: space.lg }}>
-        {/* The headline and Pip share a row, so no text size can slide the headline under him: it wraps in the space he leaves. */}
-        <Row gap={space.md}>
-          <AppText variant="heading" header style={{ flex: 1 }}>
-            {dayHeadline(day)}
-          </AppText>
-          <View style={{ pointerEvents: 'none' }} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden>
-            <Buddy mood="happy" size={SUMMARY_PIP} float={false} />
-          </View>
-        </Row>
         <FuelSummary
           numeral={fmt(day.totals.kcal)}
           unitLabel={kcal ? `/ ${fmt(kcal.target)} kcal` : 'kcal'}
@@ -266,8 +262,6 @@ function Tool({ icon, label, onPress, busy, accessibilityLabel, divided }: { ico
     </Pressable>
   );
 }
-
-const SUMMARY_PIP = 48;
 
 const styles = StyleSheet.create({
   dayPill: { justifyContent: 'space-between', paddingHorizontal: 4 },

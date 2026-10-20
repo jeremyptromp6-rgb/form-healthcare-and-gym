@@ -27,13 +27,13 @@ afterEach(() => {
 
 // @testing-library/react-native v14: render is async.
 describe('motion budget', () => {
-  it('a real Home screen runs a glow loop and a Pip bob loop, and one blink timer (its calorie count-up is a one-shot)', async () => {
+  it('a real Home screen runs one loop, the slow photo drift (its calorie count-up is a one-shot)', async () => {
     jest.useFakeTimers();
     intervals = jest.spyOn(globalThis, 'setInterval'); // the fake clock replaced the one spied on in beforeEach
     try {
       await render(home);
-      expect(loops).toHaveBeenCalledTimes(2);
-      expect(intervals).toHaveBeenCalledTimes(1);
+      expect(loops).toHaveBeenCalledTimes(1);
+      expect(intervals).toHaveBeenCalledTimes(0);
       await act(async () => {
         await jest.advanceTimersByTimeAsync(1000); // let the count-up finish inside act
       });
@@ -42,10 +42,10 @@ describe('motion budget', () => {
     }
   });
 
-  it('the Welcome screen runs one hero glow and one Pip bob (at most 3 loops, 1 setState animation)', async () => {
+  it('the Welcome screen runs just the slow photo drift (at most 3 loops, 1 setState animation)', async () => {
     await render(<WelcomeView onGetStarted={noop} onSignIn={noop} />);
     expect(loops.mock.calls.length).toBeLessThanOrEqual(3);
-    expect(loops).toHaveBeenCalledTimes(2);
-    expect(intervals).toHaveBeenCalledTimes(1);
+    expect(loops).toHaveBeenCalledTimes(1);
+    expect(intervals).toHaveBeenCalledTimes(0);
   });
 });

@@ -14,7 +14,6 @@ const mockStatus: CoachStatus = { mode: 'real_ai', provider: 'Claude', reason: n
 const turns: CoachTurn[] = [{ id: 1, role: 'user', text: 'Hello', response: null, at: '2026-09-30T12:00:00Z' }];
 
 jest.mock('expo-router', () => ({ router: { push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: () => true } }));
-jest.mock('@/components/art/Buddy', () => ({ Buddy: () => null }));
 jest.mock('@/components/pro/ProUpsellFor', () => ({ ProUpsellFor: () => null }));
 jest.mock('@/lib/pro', () => ({ proFeatureOf: () => null }));
 jest.mock('@/lib/queries', () => ({

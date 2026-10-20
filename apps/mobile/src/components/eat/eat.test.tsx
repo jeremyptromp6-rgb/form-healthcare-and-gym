@@ -191,30 +191,12 @@ describe('EatDayView', () => {
     expect(p.onOpenLog).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
   });
 
-  it('keeps Pip in the headline row, in normal flow, so no text size can put the headline under him', async () => {
-    interface Node {
-      type: string;
-      props: Record<string, unknown>;
-      children: (Node | string)[] | null;
-    }
+  it('shows the day headline over the nutrition photo, which screen readers skip', async () => {
     const { toJSON } = await render(<EatDayView {...props()} />);
-    const headline = dayHeadline(dayWith(LOGS));
-    const isHeadline = (n: Node | string) => typeof n !== 'string' && n.children?.length === 1 && n.children[0] === headline;
-    let row: Node | undefined;
-    const walk = (n: Node | string | (Node | string)[] | null) => {
-      if (!n || typeof n === 'string') return;
-      if (Array.isArray(n)) return n.forEach(walk);
-      if (n.children?.some(isHeadline)) row = n;
-      n.children?.forEach(walk);
-    };
-    walk(toJSON() as never);
-    expect(row).toBeDefined();
-    const style = Object.assign({}, ...[row!.props.style].flat(3).filter(Boolean));
-    expect(style.flexDirection).toBe('row');
-    const pip = row!.children!.filter((c): c is Node => typeof c !== 'string' && c.props['aria-hidden'] === true);
-    expect(pip).toHaveLength(1);
-    const pipStyle = Object.assign({}, ...[pip[0]!.props.style].flat(3).filter(Boolean));
-    expect(pipStyle.position).not.toBe('absolute');
+    const tree = JSON.stringify(toJSON());
+    expect(tree).toContain('assets/hero/nutrition.jpg');
+    expect(tree).toContain('"accessibilityElementsHidden":true');
+    expect(screen.getByText(dayHeadline(dayWith(LOGS)))).toBeTruthy();
   });
 
   it('flags estimated calories and over-target days without shaming', async () => {

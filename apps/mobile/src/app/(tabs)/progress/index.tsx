@@ -4,8 +4,9 @@ import { View } from 'react-native';
 import { TrainingCard } from '@/components/progress/TrainingCard';
 import { ConsistencyCard, LevelHero, LevelUpBanner, RankLadder, ResetNotice, XpHistory } from '@/components/progress/ProgressionViews';
 import { AchievementTile, BodyQuestSummaryCard, RecordsList, sortAchievements, StreaksGrid } from '@/components/recognition/RecognitionViews';
-import { AppText, Card, ErrorState, ExerciseList, ListRow, Screen, SectionAction, SectionHeader, StatStrip, StateView } from '@/components/ui';
+import { AppText, Card, ErrorState, ExerciseList, heroInk, ListRow, PhotoHero, Screen, SectionAction, SectionHeader, StatStrip, StateView } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { useAchievements, useBodyQuest, useProgress, useRecords, useRefetchOnFocus, useStreaks, useWorkouts, useXpEvents } from '@/lib/queries';
 import { colors, space } from '@/theme/tokens';
 
@@ -30,7 +31,21 @@ export default function ProgressScreen() {
   const section = { gap: space.md } as const;
 
   return (
-    <Screen title="Progress" subtitle="Your journey" refreshing={progress.isRefetching} onRefresh={refetch}>
+    <Screen
+      title="Progress"
+      subtitle="Your journey"
+      refreshing={progress.isRefetching}
+      onRefresh={refetch}
+      hero={
+        <PhotoHero source={heroPhoto('progress')} minHeight={260}>
+          <AppText variant="label" color={heroInk.muted}>
+            Progress · Your journey
+          </AppText>
+          <AppText variant="title" header color={heroInk.text}>
+            Stronger than yesterday.
+          </AppText>
+        </PhotoHero>
+      }>
       {progress.isPending ? <StateView kind="loading" compact /> : null}
       {progress.isError && !p ? <ErrorState error={progress.error} onRetry={refetch} compact /> : null}
 

@@ -2,21 +2,19 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { BodyMap } from '@/components/art/BodyMap';
-import { Buddy, type BuddyMood } from '@/components/art/Buddy';
+import { Buddy } from '@/components/art/Buddy';
 import { ExerciseThumb } from '@/components/art/ExerciseArt';
 import { setsPerMuscle } from '@/lib/muscles';
 import { RankEmblem as RankBadge } from '@/components/art/RankEmblem';
-import { RingsArt } from '@/components/art/SceneArt';
-import { AppText, Badge, BreathingGlow, Button, Card, Divider, ExerciseList, FuelSummary, HeroMedia, ICON_BUBBLE, IconBubble, InlineMessage, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
-import { useStaticArt } from '@/components/ui/staticArt';
+import { AppText, Badge, Button, Card, Divider, ExerciseList, FuelSummary, heroInk, ICON_BUBBLE, IconBubble, InlineMessage, PhotoHero, ProgressBar, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
 import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
 import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
 import { accuracyLine, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
+import { heroPhoto } from '@/lib/heroPhotos';
 import { rankLabel, stepProgress } from '@/lib/prestige';
 import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress } from '@/lib/types';
 import { formatLoad, useUnits, type Units } from '@/lib/units';
-import { imagery } from '@/theme/imagery';
 import { colors, radius, space } from '@/theme/tokens';
 
 export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak' | 'rank';
@@ -68,44 +66,39 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
       refreshing={refreshing}
       onRefresh={onRefresh}
       hero={
-        <View style={{ gap: space.md, paddingTop: space.sm }}>
+        <PhotoHero source={heroPhoto('home')} minHeight={vm.today ? 440 : 300}>
           <Row style={styles.greeting}>
             <View style={{ flex: 1, gap: 4 }}>
-              <AppText variant="label" color={colors.textFaint}>
+              <AppText variant="label" color={heroInk.muted}>
                 {date}
               </AppText>
-              <AppText variant="title" header>
+              <AppText variant="title" header color={heroInk.text}>
                 {`${GREETING[vm.greeting.period]}, ${vm.greeting.name}`}
               </AppText>
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Open profile" onPress={() => onNavigate('profile')} hitSlop={4} style={styles.avatar}>
-              <Ionicons name="person" size={20} color={colors.primary} />
+              <Ionicons name="person" size={20} color={heroInk.text} />
             </Pressable>
           </Row>
           {vm.progression ? (
             <Row gap={space.sm} style={{ flexWrap: 'wrap' }}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`${vm.progression.streak.current} day streak. Open streak and season`} onPress={() => onNavigate('streak')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
-                <Ionicons name="flame" size={16} color={colors.accent} />
-                <AppText variant="bodyStrong" color={colors.text}>
-                  {vm.progression.streak.current}
-                </AppText>
-                <AppText variant="label" color={colors.textMuted}>
-                  day streak
-                </AppText>
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Level ${vm.progression.level}, ${vm.progression.rank}. Open progress`} onPress={() => onNavigate('progress')} hitSlop={4} style={[styles.chip, { backgroundColor: colors.primarySoft }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Level ${vm.progression.level}, ${vm.progression.rank}. Open progress`} onPress={() => onNavigate('progress')} hitSlop={4} style={[styles.chip, { backgroundColor: `${heroInk.text}1F` }]}>
                 <RankBadge rank={vm.progression.rank} size={18} />
-                <AppText variant="bodyStrong" color={colors.text}>
+                <AppText variant="bodyStrong" color={heroInk.text}>
                   Lv {vm.progression.level}
                 </AppText>
-                <AppText variant="label" color={colors.textMuted}>
+                <AppText variant="label" color={heroInk.muted}>
                   {vm.progression.rank}
                 </AppText>
               </Pressable>
             </Row>
           ) : null}
-        </View>
+          {vm.today ? <TodayFocus today={vm.today} onNavigate={onNavigate} /> : null}
+        </PhotoHero>
       }>
+      {vm.nutrition || vm.water || vm.progression ? <StatTiles vm={vm} onNavigate={onNavigate} /> : null}
+
+
       {refreshFailed ? (
         <InlineMessage tone="warning" icon="cloud-offline-outline">
           {`Couldn't refresh — showing data from ${updatedAgo(vm.generatedAt, now)}. Pull down to try again.`}
@@ -120,8 +113,8 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
         </InlineMessage>
       ) : null}
 
-      {/* 3 · The one thing to do today. */}
-      {vm.today ? <TodayHero today={vm.today} onNavigate={onNavigate} /> : failed('today') ? <SectionError name="today" /> : null}
+      {/* 3 · The one thing to do today lives in the photo header above. */}
+      {!vm.today && failed('today') ? <SectionError name="today" /> : null}
 
       {/* 4 · Nutrition: calories, macros and water together. */}
       <View style={{ gap: space.md }}>
@@ -274,16 +267,6 @@ function FirstSteps({ steps, onNavigate, onAddWater }: { steps: NonNullable<Home
   );
 }
 
-/** The day's plan, big and clear, with one action. */
-/** Pip matches the day: cheering you into a session, proud when it's done, resting with you. */
-const MOOD: Record<NonNullable<HomeViewModel['today']>['suggestion']['kind'], BuddyMood> = {
-  train: 'cheer',
-  done_today: 'proud',
-  weekly_goal_met: 'proud',
-  rest_suggested: 'sleepy',
-  recover: 'sleepy',
-};
-
 /** The previous workout: the muscles it hit, its headline numbers, and what you did. */
 function LastSession({ last, units: unitsProp }: { last: NonNullable<NonNullable<HomeViewModel['today']>['lastWorkout']>; units?: Units }) {
   const units = useUnits(unitsProp);
@@ -328,34 +311,122 @@ function LastSession({ last, units: unitsProp }: { last: NonNullable<NonNullable
   );
 }
 
-function TodayHero({ today, onNavigate }: { today: NonNullable<HomeViewModel['today']>; onNavigate: HomeViewProps['onNavigate'] }) {
+/** The day's focus, on the photo: what to do today, why, the week so far and one clear action. */
+function TodayFocus({ today, onNavigate }: { today: NonNullable<HomeViewModel['today']>; onNavigate: HomeViewProps['onNavigate'] }) {
   const s = today.suggestion;
   const train = s.kind === 'train';
-  const staticArt = useStaticArt(); // Pip stands still inside a Welcome phone preview
   return (
-    <HeroMedia image={imagery.home} minHeight={train ? 300 : 240} art={<RingsArt style={{ flex: 1 }} />}>
-      <Row gap={space.sm} style={{ alignItems: 'flex-end' }}>
-        <View style={{ flex: 1, gap: 6 }}>
-          <AppText variant="overline" color={s.kind === 'recover' ? colors.warning : colors.primary}>
-            Today
-          </AppText>
-          <AppText variant="display" header>
-            {s.title}
-          </AppText>
-        </View>
-        <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <BreathingGlow size={150} color={colors.accent} style={{ position: 'absolute' }} />
-          <Buddy mood={MOOD[s.kind]} size={92} float={!staticArt} />
-        </View>
-      </Row>
-      <AppText variant="body" color={colors.textMuted}>
+    <View style={{ gap: space.sm, paddingTop: space.md }}>
+      <AppText variant="overline" color={s.kind === 'recover' ? heroInk.warning : heroInk.primary}>
+        Today
+      </AppText>
+      <AppText variant="display" header color={heroInk.text}>
+        {s.title}
+      </AppText>
+      <AppText variant="body" color={heroInk.muted}>
         {s.reason}
       </AppText>
       {today.plannedDaysPerWeek ? <WeekDots done={today.workoutsThisWeek} planned={today.plannedDaysPerWeek} /> : null}
       {s.kind === 'train' || s.kind === 'rest_suggested' ? (
-        <Button label={train ? 'Start workout' : 'Train anyway'} iconRight={train ? 'arrow-forward' : undefined} variant={train ? 'primary' : 'secondary'} onPress={() => onNavigate('train')} />
+        <Button label={train ? 'Start workout' : 'Train anyway'} iconRight={train ? 'arrow-forward' : undefined} variant={train ? 'primary' : 'secondary'} onPress={() => onNavigate('train')} style={{ marginTop: space.sm }} />
       ) : null}
-    </HeroMedia>
+    </View>
+  );
+}
+
+/** Three small numbers for the day: protein, water and the streak. Each is a quiet tile; the streak opens its screen. */
+function StatTiles({ vm, onNavigate }: { vm: HomeViewModel; onNavigate: HomeViewProps['onNavigate'] }) {
+  const n = vm.nutrition;
+  const w = vm.water;
+  const streak = vm.progression?.streak.current;
+  return (
+    <Row gap={space.sm} style={{ alignItems: 'stretch' }}>
+      {n ? (
+        <StatTile
+          icon="nutrition"
+          tint={colors.protein}
+          label="Protein"
+          value={`${Math.round(n.proteinG)} g`}
+          sub={n.targets ? `of ${Math.round(n.targets.proteinG)} g` : undefined}
+          fraction={n.targets ? n.proteinG / n.targets.proteinG : undefined}
+          accessibilityLabel={`Protein today: ${Math.round(n.proteinG)} grams${n.targets ? ` of ${Math.round(n.targets.proteinG)}` : ''}`}
+        />
+      ) : null}
+      {w ? (
+        <StatTile
+          icon="water"
+          tint={colors.water}
+          label="Water"
+          value={`${(w.totalMl / 1000).toFixed(1)} L`}
+          sub={`of ${(w.targetMl / 1000).toFixed(1)} L`}
+          fraction={w.totalMl / w.targetMl}
+          accessibilityLabel={`Water today, ${(w.totalMl / 1000).toFixed(1)} of ${(w.targetMl / 1000).toFixed(1)} litres`}
+        />
+      ) : null}
+      {streak !== undefined ? (
+        <StatTile
+          icon="flame"
+          tint={colors.accent}
+          label="Streak"
+          value={String(streak)}
+          sub={streak === 1 ? 'day' : 'days'}
+          accessibilityLabel={`${streak} day streak. Open streak and season`}
+          onPress={() => onNavigate('streak')}
+        />
+      ) : null}
+    </Row>
+  );
+}
+
+function StatTile({
+  icon,
+  tint,
+  label,
+  value,
+  sub,
+  fraction,
+  accessibilityLabel,
+  onPress,
+}: {
+  icon: IconName;
+  tint: string;
+  label: string;
+  value: string;
+  sub?: string;
+  fraction?: number;
+  accessibilityLabel: string;
+  onPress?: () => void;
+}) {
+  const body = (
+    <>
+      <Row gap={space.xs}>
+        <Ionicons name={icon} size={14} color={tint} />
+        <AppText variant="label" color={colors.textMuted} style={{ flexShrink: 1 }}>
+          {label}
+        </AppText>
+      </Row>
+      <AppText variant="stat">
+        {value}
+      </AppText>
+      {sub ? (
+        <AppText variant="caption" color={colors.textFaint}>
+          {sub}
+        </AppText>
+      ) : null}
+      {fraction !== undefined ? <ProgressBar value={fraction} height={4} color={tint} label={`${label} of daily target`} /> : null}
+    </>
+  );
+  if (onPress) {
+    return (
+      <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} hitSlop={4} style={({ pressed }) => [styles.tile, { opacity: pressed ? 0.7 : 1 }]}>
+        {body}
+      </Pressable>
+    );
+  }
+  return (
+    <View accessible accessibilityLabel={accessibilityLabel} style={styles.tile}>
+      {body}
+    </View>
   );
 }
 
@@ -543,8 +614,9 @@ function Level({ p, onOpenRank }: { p: NonNullable<HomeViewModel['progression']>
 
 const styles = StyleSheet.create({
   greeting: { paddingTop: space.sm, paddingBottom: space.xs, alignItems: 'flex-end' },
-  dot: { width: 28, height: 6, borderRadius: 3, backgroundColor: colors.track },
-  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 28, height: 6, borderRadius: 3, backgroundColor: `${heroInk.muted}4D` },
+  avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: `${heroInk.text}1F`, alignItems: 'center', justifyContent: 'center' },
+  tile: { flex: 1, minWidth: 0, gap: 4, padding: space.md, borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, minHeight: 36, borderRadius: radius.pill },
   step: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingVertical: space.sm },
   sessionRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingVertical: space.sm },

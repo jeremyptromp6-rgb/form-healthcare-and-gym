@@ -49,8 +49,8 @@ describe('artPalettes', () => {
     }
   });
 
-  it('derives the dark body from the evening primary and the light one from the original Pip', () => {
-    expect(artPalettes.dark.peach.bottom).toBe(palettes.dark.primary);
+  it('keeps Pip peach in both tones (a character does not take the brand colour)', () => {
+    expect(artPalettes.dark.peach.bottom).toBe('#E5825A');
     expect(artPalettes.dark.shadow).toBe('#000000');
     expect(artPalettes.light.peach.top).toBe('#FFC29B');
     expect(artPalettes.light.ink).toBe(palettes.light.text);

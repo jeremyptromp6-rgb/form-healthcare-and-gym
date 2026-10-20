@@ -263,6 +263,20 @@ describe('Home hierarchy and header chips', () => {
     expect(screen.queryByRole('button', { name: 'Go to Train' })).toBeNull();
   });
 
+  it('opens on the home photo with compact Protein, Water and Streak tiles', async () => {
+    await renderHome(vm());
+    expect(JSON.stringify(screen.toJSON())).toContain('assets/hero/home.jpg');
+    expect(screen.getByLabelText('Protein today: 48 grams of 130')).toBeTruthy();
+    expect(screen.getByLabelText('Water today, 0.8 of 2.5 litres')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '3 day streak. Open streak and season' })).toHaveLength(1);
+  });
+
+  it('leaves out a tile whose data is missing', async () => {
+    await renderHome(vm({ water: null, errors: ['water'] }));
+    expect(screen.queryByLabelText(/^Water today/)).toBeNull();
+    expect(screen.getByLabelText(/^Protein today/)).toBeTruthy();
+  });
+
   it('puts nutrition (with water) before goals, level and milestones', async () => {
     await renderHome(vm());
     const headers = screen.getAllByRole('header').map((h) => String(h.props.children));
