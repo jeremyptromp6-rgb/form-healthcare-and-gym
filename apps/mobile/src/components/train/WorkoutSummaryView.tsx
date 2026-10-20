@@ -20,6 +20,9 @@ const FLAG_MESSAGE: Record<string, { tone: 'warning' | 'danger'; text: string }>
   daily_workout_cap_reached: { tone: 'warning', text: "You've already earned XP for 3 workouts today — this one is saved but earns no XP." },
   partially_capped: { tone: 'warning', text: "Part of this session went past today's 2-hour cap, so it earned partial XP." },
 };
+/** How each set was recorded, as a small badge on its row. */
+const MODE_BADGE = { live: 'Live', camera: 'Camera', manual: 'Manual' } as const;
+
 const PR_LABEL: Record<string, string> = {
   max_load: 'Heaviest load',
   estimated_1rm: 'Estimated one-rep max',
@@ -85,6 +88,8 @@ export function WorkoutSummaryView({
   const byExercise = new Map<string, WorkoutSummaryDetail['sets']>();
   for (const s of summary.sets) byExercise.set(s.name, [...(byExercise.get(s.name) ?? []), s]);
   // A beaten record is a PR worth celebrating; a first value is a baseline to beat next time.
+  // Manual sets earn less XP: said once, right after the workout (history rows show the badges only).
+  const manualSets = summary.sets.some((s) => !s.warmup && s.mode === 'manual');
   const awarded = summary.prs.filter((p) => p.status === 'awarded' && p.previous != null);
   const baselines = summary.prs.filter((p) => p.status === 'awarded' && p.previous == null && p.exerciseId !== '*');
 
@@ -182,6 +187,7 @@ export function WorkoutSummaryView({
         </Card>
       ) : null}
 
+      {onDone && manualSets ? <InlineMessage tone="info">Manual sets earn less XP. Live and camera sets earn full XP.</InlineMessage> : null}
       {workout.flags.map((f) => (FLAG_MESSAGE[f] ? <InlineMessage key={f} tone={FLAG_MESSAGE[f].tone}>{FLAG_MESSAGE[f].text}</InlineMessage> : null))}
       {summary.prs.some((p) => p.status === 'needs_review') ? (
         <InlineMessage tone="info">A big jump from your previous best is held for review before it counts as a PR.</InlineMessage>
@@ -210,6 +216,13 @@ export function WorkoutSummaryView({
                 {s.formScore !== null ? ` · form ${s.formScore}` : ''}
                 {s.romPercent !== null ? ` · ROM ${s.romPercent}%` : ''}
               </AppText>
+              {s.mode && !s.warmup ? (
+                <View accessible accessibilityLabel={`${MODE_BADGE[s.mode]} set`} style={{ paddingHorizontal: space.sm, paddingVertical: 2, borderRadius: 999, backgroundColor: s.mode === 'manual' ? colors.cardRaised : colors.primarySoft }}>
+                  <AppText variant="overline" color={s.mode === 'manual' ? colors.textMuted : colors.primary}>
+                    {MODE_BADGE[s.mode]}
+                  </AppText>
+                </View>
+              ) : null}
               </Row>
               );
             })}

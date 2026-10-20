@@ -3,6 +3,7 @@ import { analyzeSet, keepRecorded, type AssessedRep, type SetAnalysis } from "..
 import { workoutXp, type PainLevel, type XpAward } from "../progression/progressionEngine";
 import { DomainValidationError } from "../shared/errors";
 import { EXERCISES } from "./exercises";
+import { resolveSetMode, type SetMode } from "./setMode";
 import type { VerificationStatus, WorkoutSet } from "./workouts";
 
 /**
@@ -19,6 +20,10 @@ export interface SubmittedSet {
   trace?: RepTrace;
   /** A warm-up set is recorded but never counts: no XP, records, verified-rep totals, volume or daily caps. */
   warmup?: boolean;
+  /** How the client says the set was recorded; the server resolves what it trusts (see resolveSetMode). Missing = manual. */
+  mode?: SetMode;
+  /** Seconds the live-set timer ran. Only used with mode "live". */
+  liveSeconds?: number;
 }
 
 /**
@@ -58,6 +63,10 @@ export interface EvaluatedSet extends Omit<WorkoutSet, "verificationStatus"> {
   analysis: SetAnalysisRecord | null;
   /** Carried through from the submission; see SubmittedSet.warmup. */
   warmup?: boolean;
+  /** The mode the server trusts (see resolveSetMode); drives the set's share of the XP. */
+  mode?: SetMode;
+  /** The live timer, kept only for live sets. */
+  liveSeconds?: number | null;
 }
 
 /** What's stored per set for audit/debugging: everything except the per-rep list (stored separately). */
@@ -88,6 +97,7 @@ export function evaluateSet(s: SubmittedSet, setIndex: number, traceBudgetRemain
     }
   }
   const { reps: kept = [], ...record } = analysis ?? {};
+  const mode = resolveSetMode({ mode: s.mode, liveSeconds: s.liveSeconds, reps: s.reps, verifiedReps: kept.length });
   return {
     setIndex,
     exerciseId: s.exerciseId,
@@ -99,6 +109,8 @@ export function evaluateSet(s: SubmittedSet, setIndex: number, traceBudgetRemain
     formScore: analysis?.quality.averageFormScore ?? null,
     verifiedRepDetails: kept,
     analysis: analysis ? (record as SetAnalysisRecord) : null,
+    mode,
+    liveSeconds: mode === "live" ? s.liveSeconds ?? null : null,
     ...(s.warmup ? { warmup: true } : {}),
   };
 }
@@ -113,7 +125,7 @@ export function evaluateWorkout(input: WorkoutSubmission): { sets: EvaluatedSet[
 
   const award = workoutXp({
     // Warm-up sets are evaluated and returned but earn nothing.
-    sets: sets.filter((s) => !s.warmup).map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
+    sets: sets.filter((s) => !s.warmup).map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })), mode: s.mode })),
     durationMinutes: input.durationMinutes,
     priorTrainingMinutesToday: input.priorTrainingMinutesToday,
     painLevel: input.painLevel,

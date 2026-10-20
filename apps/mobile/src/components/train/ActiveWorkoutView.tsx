@@ -1,11 +1,14 @@
+import { EXERCISE_BY_ID, suggestWarmups } from '@form/domain';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ExerciseArt } from '@/components/art/ExerciseArt';
 import { AppText, Button, Divider, ExerciseRow, Field, IconButton, InlineMessage, Row, StatStrip } from '@/components/ui';
-import type { SessionExercise, WorkoutSession } from '@/lib/types';
-import { formatVolume, loadFromDisplay, loadStep, loadToDisplay, loadUnit, snapLoadKg, useUnits, type Units } from '@/lib/units';
+import { barKgOf, useBarWeight } from '@/lib/barWeight';
+import { liveSecondsToSend, startLiveSet, type LiveSet } from '@/lib/liveSet';
+import type { SessionExercise, SetMode, WorkoutSession } from '@/lib/types';
+import { formatVolume, loadFromDisplay, loadStep, loadToDisplay, loadUnit, lbToKg, snapLoadKg, useUnits, type Units } from '@/lib/units';
 import {
   sessionTotals,
   elapsedSeconds,
@@ -20,12 +23,20 @@ import {
   workingSets,
 } from '@/lib/workoutSession';
 import { colors, MAX_CONTENT_WIDTH, radius, space } from '@/theme/tokens';
+import { LiveSetPanel } from './LiveSetPanel';
+import { PlateCalculatorSheet } from './PlateCalculatorSheet';
 import { RestTimerPill } from './RestTimerPill';
 import { SetRow, SetTableHeader } from './SetRow';
 import { Stepper } from './Stepper';
 
-/** The next set being entered. `warmup` marks it a warm-up set (absent means a working set). */
-type Draft = { reps: number; loadKg: number; warmup?: boolean };
+/**
+ * The next set being entered. `warmup` marks it a warm-up set (absent means a working set). `mode` and `liveSeconds`
+ * come from a finished live set (absent = typed in, i.e. manual); changing the reps by hand drops them.
+ */
+export type Draft = { reps: number; loadKg: number; warmup?: boolean; mode?: SetMode; liveSeconds?: number };
+
+/** The draft as typed in by hand: reps and load only, no live timer. */
+const typedIn = (d: Draft): Draft => ({ reps: d.reps, loadKg: d.loadKg, ...(d.warmup ? { warmup: true } : {}) });
 
 /** Longest workout note the server keeps. */
 const NOTES_MAX = 500;
@@ -83,6 +94,12 @@ const REST_PILL_ROOM = 170;
 
 const draftKey = (e: SessionExercise) => `${e.exerciseId}:${e.loggedSets.length}`;
 
+/** Its main way to do it is with a barbell (plates go on it); unknown exercises are not offered the calculator. */
+const usesBarbell = (exerciseId: string) => !!EXERCISE_BY_ID.get(exerciseId)?.equipment[0]?.includes('barbell');
+
+/** Warm-up sets queued to be logged one after another, oldest first. */
+type WarmupQueue = { exerciseId: string; base: number; sets: Draft[]; resume: Draft };
+
 /**
  * The live workout screen as one scroll: every exercise's set table, the focused one with its
  * art and big steppers. Pure view — every value comes from the server session; every action is a callback.
@@ -98,6 +115,72 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
   const errorIndex = p.logErrorIndex === undefined ? index : p.logErrorIndex;
   // Drafts for the next set of exercises that aren't focused, keyed `${exerciseId}:${loggedCount}`.
   const [rowDrafts, setRowDrafts] = useState<Record<string, Draft>>({});
+
+  // Automatic warm-ups for the focused lift: suggested from today's working weight, logged one by one as warm-up sets.
+  const { bar, setBar } = useBarWeight(units);
+  const focusedEx = session.exercises[index];
+  const barbell = !!focusedEx && focusedEx.loadable && usesBarbell(focusedEx.exerciseId);
+  // The live set being counted (one at a time, on one exercise). Local: it is a timer and a tap count until Done saves it.
+  const [live, setLive] = useState<LiveSet | null>(null);
+  const liveEx = live ? session.exercises.find((e) => e.exerciseId === live.exerciseId) : undefined;
+  const finishLive = (seconds: number) => {
+    if (!live) return;
+    const d: Draft = { reps: live.reps, loadKg: p.draft.loadKg, ...(p.draft.warmup ? { warmup: true } : {}), mode: 'live', liveSeconds: liveSecondsToSend(seconds) };
+    setLive(null);
+    // Kept as the draft too, so a failed save is retried as the same live set.
+    p.onChangeDraft(d);
+    p.onLogSet(d);
+  };
+  const [warmQueue, setWarmQueue] = useState<WarmupQueue | null>(null);
+  // What the queue's effect already did, so a re-render never repeats it: a send, the resume or a failure.
+  const handled = useRef<{ queue: WarmupQueue; step: string } | null>(null);
+  const failedHere = !!p.logError && errorIndex === index;
+  const warmups =
+    focusedEx && focusedEx.loadable && focusedEx.loggedSets.length === 0 && !p.draft.warmup && !failedHere && p.onLogSetAt
+      ? suggestWarmups({
+          loadable: true,
+          workingKg: p.draft.loadKg,
+          workingReps: p.draft.reps,
+          // Imperial users warm up in plate-friendly pounds.
+          stepKg: units === 'imperial' ? lbToKg(loadStep(p.loadStepKg, units)) : p.loadStepKg,
+          barbell,
+          barKg: barKgOf(bar, units),
+        }).map((w) => ({ reps: w.reps, loadKg: snapLoadKg(w.loadKg, units) }))
+      : [];
+  // Where the queue stands, from the session itself: sets logged since it started (all warm-ups) against the sets it holds.
+  const warmIndex = warmQueue ? session.exercises.findIndex((e) => e.exerciseId === warmQueue.exerciseId) : -1;
+  const warmEx = warmIndex >= 0 ? session.exercises[warmIndex] : undefined;
+  const warmDone = warmQueue && warmEx ? warmEx.loggedSets.length - warmQueue.base : 0;
+  const warmLive = !!warmQueue && !!warmEx && warmDone >= 0 && warmEx.loggedSets.slice(warmQueue.base).every((s) => s.warmup);
+  const warmActive = warmLive && !!warmQueue && warmDone < warmQueue.sets.length;
+  const warmFailed = warmActive && !!p.logError && errorIndex === warmIndex;
+  const addWarmups = () => {
+    if (!focusedEx || warmActive || warmups.length === 0) return;
+    setWarmQueue({
+      exerciseId: focusedEx.exerciseId,
+      base: focusedEx.loggedSets.length,
+      sets: warmups.map((w) => ({ ...w, warmup: true })),
+      resume: { reps: p.draft.reps, loadKg: p.draft.loadKg },
+    });
+  };
+  const { onLogSetAt, onChangeDraft, logging } = p;
+  useEffect(() => {
+    if (!warmQueue || !warmEx || !warmLive) return;
+    const once = (step: string) => {
+      if (handled.current?.queue === warmQueue && handled.current.step === step) return false;
+      handled.current = { queue: warmQueue, step };
+      return true;
+    };
+    if (warmDone >= warmQueue.sets.length) {
+      // All in: the working set starts from what was on the steppers before.
+      if (once('resume') && warmIndex === index) onChangeDraft(warmQueue.resume);
+    } else if (warmFailed) {
+      // One failed: it becomes the next set, so Retry saves that warm-up; adding goes on after it saves.
+      if (once(`failed-${warmDone}`) && warmIndex === index) onChangeDraft(warmQueue.sets[warmDone]);
+    } else if (!logging && !paused && onLogSetAt && once(`send-${warmDone}`)) {
+      onLogSetAt(warmIndex, warmQueue.sets[warmDone]);
+    }
+  }, [warmQueue, warmEx, warmLive, warmDone, warmFailed, warmIndex, logging, paused, index, onLogSetAt, onChangeDraft]);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -155,13 +238,30 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
                 const key = draftKey(e);
                 const rowDraft = rowDrafts[key] ?? nextSetDefaults(e, units);
                 const patchRow = (patch: Partial<Draft>) => setRowDrafts((prev) => ({ ...prev, [key]: { ...(prev[key] ?? nextSetDefaults(e, units)), ...patch } }));
-                const patchDraft = (patch: Partial<Draft>) => (focused ? p.onChangeDraft({ ...p.draft, ...patch }) : patchRow(patch));
+                const patchDraft = (patch: Partial<Draft>) => (focused ? p.onChangeDraft({ ...(patch.reps === undefined ? p.draft : typedIn(p.draft)), ...patch }) : patchRow(patch));
                 return (
                   <View key={`${e.exerciseId}-${i}`}>
                     {i > 0 ? <Divider /> : null}
                     <View style={styles.section}>
                       {focused ? (
-                        <FocusedHeader p={p} exercise={e} paused={paused} units={units} showError={!!p.logError && errorIndex === i} />
+                        <FocusedHeader
+                          p={p}
+                          exercise={e}
+                          paused={paused}
+                          units={units}
+                          showError={!!p.logError && errorIndex === i}
+                          warmups={{ count: warmups.length, adding: warmActive && !warmFailed && warmQueue?.exerciseId === e.exerciseId, onAdd: addWarmups }}
+                          plates={barbell ? { bar, onChangeBar: setBar } : null}
+                          liveSet={{
+                            live: live && live.exerciseId === e.exerciseId ? live : null,
+                            elsewhere: live && live.exerciseId !== e.exerciseId ? (liveEx?.name ?? 'another exercise') : null,
+                            onStart: () => setLive(startLiveSet(e.exerciseId, session, Date.now())),
+                            onAddRep: () => setLive((l) => (l ? { ...l, reps: l.reps + 1 } : l)),
+                            onUndoRep: () => setLive((l) => (l ? { ...l, reps: Math.max(0, l.reps - 1) } : l)),
+                            onDone: finishLive,
+                            onCancel: () => setLive(null),
+                          }}
+                        />
                       ) : (
                         <>
                           <ExerciseRow
@@ -246,7 +346,37 @@ export function ActiveWorkoutView(p: ActiveWorkoutViewProps) {
 }
 
 /** The focused exercise: moving art, name, where you are, notes, camera, steppers and the log button. */
-function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWorkoutViewProps; exercise: SessionExercise; paused: boolean; units: Units; showError: boolean }) {
+function FocusedHeader({
+  p,
+  exercise,
+  paused,
+  units,
+  showError,
+  warmups,
+  plates,
+  liveSet,
+}: {
+  p: ActiveWorkoutViewProps;
+  exercise: SessionExercise;
+  paused: boolean;
+  units: Units;
+  showError: boolean;
+  /** Suggested warm-ups for this lift (`count` 0 = none to offer); `adding` while they are being logged. */
+  warmups: { count: number; adding: boolean; onAdd: () => void };
+  /** Barbell lifts: the plate calculator and the saved bar weight. */
+  plates: { bar: number; onChangeBar: (bar: number) => void } | null;
+  /** Live set mode: the set being counted here (if any), the name of the exercise a live set is running on instead (if any), and the actions. */
+  liveSet: {
+    live: LiveSet | null;
+    elsewhere: string | null;
+    onStart: () => void;
+    onAddRep: () => void;
+    onUndoRep: () => void;
+    onDone: (seconds: number) => void;
+    onCancel: () => void;
+  };
+}) {
+  const [platesOpen, setPlatesOpen] = useState(false);
   const setNumber = workingSets(exercise).length + 1;
   const target = formatTarget(exercise, units);
   const previous = formatPrevious(exercise, units);
@@ -276,13 +406,41 @@ function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWor
           <Button label="Use camera coaching" icon="videocam-outline" variant="secondary" onPress={p.onOpenCamera} accessibilityHint="Opens the camera so FORM can count your reps and coach your form" />
         ) : null}
         <AppText variant="caption" color={colors.textFaint}>
-          {exercise.cameraVerifiable ? 'Reps you enter yourself are recorded. Use the camera to have them verified.' : 'Enter your reps as you go.'}
+          {exercise.cameraVerifiable
+            ? 'Start a set to count reps live, or use the camera to have them verified. Both earn full XP; reps you type in afterwards earn less.'
+            : 'Start a set to count reps live and earn full XP. Reps you type in afterwards earn less.'}
         </AppText>
       </View>
 
       <View style={styles.entry}>
+        {liveSet.live ? (
+          <>
+            <LiveSetPanel
+              live={liveSet.live}
+              session={p.session}
+              nowMs={p.now.getTime()}
+              label={p.draft.warmup ? 'Warm-up set' : `Set ${setNumber}`}
+              onAddRep={liveSet.onAddRep}
+              onUndoRep={liveSet.onUndoRep}
+              onDone={liveSet.onDone}
+              onCancel={liveSet.onCancel}
+              disabled={paused}
+            />
+            {exercise.loadable ? (
+              <Stepper
+                label="Weight"
+                unit={loadUnit(units)}
+                value={loadToDisplay(p.draft.loadKg, units)}
+                step={loadStep(p.loadStepKg, units)}
+                max={loadToDisplay(1000, units)}
+                onChange={(v) => p.onChangeDraft({ ...p.draft, loadKg: loadFromDisplay(v, units) })}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
         <Row gap={space.lg} style={{ alignItems: 'flex-start' }}>
-          <Stepper label="Reps" value={p.draft.reps} onChange={(reps) => p.onChangeDraft({ ...p.draft, reps })} />
+          <Stepper label="Reps" value={p.draft.reps} onChange={(reps) => p.onChangeDraft({ ...typedIn(p.draft), reps })} />
           {exercise.loadable ? (
             <Stepper
               label="Weight"
@@ -294,8 +452,49 @@ function FocusedHeader({ p, exercise, paused, units, showError }: { p: ActiveWor
             />
           ) : null}
         </Row>
+        {plates || warmups.count > 0 || warmups.adding ? (
+          <Row gap={space.sm} style={{ flexWrap: 'wrap' }}>
+            {warmups.count > 0 || warmups.adding ? (
+              <Button
+                label={warmups.adding ? 'Adding warm-ups…' : `Add warm-ups (${warmups.count})`}
+                icon="flame-outline"
+                variant="secondary"
+                onPress={warmups.onAdd}
+                loading={warmups.adding}
+                disabled={paused}
+                accessibilityHint="Logs lighter warm-up sets before your working sets. They don't count towards XP or records"
+              />
+            ) : null}
+            {plates ? <Button label="Plates" icon="barbell-outline" variant="ghost" onPress={() => setPlatesOpen(true)} accessibilityHint="Shows which plates to load on each side of the bar" /> : null}
+          </Row>
+        ) : null}
+        {plates ? <PlateCalculatorSheet visible={platesOpen} onClose={() => setPlatesOpen(false)} loadKg={p.draft.loadKg} units={units} bar={plates.bar} onChangeBar={plates.onChangeBar} /> : null}
         {showError ? <InlineMessage tone="danger">{p.logError}</InlineMessage> : null}
-        <Button label={showError ? 'Retry — save this set' : p.draft.warmup ? 'Log warm-up set' : `Log set ${setNumber}`} icon="checkmark" onPress={() => p.onLogSet()} loading={p.logging} disabled={paused} />
+        {showError ? null : (
+          <Button
+            label={p.draft.warmup ? 'Start warm-up set' : `Start set ${setNumber}`}
+            icon="play"
+            onPress={liveSet.onStart}
+            disabled={paused || warmups.adding || p.logging || !!liveSet.elsewhere}
+            accessibilityHint="Starts a timer and a rep counter. Live sets earn full XP"
+          />
+        )}
+        {liveSet.elsewhere ? (
+          <AppText variant="caption" color={colors.textMuted}>
+            Finish the live set on {liveSet.elsewhere} first.
+          </AppText>
+        ) : null}
+        <Button
+          label={showError ? 'Retry — save this set' : p.draft.warmup ? 'Log warm-up without timer' : 'Log without timer'}
+          variant={showError ? 'primary' : 'secondary'}
+          icon="checkmark"
+          onPress={() => p.onLogSet()}
+          loading={p.logging}
+          disabled={paused}
+          accessibilityHint={showError ? undefined : 'Saves the reps you typed. Typed-in sets earn less XP than live or camera sets'}
+        />
+          </>
+        )}
       </View>
     </>
   );

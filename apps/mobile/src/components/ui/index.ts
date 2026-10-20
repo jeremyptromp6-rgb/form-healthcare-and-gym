@@ -9,3 +9,4 @@ export * from './rows';
 export * from './gym';
 export * from './exercise';
 export * from './fuel';
+export * from './SwipeRuler';

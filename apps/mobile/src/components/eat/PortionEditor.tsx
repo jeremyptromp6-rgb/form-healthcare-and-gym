@@ -2,7 +2,7 @@ import { presentAmount, unitSymbol, type ScaleProvider } from '@form/domain';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FoodThumb } from '@/components/eat/FoodThumb';
-import { AppText, Badge, Button, Card, Field, InlineMessage, Row, Segmented } from '@/components/ui';
+import { AppText, Badge, Button, Card, Field, InlineMessage, Row, Segmented, SwipeRuler } from '@/components/ui';
 import type { WeightSource } from '@/lib/api';
 import { allowedMethods, defaultMethod, MEAL_LABEL, MEALS, METHOD_LABEL, previewPortion, readAmount, unitOptions, type UnitGroup, type UnitOption } from '@/lib/eat';
 import { defaultScaleProvider } from '@/lib/scale';
@@ -65,6 +65,9 @@ const STEP: Partial<Record<FoodUnit, number>> = {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Grams on the swipe ruler: 5 g a tick, 10 g once past 500 g. */
+const GRAM_RULER = { fine: { step: 5, min: 5, max: 1000 }, coarse: { step: 10, min: 10, max: 5000 } } as const;
+
 /**
  * How much, in what unit, and how you know. Weights (g, kg, oz, lb), volumes (ml, L, fl oz, cups,
  * spoons) and the food's own servings/pieces/items; decimals with "." or ",". The result is the
@@ -117,6 +120,7 @@ export function PortionEditor({ food, initial, submitLabel, busy, error, onSubmi
     const base = input.ok ? input.value : 0;
     type(String(Math.max(inc, round2(base + dir * inc))));
   };
+  const gramRuler = input.ok && input.value > 500 ? GRAM_RULER.coarse : GRAM_RULER.fine;
   const useScaleReading = (grams: number) => {
     const g = options.find((o) => o.unit === 'g')!;
     setOption(g);
@@ -168,6 +172,19 @@ export function PortionEditor({ food, initial, submitLabel, busy, error, onSubmi
           />
           <Button label="+" variant="secondary" onPress={() => step(1)} accessibilityHint="Increase amount" style={{ width: 52 }} />
         </Row>
+        {option.unit === 'g' && option.group === 'weight' ? (
+          <SwipeRuler
+            label="Swipe to set the amount in grams"
+            hideValue
+            hideButtons
+            value={Math.min(gramRuler.max, Math.max(gramRuler.min, input.ok ? input.value : 0))}
+            onChange={(v) => type(String(v > 500 ? Math.round(v / 10) * 10 : v))}
+            step={gramRuler.step}
+            min={gramRuler.min}
+            max={gramRuler.max}
+            unit="g"
+          />
+        ) : null}
         {groups.map((g) => (
           <View key={g} style={{ gap: space.xs }} accessibilityRole="radiogroup" accessibilityLabel={`${GROUP_LABEL[g]} units`}>
             <AppText variant="label" color={colors.textFaint}>

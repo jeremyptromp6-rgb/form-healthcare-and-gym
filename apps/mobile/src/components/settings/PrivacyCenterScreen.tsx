@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { PrivacyCenterView } from '@/components/settings/SettingsViews';
+import { DeleteProgressPhotosCard } from '@/components/progress/bodyProgress/DeleteAllPhotos';
 import { Screen } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { saveExport } from '@/lib/privateFiles';
+import { deleteAllProgressPhotos } from '@/lib/progressPhotos';
 import { useDataSummary } from '@/lib/queries';
 
 /**
@@ -24,10 +26,13 @@ export function PrivacyCenterScreen({ right }: { right?: ReactNode }) {
         }}
         onDelete={async (body) => {
           await authed((t) => api.deleteAccount(t, body));
-          // Only reached when the server confirmed everything is gone.
+          // Only reached when the server confirmed everything is gone. Progress photos live only on this
+          // phone, so deleting the account removes them here too (best effort: never blocks the sign-out).
+          await deleteAllProgressPhotos().catch(() => undefined);
           await signOut();
         }}
       />
+      <DeleteProgressPhotosCard />
     </Screen>
   );
 }

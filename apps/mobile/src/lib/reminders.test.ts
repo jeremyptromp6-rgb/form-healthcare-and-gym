@@ -29,6 +29,7 @@ const prefs = (over: { [K in keyof ReminderPrefs]?: Partial<ReminderPrefs[K]> } 
   streak: { ...DEFAULT_PREFS.streak, ...over.streak },
   weekly: { ...DEFAULT_PREFS.weekly, ...over.weekly },
   rest: { ...DEFAULT_PREFS.rest, ...over.rest },
+  photo: { ...DEFAULT_PREFS.photo, ...over.photo },
 });
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
@@ -169,11 +170,56 @@ describe('at most two a day', () => {
   });
 });
 
+describe('monthly progress photo', () => {
+  // Wednesday 28 Oct 2026: the 1st of November (a Sunday) is inside the coming week.
+  const WED = new Date(2026, 9, 28, 9, 0);
+  const photos = (plan: ReturnType<typeof planReminders>) => plan.filter((r) => r.kind === 'photo');
+
+  it('is off unless asked for', () => {
+    expect(DEFAULT_PREFS.photo.on).toBe(false);
+    expect(planReminders(prefs(), ctx(), WED)).toEqual([]);
+  });
+
+  it('is one reminder, on the 1st at 10:00, opening Body progress', () => {
+    const plan = photos(planReminders(prefs({ photo: { on: true } }), ctx(), WED));
+    expect(plan).toHaveLength(1);
+    expect(plan[0]).toMatchObject({ id: 'form.reminder.photo.2026-11-01', route: 'bodyProgress', title: 'Monthly progress photo' });
+    expect(plan[0]!.at).toEqual(new Date(2026, 10, 1, 10, 0));
+  });
+
+  it('plans nothing in a week that has no 1st in it', () => {
+    expect(planReminders(prefs({ photo: { on: true } }), ctx(), TUE)).toEqual([]);
+  });
+
+  it('stays inside the two-a-day cap: on a busy 1st the workout nudge gives way, never the cap', () => {
+    // Sunday 1 Nov: weekly recap 18:00 + photo 10:00 + a daily workout reminder would be three.
+    const plan = planReminders(prefs({ workout: { on: true, time: '12:00' }, weekly: { on: true }, photo: { on: true } }), ctx({ plannedDaysPerWeek: null }), WED);
+    const sunday = plan.filter((r) => r.at.getDate() === 1);
+    expect(sunday).toHaveLength(2);
+    expect(sunday.map((r) => r.kind).sort()).toEqual(['photo', 'weekly']);
+  });
+
+  it('is scheduled on the device like the others, and cancelled when switched off', async () => {
+    await syncReminders(prefs({ photo: { on: true } }), ctx(), WED);
+    expect(schedule).toHaveBeenCalledWith(expect.objectContaining({ identifier: 'form.reminder.photo.2026-11-01', content: expect.objectContaining({ data: { route: 'bodyProgress' } }) }));
+    listScheduled.mockResolvedValue([{ identifier: 'form.reminder.photo.2026-11-01' }]);
+    await syncReminders(prefs(), ctx(), WED);
+    expect(cancel).toHaveBeenCalledWith('form.reminder.photo.2026-11-01');
+  });
+
+  it('older saved choices without the photo reminder load as off', async () => {
+    mockStore.set('form.reminders.v1', JSON.stringify({ workout: { on: true, time: '07:00', days: [0] } }));
+    resetReminderPrefsCache();
+    expect((await loadReminderPrefs()).photo).toEqual({ on: false });
+  });
+});
+
 describe('deep links', () => {
   it('maps a reminder tap to its screen and ignores anything else', () => {
     expect(routeForReminder({ route: 'train' })).toBe('/train');
     expect(routeForReminder({ route: 'streak' })).toBe('/progress/streak');
     expect(routeForReminder({ route: 'progress' })).toBe('/progress');
+    expect(routeForReminder({ route: 'bodyProgress' })).toBe('/progress/body-progress');
     expect(routeForReminder({ route: '/admin' })).toBeNull();
     expect(routeForReminder({ route: 'constructor' })).toBeNull();
     expect(routeForReminder(null)).toBeNull();

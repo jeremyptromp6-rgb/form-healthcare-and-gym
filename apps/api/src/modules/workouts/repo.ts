@@ -71,8 +71,8 @@ export function insertWorkout(
   ).run(w.id, w.userId, w.clientWorkoutId, w.localDate, w.durationMinutes, w.painLevel, "[]", at, w.notes ?? null);
 
   const insertSet = db.prepare(
-    `INSERT INTO workout_sets (workout_id, set_index, exercise_id, reps, verified_reps, verification_status, rom_percent, load_kg, target_reps, form_score, analysis, warmup)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO workout_sets (workout_id, set_index, exercise_id, reps, verified_reps, verification_status, rom_percent, load_kg, target_reps, form_score, analysis, warmup, mode, live_seconds)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertRep = db.prepare(
     `INSERT INTO verified_reps (set_id, rep_index, duration_ms, min_angle_deg, rom_percent, start_ms, end_ms, peak_angle_deg, form_score, issues)
@@ -89,10 +89,10 @@ export function insertWorkout(
     // A warm-up set is kept on the record but earns nothing: stored with no verification, no rep rows, no
     // domain event, no PRs, and every reader of verified work also filters warmup = 0.
     if (s.warmup) {
-      insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, 0, "not_tracked", null, s.loadKg, s.targetReps ?? null, null, null, 1);
+      insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, 0, "not_tracked", null, s.loadKg, s.targetReps ?? null, null, null, 1, s.mode ?? "manual", s.liveSeconds ?? null);
       continue;
     }
-    const setId = insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, s.verifiedReps, s.verificationStatus, s.romPercent, s.loadKg, s.targetReps ?? null, s.formScore, s.analysis ? JSON.stringify(s.analysis) : null, 0).lastInsertRowid;
+    const setId = insertSet.run(w.id, s.setIndex, s.exerciseId, s.reps, s.verifiedReps, s.verificationStatus, s.romPercent, s.loadKg, s.targetReps ?? null, s.formScore, s.analysis ? JSON.stringify(s.analysis) : null, 0, s.mode ?? "manual", s.liveSeconds ?? null).lastInsertRowid;
     for (const r of s.verifiedRepDetails) {
       insertRep.run(setId, r.index, r.durationMs, r.minAngleDeg, r.romPercent, r.startMs ?? null, r.endMs ?? null, r.peakAngleDeg ?? null, r.formScore ?? null, JSON.stringify(r.issues ?? []));
     }
@@ -116,7 +116,7 @@ export function insertWorkout(
   }
 
   const award = workoutXp({
-    sets: working.map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })) })),
+    sets: working.map((s) => ({ reps: s.reps, verifiedReps: s.verifiedReps, repQuality: s.verifiedRepDetails.map((r) => ({ formScore: (r as { formScore?: number }).formScore ?? null, romPercent: r.romPercent })), mode: s.mode ?? "manual" })),
     durationMinutes: w.durationMinutes,
     priorTrainingMinutesToday: w.priorTrainingMinutesToday,
     painLevel: w.painLevel,

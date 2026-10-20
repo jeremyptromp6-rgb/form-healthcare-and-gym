@@ -70,6 +70,18 @@ describe.each([
   });
 });
 
+describe('Weight: swipe ruler', () => {
+  it('starts at the latest entry, moves by 0.1 kg and fills the field', async () => {
+    await render(<WeightScreen />);
+    const ruler = screen.getByRole('adjustable', { name: "Swipe to set today's weight" });
+    expect(ruler.props.accessibilityValue).toEqual({ text: '80 kg' });
+    await fireEvent(ruler, 'accessibilityAction', { nativeEvent: { actionName: 'increment' } });
+    expect(screen.getByDisplayValue('80.1')).toBeTruthy();
+    await fireEvent(screen.getByRole('adjustable', { name: "Swipe to set today's weight" }), 'accessibilityAction', { nativeEvent: { actionName: 'decrement' } });
+    expect(screen.getByDisplayValue('80')).toBeTruthy();
+  });
+});
+
 describe('Weight: deleting an entry', () => {
   it('asks first, and only deletes on the second tap', async () => {
     await render(<WeightScreen />);

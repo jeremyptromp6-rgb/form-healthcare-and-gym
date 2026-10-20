@@ -1069,6 +1069,21 @@ const V27_STEPS = `
   BEGIN SELECT RAISE(ABORT, 'xp_events is append-only: add a compensating entry instead'); END;
 `;
 
+/**
+ * How a set was recorded: 'camera' (server-verified reps), 'live' (counted on the app's set timer, with the seconds
+ * it ran) or 'manual' (typed in). Manual sets earn reduced XP. Existing sets with verified reps are camera sets;
+ * everything else, like a request from an old client without the field, is manual. The stored mode is the one the
+ * server trusts (an implausible live timer is stored as manual).
+ */
+const V28_SET_MODE = `
+  ALTER TABLE session_sets ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual' CHECK (mode IN ('live', 'manual', 'camera'));
+  ALTER TABLE session_sets ADD COLUMN live_seconds INTEGER CHECK (live_seconds IS NULL OR live_seconds BETWEEN 1 AND 3600);
+  ALTER TABLE workout_sets ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual' CHECK (mode IN ('live', 'manual', 'camera'));
+  ALTER TABLE workout_sets ADD COLUMN live_seconds INTEGER CHECK (live_seconds IS NULL OR live_seconds BETWEEN 1 AND 3600);
+  UPDATE session_sets SET mode = 'camera' WHERE verified_reps > 0 AND warmup = 0;
+  UPDATE workout_sets SET mode = 'camera' WHERE verified_reps > 0 AND warmup = 0;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "initial", up: V1_INITIAL },
   { version: 2, name: "foundation", up: V2_FOUNDATION },
@@ -1097,4 +1112,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 25, name: "streak_freezes", up: V25_STREAK_FREEZES },
   { version: 26, name: "leaderboard", up: V26_LEADERBOARD },
   { version: 27, name: "steps", up: V27_STEPS },
+  { version: 28, name: "set_mode", up: V28_SET_MODE },
 ];

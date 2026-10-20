@@ -3,6 +3,7 @@ import {
   activeDurationMinutes,
   EXERCISE_BY_ID,
   evaluateSet,
+  isPlausibleLiveSet,
   summarizeSet,
   traceBudgetMs,
   restRemainingSeconds,
@@ -11,6 +12,7 @@ import {
   type PlannedExercise,
   type AssessedRep,
   type RepTrace,
+  type SetMode,
   type SetAnalysisRecord,
 } from "@form/domain";
 import type { Db } from "../../db";
@@ -63,6 +65,8 @@ interface SetRow {
   verified_rep_details: string;
   analysis: string | null;
   warmup: number;
+  mode: SetMode;
+  live_seconds: number | null;
   created_at: string;
 }
 
@@ -125,6 +129,8 @@ const setView = (r: SetRow) => ({
   formScore: r.form_score,
   quality: r.analysis ? (JSON.parse(r.analysis) as SetAnalysisRecord).quality : null,
   warmup: r.warmup === 1,
+  mode: r.mode,
+  liveSeconds: r.live_seconds,
   createdAt: r.created_at,
 });
 
@@ -205,7 +211,7 @@ export function logSet(
   ctx: AppContext,
   userId: string,
   sessionId: string,
-  body: { clientSetId: string; exerciseId: string; reps: number; loadKg: number; targetReps?: number; targetLoadKg?: number; trace?: RepTrace; restSeconds?: number; warmup?: boolean },
+  body: { clientSetId: string; exerciseId: string; reps: number; loadKg: number; targetReps?: number; targetLoadKg?: number; trace?: RepTrace; restSeconds?: number; warmup?: boolean; mode?: SetMode; liveSeconds?: number },
 ) {
   const { db } = ctx;
   return transaction(db, () => {
@@ -224,12 +230,13 @@ export function logSet(
     const now = ctx.now();
     const realMs = Math.max(0, now.getTime() - new Date(open.started_at).getTime() - open.paused_ms);
     const traceUsedMs = sets(db, sessionId).reduce((a, r) => a + (r.analysis ? ((JSON.parse(r.analysis) as SetAnalysisRecord).spanMs ?? 0) : 0), 0);
-    const evaluated = evaluateSet({ exerciseId: body.exerciseId, reps: body.reps, loadKg: body.loadKg, trace: body.trace }, setIndex, traceBudgetMs(realMs) - traceUsedMs);
+    // The mode is the client's claim; evaluateSet resolves what is trusted (verified reps = camera, a plausible live timer = live, else manual).
+    const evaluated = evaluateSet({ exerciseId: body.exerciseId, reps: body.reps, loadKg: body.loadKg, trace: body.trace, mode: body.mode, liveSeconds: body.liveSeconds }, setIndex, traceBudgetMs(realMs) - traceUsedMs);
     const id = randomUUID();
     db.prepare(
       `INSERT INTO session_sets (id, session_id, client_set_id, exercise_id, set_index, target_reps, target_load_kg, reps, load_kg, verified_reps,
-         verification_status, rom_percent, form_score, verified_rep_details, analysis, warmup, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         verification_status, rom_percent, form_score, verified_rep_details, analysis, warmup, mode, live_seconds, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       sessionId,
@@ -247,6 +254,8 @@ export function logSet(
       JSON.stringify(evaluated.verifiedRepDetails),
       evaluated.analysis ? JSON.stringify(evaluated.analysis) : null,
       body.warmup ? 1 : 0,
+      evaluated.mode ?? "manual",
+      evaluated.liveSeconds ?? null,
       now.toISOString(),
       now.toISOString(),
     );
@@ -262,6 +271,8 @@ export function editSet(ctx: AppContext, userId: string, sessionId: string, setI
     const row = db.prepare("SELECT * FROM session_sets WHERE id = ? AND session_id = ?").get(setId, sessionId) as SetRow | undefined;
     if (!row) throw new HttpError(404, "not_found", "Set not found");
     const reps = patch.reps ?? row.reps;
+    // A live set only stays live while its timer still covers the reps: raising the reps afterwards makes it manual.
+    const mode: SetMode = row.mode === "live" && (reps > row.reps || row.live_seconds === null || !isPlausibleLiveSet(reps, row.live_seconds)) ? "manual" : row.mode;
     // Lowering reps can lower verified reps; raising them never adds verification. Form, ROM and
     // the quality summary follow the verified reps that are kept.
     const details = (JSON.parse(row.verified_rep_details) as AssessedRep[]).slice(0, reps);
@@ -271,7 +282,7 @@ export function editSet(ctx: AppContext, userId: string, sessionId: string, setI
       analysis = { ...analysis, quality: { ...quality, attemptedReps: analysis.quality.attemptedReps } };
     }
     db.prepare(
-      "UPDATE session_sets SET reps = ?, load_kg = ?, verified_reps = ?, verified_rep_details = ?, rom_percent = ?, form_score = ?, analysis = ?, warmup = ?, updated_at = ? WHERE id = ?",
+      "UPDATE session_sets SET reps = ?, load_kg = ?, verified_reps = ?, verified_rep_details = ?, rom_percent = ?, form_score = ?, analysis = ?, warmup = ?, mode = ?, live_seconds = ?, updated_at = ? WHERE id = ?",
     ).run(
       reps,
       patch.loadKg ?? row.load_kg,
@@ -281,6 +292,8 @@ export function editSet(ctx: AppContext, userId: string, sessionId: string, setI
       analysis ? analysis.quality.averageFormScore : row.form_score,
       analysis ? JSON.stringify(analysis) : null,
       patch.warmup === undefined ? row.warmup : patch.warmup ? 1 : 0,
+      mode,
+      mode === "live" ? row.live_seconds : null,
       ctx.now().toISOString(),
       setId,
     );
@@ -383,10 +396,10 @@ export function completionSummary(db: Db, userId: string, workoutId: string) {
   const setRows = db
     .prepare(
       `SELECT exercise_id AS exerciseId, set_index AS setIndex, target_reps AS targetReps, reps, verified_reps AS verifiedReps, load_kg AS loadKg,
-              verification_status AS verificationStatus, rom_percent AS romPercent, form_score AS formScore, analysis, warmup
+              verification_status AS verificationStatus, rom_percent AS romPercent, form_score AS formScore, analysis, warmup, mode, live_seconds AS liveSeconds
        FROM workout_sets WHERE workout_id = ? ORDER BY id`,
     )
-    .all(workoutId) as { exerciseId: string; reps: number; verifiedReps: number; loadKg: number; formScore: number | null; analysis: string | null; warmup: number }[];
+    .all(workoutId) as { exerciseId: string; reps: number; verifiedReps: number; loadKg: number; formScore: number | null; analysis: string | null; warmup: number; mode: SetMode; liveSeconds: number | null }[];
   const sets = setRows.map(({ analysis, warmup, ...s }) => ({
     ...s,
     warmup: warmup === 1,
@@ -467,6 +480,8 @@ export function completeSession(ctx: AppContext, userId: string, sessionId: stri
           analysis: r.analysis ? JSON.parse(r.analysis) : null,
           targetReps: r.target_reps,
           warmup: r.warmup === 1,
+          mode: r.mode,
+          liveSeconds: r.live_seconds,
         })),
       });
     }

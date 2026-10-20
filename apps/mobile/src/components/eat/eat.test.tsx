@@ -263,6 +263,23 @@ describe('PortionEditor', () => {
     expect(onSubmit).toHaveBeenCalledWith({ quantity: 150, unit: 'g', servingId: null, amountMethod: 'measured', mealType: 'dinner', weightSource: 'typed' });
   });
 
+  it('swipe ruler moves grams by 5, or by 10 past 500 g', async () => {
+    const act = (name: string) => ({ nativeEvent: { actionName: name } });
+    await render(<PortionEditor food={chicken} initial={{ unit: 'g', quantity: 150 }} submitLabel="Log food" onSubmit={jest.fn()} scale={NO_SCALE_PROVIDER} />);
+    const ruler = () => screen.getByRole('adjustable', { name: 'Swipe to set the amount in grams' });
+    await fireEvent(ruler(), 'accessibilityAction', act('increment'));
+    expect(screen.getByDisplayValue('155')).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText('Amount (g)'), '600');
+    await fireEvent(ruler(), 'accessibilityAction', act('increment'));
+    expect(screen.getByDisplayValue('610')).toBeTruthy();
+  });
+
+  it('has no gram ruler for a piece', async () => {
+    await render(<PortionEditor food={chicken} initial={{ unit: 'g', quantity: 150 }} submitLabel="Log food" onSubmit={jest.fn()} scale={NO_SCALE_PROVIDER} />);
+    await fireEvent.press(screen.getByRole('radio', { name: '1 breast (172 g)' }));
+    expect(screen.queryByRole('adjustable', { name: 'Swipe to set the amount in grams' })).toBeNull();
+  });
+
   it('a piece is counted, never measured', async () => {
     const onSubmit = jest.fn();
     await render(<PortionEditor food={chicken} initial={{ unit: 'g', quantity: 150, amountMethod: 'measured' }} submitLabel="Log food" onSubmit={onSubmit} scale={NO_SCALE_PROVIDER} />);

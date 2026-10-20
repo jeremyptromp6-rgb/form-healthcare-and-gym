@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { View } from 'react-native';
-import { AppText, Button, Card, ErrorState, Field, IconButton, InlineMessage, Row, Screen, SectionHeader, StateView } from '@/components/ui';
+import { AppText, Button, Card, ErrorState, Field, IconButton, InlineMessage, Row, Screen, SectionHeader, StateView, SwipeRuler } from '@/components/ui';
 import { localDateKey } from '@/lib/dates';
 import { useCatalog, useDeleteWeight, useLogWeight, useMe, useWeightHistory } from '@/lib/queries';
-import { formatWeight, weightInputToKg, type Units } from '@/lib/units';
+import { formatWeight, parseNumber, weightInputToKg, weightToInput, type Units } from '@/lib/units';
 import { colors, radius, space } from '@/theme/tokens';
 
 /** Weight history: private, one entry per day, the newest sets the current weight and targets. */
@@ -41,6 +41,14 @@ export default function WeightScreen() {
   };
 
   const entries = history.data?.entries ?? [];
+  // The swipe ruler: 0.1 kg or 0.2 lb a tick, from what is typed, else the latest entry, else a typical weight.
+  const toUnit = (kg: number) => Number(weightToInput(kg, units));
+  const typed = parseNumber(text);
+  const rulerValue = Number.isFinite(typed) ? typed : entries[0] ? toUnit(entries[0].weightKg) : units === 'metric' ? 70 : 155;
+  const rulerStep = units === 'metric' ? 0.1 : 0.2;
+  // Ticks sit on whole steps (155.0, 155.2, ...), inside the server's limits.
+  const rulerMin = Math.round(Math.ceil(toUnit(limits?.min ?? 20) / rulerStep - 1e-9) * rulerStep * 10) / 10;
+  const rulerMax = Math.round(Math.floor(toUnit(limits?.max ?? 500) / rulerStep + 1e-9) * rulerStep * 10) / 10;
   const chart = [...entries].slice(0, 14).reverse();
   const min = Math.min(...chart.map((e) => e.weightKg));
   const max = Math.max(...chart.map((e) => e.weightKg));
@@ -55,6 +63,17 @@ export default function WeightScreen() {
           keyboardType="decimal-pad"
           placeholder={units === 'metric' ? '70.5' : '155'}
           onSubmitEditing={submit}
+        />
+        <SwipeRuler
+          label="Swipe to set today's weight"
+          hideValue
+          hideButtons
+          value={Math.min(rulerMax, Math.max(rulerMin, rulerValue))}
+          onChange={(v) => setText(String(v))}
+          step={rulerStep}
+          min={rulerMin}
+          max={rulerMax}
+          unit={units === 'metric' ? 'kg' : 'lb'}
         />
         {error ? <InlineMessage tone="danger">{error}</InlineMessage> : null}
         {saved ? <InlineMessage tone="success">Logged. Your targets now use this weight.</InlineMessage> : null}

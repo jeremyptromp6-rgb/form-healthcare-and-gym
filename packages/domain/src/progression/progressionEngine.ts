@@ -1,4 +1,5 @@
 import { assertFiniteInRange, assertInteger, DomainValidationError } from "../shared/errors";
+import { MANUAL_XP_FACTOR, type SetMode } from "../workouts/setMode";
 
 /**
  * ProgressionEngine — the single source of truth for XP, levels and ranks.
@@ -134,6 +135,12 @@ export interface WorkoutSetForXp {
   verifiedReps: number;
   /** Per verified rep, from the server's analysis: form score and range of motion. */
   repQuality?: readonly { formScore?: number | null; romPercent?: number | null }[];
+  /**
+   * How the set was recorded (already resolved by resolveSetMode). The unverified reps of a "manual" set earn only
+   * MANUAL_XP_FACTOR of the self-logged rate; live and camera sets earn it in full. A set without a mode
+   * (direct domain callers) is paid in full.
+   */
+  mode?: SetMode;
 }
 
 export type PainLevel = "none" | "mild" | "serious";
@@ -203,6 +210,8 @@ export function workoutXp(input: WorkoutXpInput): XpAward {
 
   let verified = 0;
   let unverified = 0;
+  /** Unverified reps weighted by set mode: manual sets count MANUAL_XP_FACTOR per rep. */
+  let weightedUnverified = 0;
   let goodForm = 0;
   let fullRom = 0;
   for (const set of input.sets) {
@@ -212,6 +221,7 @@ export function workoutXp(input: WorkoutXpInput): XpAward {
     assertFiniteInRange(set.verifiedReps, 0, set.reps, "verifiedReps");
     verified += set.verifiedReps;
     unverified += set.reps - set.verifiedReps;
+    weightedUnverified += (set.reps - set.verifiedReps) * (set.mode === "manual" ? MANUAL_XP_FACTOR : 1);
     // Only verified reps carry quality; never more quality entries than verified reps.
     for (const q of (set.repQuality ?? []).slice(0, set.verifiedReps)) {
       if (q.formScore != null && q.formScore >= XP_RULES.goodFormScore) goodForm++;
@@ -241,7 +251,7 @@ export function workoutXp(input: WorkoutXpInput): XpAward {
   const flags: XpFlag[] = eligibleFraction < 1 ? ["partially_capped"] : [];
   const completionBonus = verified + unverified > 0 ? XP_RULES.workoutCompletionBonus : 0;
   const vXp = verifiedRepXp(verified);
-  const uXp = Math.min(unverified * XP_RULES.perUnverifiedRep, XP_RULES.unverifiedRepXpCap);
+  const uXp = Math.min(weightedUnverified * XP_RULES.perUnverifiedRep, XP_RULES.unverifiedRepXpCap);
   const formXp = Math.min(goodForm * XP_RULES.perGoodFormRep, XP_RULES.goodFormXpCap);
   const romXp = Math.min(fullRom * XP_RULES.perFullRomRep, XP_RULES.fullRomXpCap);
   const prXp = prs * XP_RULES.perPersonalRecord;

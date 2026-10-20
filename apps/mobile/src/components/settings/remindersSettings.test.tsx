@@ -35,7 +35,7 @@ describe('RemindersSettings', () => {
     getPerms.mockResolvedValue(notAskedYet);
     await render(<RemindersSettings />);
     expect(await screen.findByText('Reminders')).toBeTruthy();
-    for (const name of ['Workout reminder', 'Streak at risk', 'Weekly recap', 'Rest-day message']) {
+    for (const name of ['Workout reminder', 'Streak at risk', 'Weekly recap', 'Rest-day message', 'Progress photo reminder']) {
       expect(screen.getByRole('switch', { name }).props.value).toBe(false);
     }
     expect(askPerms).not.toHaveBeenCalled();

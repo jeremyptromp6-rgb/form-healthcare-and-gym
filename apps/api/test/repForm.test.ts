@@ -116,8 +116,8 @@ describe("rep verification + form analysis (server-side, authoritative)", () => 
     // Verified reps, recorded reps and completion — plus form/ROM bonuses from the server's own analysis.
     const award = ctx.db.prepare("SELECT xp, detail FROM xp_events WHERE user_id = ? AND source = 'workout'").get(u.id) as { xp: number; detail: string };
     const b = JSON.parse(award.detail).breakdown;
-    expect(b).toMatchObject({ verifiedRepXp: 4, unverifiedRepXp: 5, completionBonus: 25 });
-    expect(done.workout.xp).toBe(Math.floor(4 + 5 + 25 + b.formXp + b.romXp));
+    expect(b).toMatchObject({ verifiedRepXp: 4, unverifiedRepXp: 2.5, completionBonus: 25 }); // manual reps: half rate
+    expect(done.workout.xp).toBe(Math.floor(4 + 2.5 + 25 + b.formXp + b.romXp));
 
     await post(u.auth, `/workouts/sessions/${u.sessionId}/complete`, { painLevel: "none" }); // retry
     const events = ctx.db.prepare("SELECT type, key, payload FROM domain_events WHERE user_id = ? AND type = 'exercise.set_verified'").all(u.id) as { type: string; key: string; payload: string }[];

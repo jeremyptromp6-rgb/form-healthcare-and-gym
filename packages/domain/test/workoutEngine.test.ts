@@ -31,8 +31,9 @@ describe("Workout Engine", () => {
     ]);
     expect(sets[0]!.verifiedRepDetails).toHaveLength(4);
     // Verified reps, recorded reps, completion — plus form and range-of-motion bonuses from the server's analysis.
-    expect(award.breakdown).toMatchObject({ verifiedReps: 4, unverifiedReps: 8, verifiedRepXp: 8, unverifiedRepXp: 4, completionBonus: 25 });
-    expect(award.xp).toBe(Math.floor(4 * 2 + 8 * 0.5 + 25 + award.breakdown.formXp + award.breakdown.romXp));
+    expect(award.breakdown).toMatchObject({ verifiedReps: 4, unverifiedReps: 8, verifiedRepXp: 8, unverifiedRepXp: 2, completionBonus: 25 });
+    // The untraced set carries no mode, so it is manual: its self-logged reps earn half (see setMode.test.ts).
+    expect(award.xp).toBe(Math.floor(4 * 2 + 8 * 0.5 * 0.5 + 25 + award.breakdown.formXp + award.breakdown.romXp));
     expect(award.breakdown.goodFormReps + award.breakdown.fullRomReps).toBeGreaterThan(0);
   });
 

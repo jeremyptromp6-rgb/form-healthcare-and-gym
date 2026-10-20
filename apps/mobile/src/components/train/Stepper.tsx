@@ -1,9 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { AppText } from '@/components/ui';
+import { AppText, SwipeRuler } from '@/components/ui';
 import { colors, radius, space } from '@/theme/tokens';
 
-/** Large −/+ control for use mid-set: big targets, big number, no keyboard needed. */
+/**
+ * Large −/+ control for use mid-set: big targets, big number, no keyboard needed. With `ruler` (on by
+ * default for a value with a unit, i.e. the load) a swipe ruler sits under the number for quick, precise changes.
+ */
 export function Stepper({
   label,
   value,
@@ -13,6 +16,7 @@ export function Stepper({
   max = 200,
   unit,
   format = (v) => String(v),
+  ruler = unit !== undefined,
 }: {
   label: string;
   value: number;
@@ -22,7 +26,9 @@ export function Stepper({
   max?: number;
   unit?: string;
   format?: (v: number) => string;
+  ruler?: boolean;
 }) {
+  if (ruler) return <SwipeRuler label={label} value={value} onChange={onChange} step={step} min={min} max={max} unit={unit} format={format} />;
   const clamp = (v: number) => Math.min(max, Math.max(min, Math.round(v * 100) / 100));
   return (
     <View style={styles.wrap} accessibilityRole="adjustable" accessibilityLabel={label} accessibilityValue={{ text: `${format(value)}${unit ? ` ${unit}` : ''}` }}>

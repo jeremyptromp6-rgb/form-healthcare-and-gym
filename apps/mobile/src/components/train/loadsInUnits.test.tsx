@@ -129,6 +129,15 @@ describe('ActiveWorkoutView loads in display units', () => {
     expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 12, loadKg: 58.97 }); // 130 lb
   });
 
+  it('the weight has a swipe ruler that steps like the buttons (5 lb), reps stay a plain stepper', async () => {
+    const p = await renderView(session(), { units: 'imperial', draft: { reps: 12, loadKg: 61.23 } });
+    const ruler = screen.getByRole('adjustable', { name: 'Weight' });
+    expect(ruler.props.accessibilityValue).toEqual({ text: '135 lb' });
+    await fireEvent(ruler, 'accessibilityAction', { nativeEvent: { actionName: 'increment' } });
+    expect(p.onChangeDraft).toHaveBeenLastCalledWith({ reps: 12, loadKg: 63.5 }); // 140 lb
+    expect(screen.getAllByTestId('swipe-ruler-scroll')).toHaveLength(1); // none for reps
+  });
+
   it('steps a metric user by the exercise increment, in kg', async () => {
     const p = await renderView(session(), { units: 'metric', draft: { reps: 12, loadKg: 60 } });
     await fireEvent.press(screen.getByRole('button', { name: 'Increase Weight' }));

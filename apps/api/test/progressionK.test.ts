@@ -20,7 +20,7 @@ const workout = (localDate: string, extra: Record<string, unknown> = {}) => ({
   localDate,
   durationMinutes: 30,
   painLevel: "none",
-  sets: [{ exerciseId: "push_up", reps: 20 }],
+  sets: [{ exerciseId: "push_up", reps: 40 }], // manual reps earn half the self-logged rate: 40 x 0.25 = 10 XP, as 20 live reps would
   ...extra,
 });
 

@@ -25,10 +25,11 @@ export const WINDOW_DAYS = 7;
 
 const WEEKLY_AT = 18 * 60; // Sunday 18:00
 const REST_AT = 10 * 60;
+const PHOTO_AT = 10 * 60; // the 1st of the month
 
-export type ReminderKind = 'workout' | 'streak' | 'weekly' | 'rest';
+export type ReminderKind = 'workout' | 'streak' | 'weekly' | 'rest' | 'photo';
 /** Where tapping a reminder goes. */
-export type ReminderRoute = 'train' | 'streak' | 'progress';
+export type ReminderRoute = 'train' | 'streak' | 'progress' | 'bodyProgress';
 
 export interface ReminderPrefs {
   /** Daily at `time` on the chosen days (0 = Monday … 6 = Sunday). */
@@ -39,6 +40,8 @@ export interface ReminderPrefs {
   weekly: { on: boolean };
   /** A short note on a rest day. Off unless asked for. */
   rest: { on: boolean };
+  /** The 1st of each month, 10:00: time for a progress photo. Off unless asked for. */
+  photo: { on: boolean };
 }
 
 export const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -48,9 +51,10 @@ export const DEFAULT_PREFS: ReminderPrefs = {
   streak: { on: false, time: '20:00' },
   weekly: { on: false },
   rest: { on: false },
+  photo: { on: false },
 };
 
-export const anyReminderOn = (p: ReminderPrefs): boolean => p.workout.on || p.streak.on || p.weekly.on || p.rest.on;
+export const anyReminderOn = (p: ReminderPrefs): boolean => p.workout.on || p.streak.on || p.weekly.on || p.rest.on || p.photo.on;
 
 /** What the app knows when it plans: Home's numbers for the user's day and week. */
 export interface ReminderContext {
@@ -117,7 +121,7 @@ export function weekXpFrom(events: readonly XpLedgerEntry[], now: Date): number 
 // ---------------------------------------------------------------------------------------------
 // Planning (pure)
 
-const PRIORITY: Record<ReminderKind, number> = { streak: 0, weekly: 1, workout: 2, rest: 3 };
+const PRIORITY: Record<ReminderKind, number> = { streak: 0, weekly: 1, photo: 2, workout: 3, rest: 4 };
 const RESTING: readonly TodayKind[] = ['rest_suggested', 'recover', 'weekly_goal_met'];
 
 function weeklyBody(workouts: number, xp: number): string {
@@ -155,6 +159,10 @@ function candidates(prefs: ReminderPrefs, ctx: ReminderContext, now: Date): Plan
       out.push({ id: idFor('weekly', day), kind: 'weekly', at: atMinutes(day, WEEKLY_AT), title: 'Your week in FORM', body: weeklyBody(ctx.workoutsThisWeek, ctx.weekXp), route: 'progress' });
     }
 
+    if (prefs.photo.on && day.getDate() === 1) {
+      out.push({ id: idFor('photo', day), kind: 'photo', at: atMinutes(day, PHOTO_AT), title: 'Monthly progress photo', body: 'Same spot, same light. Your photo stays on this phone.', route: 'bodyProgress' });
+    }
+
     if (isToday && prefs.rest.on && ctx.todayKind !== null && (ctx.todayKind === 'rest_suggested' || ctx.todayKind === 'recover') && !ctx.trainedToday) {
       out.push({ id: idFor('rest', day), kind: 'rest', at: atMinutes(day, REST_AT), title: 'Rest day', body: 'Recovery is part of the plan. Take it easy today.', route: 'progress' });
     }
@@ -183,7 +191,7 @@ export function planReminders(prefs: ReminderPrefs, ctx: ReminderContext, now: D
 // ---------------------------------------------------------------------------------------------
 // Deep links
 
-const ROUTES: Record<ReminderRoute, string> = { train: '/train', streak: '/progress/streak', progress: '/progress' };
+const ROUTES: Record<ReminderRoute, string> = { train: '/train', streak: '/progress/streak', progress: '/progress', bodyProgress: '/progress/body-progress' };
 
 /** Where a tapped reminder goes; null for anything that isn't one of ours. */
 export function routeForReminder(data: unknown): string | null {
@@ -207,6 +215,7 @@ function sanitize(raw: unknown): ReminderPrefs {
     streak: { on: r.streak?.on === true, time: time(r.streak?.time, DEFAULT_PREFS.streak.time) },
     weekly: { on: r.weekly?.on === true },
     rest: { on: r.rest?.on === true },
+    photo: { on: r.photo?.on === true },
   };
 }
 

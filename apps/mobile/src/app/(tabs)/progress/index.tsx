@@ -66,6 +66,7 @@ export default function ProgressScreen() {
                 <ListRow title="Your rank" subtitle="Your badge, where you stand among FORM users and your XP over time" icon="ribbon-outline" iconTint={colors.primary} onPress={() => router.push('/progress/rank' as Href)} />
                 <ListRow title="Leaderboards" subtitle="See who earned the most XP today, this week or ever" icon="podium-outline" iconTint={colors.primary} onPress={() => router.push('/progress/leaderboard' as Href)} />
                 <ListRow title="Muscle ranks" subtitle="See which muscles are strong and which to improve" icon="body-outline" iconTint={colors.primary} onPress={() => router.push('/progress/muscles' as Href)} />
+                <ListRow title="Body progress" subtitle="Progress photos that stay on this phone, with before and after comparison" icon="images-outline" iconTint={colors.primary} onPress={() => router.push('/progress/body-progress' as Href)} />
                 <ListRow title="Trends" subtitle="Strength, form, consistency, food and more over 7, 30 or 90 days" icon="analytics-outline" iconTint={colors.primary} onPress={() => router.push('/progress/analytics' as Href)} />
                 <ListRow title="Weekly report" subtitle="Your week in numbers, with a coach note — FORM Pro" icon="document-text-outline" iconTint={colors.primary} onPress={() => router.push('/progress/reports' as Href)} />
               </ExerciseList>

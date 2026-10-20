@@ -1,4 +1,4 @@
-import { addDays, EXERCISE_BY_ID, formIntelligence, SESSION_LIMITS, type FormIssueCode } from "@form/domain";
+import { addDays, EXERCISE_BY_ID, formIntelligence, LIVE_SET, SESSION_LIMITS, type FormIssueCode } from "@form/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { HttpError } from "../../http/errors";
@@ -45,6 +45,10 @@ const setBody = z
     trace: traceSchema.optional(),
     restSeconds: restSeconds.optional(),
     warmup: z.boolean().default(false),
+    // How the set was recorded. Both optional: an old client sends neither and its sets are manual. The server
+    // decides what it trusts (an implausible live timer is stored as manual); camera sets are proven by the trace.
+    mode: z.enum(["live", "manual", "camera"]).optional(),
+    liveSeconds: z.number().int().min(1).max(LIVE_SET.maxSeconds).optional(),
   })
   .strict();
 

@@ -8,7 +8,7 @@ import { colors, space } from '@/theme/tokens';
 const STEP_MINUTES = 30;
 const DAY_OPTIONS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((label, i) => ({ key: String(i), label }));
 
-type Switch = 'workout' | 'streak' | 'weekly' | 'rest';
+type Switch = 'workout' | 'streak' | 'weekly' | 'rest' | 'photo';
 
 /**
  * A time chosen in half-hour steps: no native picker, big touch targets, and it reads aloud as a time.
@@ -102,6 +102,7 @@ export function RemindersSettings() {
 
         <Toggle label="Weekly recap" description="Sundays at 18:00: your workouts and XP for the week." value={prefs.weekly.on} onChange={(v) => void setOn('weekly', v)} />
         <Toggle label="Rest-day message" description="A short note on days your plan says to recover." value={prefs.rest.on} onChange={(v) => void setOn('rest', v)} />
+        <Toggle label="Progress photo reminder" description="Once a month, on the 1st at 10:00. Your photos stay on this phone." value={prefs.photo.on} onChange={(v) => void setOn('photo', v)} />
       </Card>
     </>
   );

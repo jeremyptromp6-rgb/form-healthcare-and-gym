@@ -245,7 +245,7 @@ describe("backups", () => {
       await onboard(app, u.auth);
       const out = join(dir, "backups");
       const results = [0, 1, 2].map((i) => backupDatabase(dbPath, out, { now: new Date(Date.UTC(2026, 9, 2, 3, 0, i)), keep: 2 }));
-      expect(results[2]).toMatchObject({ integrity: "ok", users: 1, schemaVersion: 27 });
+      expect(results[2]).toMatchObject({ integrity: "ok", users: 1, schemaVersion: 28 });
       expect(readdirSync(out).sort()).toEqual(["form-20261002T030001Z.db", "form-20261002T030002Z.db"]);
       expect(results[2]!.removed).toEqual(["form-20261002T030000Z.db"]);
       // A damaged file is never accepted as a backup.

@@ -128,7 +128,7 @@ describe('ActiveWorkoutView as one logger', () => {
 
   it('logs the draft when the Log set button is pressed (no arguments)', async () => {
     const p = await renderView(session());
-    await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
     expect(p.onLogSet).toHaveBeenCalledWith();
   });
@@ -169,7 +169,7 @@ describe('ActiveWorkoutView as one logger', () => {
   it('floats the rest timer with +15 s, +30 s and Skip, keeping logging available', async () => {
     const p = await renderView(resting());
     expect(screen.getByLabelText('90 seconds of rest left')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Log set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Log without timer' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Increase Reps' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: '+15 s' }));
     expect(p.onAddRest).toHaveBeenLastCalledWith(105);
@@ -177,7 +177,7 @@ describe('ActiveWorkoutView as one logger', () => {
     expect(p.onAddRest).toHaveBeenLastCalledWith(120);
     await fireEvent.press(screen.getByRole('button', { name: 'Skip rest' }));
     expect(p.onSkipRest).toHaveBeenCalledTimes(1);
-    await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' }));
     expect(p.onLogSet).toHaveBeenCalledTimes(1);
   });
 
@@ -239,7 +239,7 @@ describe('ActiveWorkoutView as one logger', () => {
     const p = await renderView(session(), { logError: 'Not saved — no connection.', logErrorIndex: 1 });
     expect(screen.getAllByText('Not saved — no connection.')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Retry — save this set' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Log set 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Log without timer' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Log set 1 of Push-Up' }));
     expect(p.onLogSetAt).toHaveBeenCalledWith(1, { reps: 15, loadKg: 0 });
   });
@@ -297,7 +297,7 @@ describe('ActiveWorkoutView as one logger', () => {
       await render(<Harness onLog={onLog} />);
       await fireEvent.changeText(screen.getByLabelText('Set 1 weight in kilograms'), '22.5');
       await fireEvent.changeText(screen.getAllByLabelText('Set 1 reps')[0]!, '9');
-      await fireEvent.press(screen.getByRole('button', { name: 'Log set 1' })); // no blur in between
+      await fireEvent.press(screen.getByRole('button', { name: 'Log without timer' })); // no blur in between
       expect(onLog).toHaveBeenCalledTimes(1);
       expect(onLog).toHaveBeenCalledWith({ reps: 9, loadKg: 22.5 });
     });
@@ -394,7 +394,7 @@ describe('ActiveWorkoutView warm-ups, previous and notes', () => {
     await renderView(session({ exercises: [ex()] }), { draft: { reps: 10, loadKg: 5, warmup: true } });
     expect(screen.getByText('Warm-up set')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Complete warm-up set' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Log warm-up set' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Log warm-up without timer' })).toBeTruthy();
     // 3 planned working sets still follow the warm-up row.
     expect(screen.getAllByText('8–12')).toHaveLength(3);
   });

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMarkWorkoutRecordsSeen } from '@/components/recognition/Celebrations';
-import { ActiveWorkoutView } from '@/components/train/ActiveWorkoutView';
+import { ActiveWorkoutView, type Draft } from '@/components/train/ActiveWorkoutView';
 import { WorkoutSummaryView } from '@/components/train/WorkoutSummaryView';
 import { AppText, Button, Card, ErrorState, InlineMessage, Segmented, StateView } from '@/components/ui';
 import { localDateKey, uuid } from '@/lib/dates';
@@ -86,7 +86,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
 
   const [now, setNow] = useState(() => new Date());
   const [selected, setSelected] = useState<number | null>(null);
-  const [override, setOverride] = useState<{ key: string; reps: number; loadKg: number; warmup?: boolean } | null>(null);
+  const [override, setOverride] = useState<({ key: string } & Draft) | null>(null);
   // A failed save keeps its client id, so "Retry" can never create a second copy of the set.
   // Keyed `${exerciseId}:${loggedCount}` so every exercise's pending set has its own id.
   const pending = useRef(new Map<string, string>());
@@ -113,7 +113,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
   const loadStepKg = library.data?.exercises.find((e) => e.id === exercise?.exerciseId)?.loadIncrementKg || 2.5;
 
   /** Logs the next set of exercise `i` with exactly `values` — the focused exercise or any other. */
-  const logAt = (i: number, values: { reps: number; loadKg: number; warmup?: boolean }) => {
+  const logAt = (i: number, values: Draft) => {
     const target = session.exercises[i];
     if (!target || logSet.isPending) return;
     const key = `${target.exerciseId}:${target.loggedSets.length}`;
@@ -131,6 +131,9 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
         targetLoadKg: target.targetLoadKg ?? undefined,
         restSeconds: target.restSeconds,
         ...(values.warmup ? { warmup: true } : {}),
+        // A set counted on the live timer says so (with its seconds); anything typed in is manual and earns less XP.
+        mode: values.mode === 'live' && values.liveSeconds ? 'live' : 'manual',
+        ...(values.mode === 'live' && values.liveSeconds ? { liveSeconds: values.liveSeconds } : {}),
       },
       {
         onSuccess: ({ session: next }) => {
@@ -158,7 +161,7 @@ function LiveWorkout({ session, onCompleted }: { session: WorkoutSession; onComp
     mutate(failed(what));
   };
   // The focused row's check passes the values it just typed; the Log button logs the current draft.
-  const onLogSet = (typed?: { reps: number; loadKg: number; warmup?: boolean }) => logAt(index, typed ?? draft);
+  const onLogSet = (typed?: Draft) => logAt(index, typed ?? draft);
 
   if (finishing) {
     return (

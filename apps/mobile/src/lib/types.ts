@@ -661,6 +661,9 @@ export interface TodayWorkout {
   activeSession: { id: string; status: 'active' | 'paused'; localDate: string } | null;
 }
 
+/** How a set was recorded. Live and camera sets earn full XP, manual sets less. */
+export type SetMode = 'live' | 'manual' | 'camera';
+
 export interface SessionSet {
   id: string;
   clientSetId: string;
@@ -678,6 +681,10 @@ export interface SessionSet {
   quality: SetQuality | null;
   /** A warm-up set is logged and shown but never counts (no XP, records, totals or caps). */
   warmup?: boolean;
+  /** How the set was recorded, as the server trusts it: live (set timer), camera (verified) or manual (typed in). Absent on older servers. */
+  mode?: SetMode;
+  /** Seconds the live-set timer ran; null unless the set is live. */
+  liveSeconds?: number | null;
   createdAt: string;
 }
 
@@ -721,7 +728,7 @@ export interface WorkoutSession {
 export interface WorkoutSummaryDetail {
   workout: { id: string; localDate: string; durationMinutes: number; painLevel: PainLevel; xp: number; flags: string[]; notes?: string | null };
   totals: { sets: number; warmupSets?: number; reps: number; verifiedReps: number; volumeKg: number; perfectReps: number; averageFormScore: number | null };
-  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; warmup?: boolean; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null; verificationStatus?: string }[];
+  sets: { exerciseId: string; name: string; setIndex: number; targetReps: number | null; warmup?: boolean; mode?: SetMode; liveSeconds?: number | null; reps: number; verifiedReps: number; loadKg: number; romPercent: number | null; formScore: number | null; quality: SetQuality | null; verificationStatus?: string }[];
   prs: { exerciseId: string; kind: string; value: number; status: string; previous?: number | null }[];
 }
 
