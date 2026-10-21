@@ -19,6 +19,7 @@ import { privacyRoutes } from "./modules/privacy/routes";
 import { authenticate, authRoutes, sessionRoutes } from "./modules/auth/routes";
 import { coachRoutes } from "./modules/coach/routes";
 import { homeRoutes } from "./modules/home/routes";
+import { legalRoutes } from "./modules/legal/pages";
 import { leaderboardRoutes } from "./modules/leaderboard/routes";
 import { nutritionRoutes } from "./modules/nutrition/routes";
 import { mealRoutes } from "./modules/meals/routes";
@@ -152,6 +153,7 @@ export async function buildApp(opts: BuildOptions): Promise<{ app: FastifyInstan
   });
   await app.register(async (pub) => authRoutes(pub, ctx));
   await app.register(async (pub) => clientErrorRoutes(pub, ctx));
+  await app.register(async (pub) => legalRoutes(pub, ctx));
   await app.register(async (hooks) => billingWebhookRoutes(hooks, ctx));
 
   // Every module below requires a valid, unrevoked token; every query is scoped to req.user.sub.

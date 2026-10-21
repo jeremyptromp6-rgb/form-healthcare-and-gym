@@ -99,6 +99,36 @@ the declaration before the permission works for store users; allow up to a week.
 store build (not Expo Go) and an Android device with Health Connect (built in on Android 14+; a Play Store app
 before that).
 
+## Play Store release
+
+The test APK (`android-apk.yml`, development-key signed) is not a store build. The store build is the
+separate **Android release** workflow (`.github/workflows/android-release.yml`): it builds a signed App
+Bundle (`.aab`) with the upload key and keeps it as a private workflow artifact for 30 days (never a public
+release). The signing is injected by the config plugin `apps/mobile/plugins/withReleaseSigning.js`; without
+the key properties (test APK builds, local builds) the build falls back to debug signing unchanged.
+
+1. **Create the upload key, once.** In Git Bash: `bash apps/mobile/scripts/make-upload-key.sh`. It asks for
+   your name/organisation and a password (twice), then writes `upload-key.p12`, `upload-key.p12.base64.txt`
+   and `upload-certificate.pem` to `~/form-keys/` (outside the repo; it refuses to write inside it) and
+   prints the certificate SHA-256 fingerprint.
+2. **Back the key up now.** Keep `upload-key.p12` and its password in two separate safe places (a password
+   manager and an encrypted drive). Losing it means you cannot update the app without asking Google to reset
+   the upload key (days of delay; needs `upload-certificate.pem`). Never commit or share it.
+3. **Add four repository secrets** (GitHub → Settings → Secrets and variables → Actions):
+   `ANDROID_UPLOAD_KEYSTORE_BASE64` (the one line in `upload-key.p12.base64.txt`),
+   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD` (the same password), `ANDROID_KEY_ALIAS` (`upload`).
+   Then delete the `.base64.txt` file.
+4. **Run the build.** Actions → **Android release** → Run workflow, or push a tag such as `v1.0.0`
+   (`git tag v1.0.0 && git push origin v1.0.0`). The versionName is the tag without the `v` (or `version` in
+   `app.json` for a manual run); the versionCode is the run number + 1000, so each upload is higher than the
+   last. The job fails with a clear message if a secret is missing, and checks the bundle is signed with the
+   upload key (it logs the certificate SHA-256, which must equal the one the script printed).
+5. **Download** the `FORM-android-aab` artifact from the run page (repository access needed; unzip it).
+6. **Upload to the Play Console** (App → Testing → Closed testing → Create new release; choose **Play App
+   Signing**, i.e. Google holds the app signing key and your upload key only proves the upload). Do closed
+   testing first, then promote to production after the testers' feedback. Store texts and the Health Connect
+   declaration are in `docs/store` and the section above.
+
 ## Operations runbook
 
 **Environment** (validated at boot; production refuses unsafe values): `NODE_ENV=production`,

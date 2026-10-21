@@ -69,7 +69,8 @@
         }
       ],
       "react-native-health-connect",
-      ["expo-build-properties", { "android": { "minSdkVersion": 26 } }]
+      ["expo-build-properties", { "android": { "minSdkVersion": 26 } }],
+      "./plugins/withReleaseSigning.js"
     ],
     "experiments": {
       "typedRoutes": true,

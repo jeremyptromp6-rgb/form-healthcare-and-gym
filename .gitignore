@@ -18,3 +18,9 @@ apps/api/bin/
 
 # Local dev test-account passwords (see docs/RELEASE.md Q-24)
 apps/api/seed.example.json
+
+# Android signing keys (the upload key lives outside the repo; see apps/mobile/scripts/make-upload-key.sh)
+*.p12
+*.jks
+*.keystore
+form-keys/

@@ -59,6 +59,10 @@ services:
         sync: false
       - key: LITESTREAM_SECRET_ACCESS_KEY
         sync: false
+      # Contact email shown on the public /privacy, /delete-account and /terms pages. Set it in the Render
+      # dashboard; until then the pages point to the developer contact on the store listing.
+      - key: SUPPORT_EMAIL
+        sync: false
       # The phone app doesn't use CORS; production still requires an explicit origin list.
       - key: CORS_ORIGINS
         value: https://form-api-e68m.onrender.com

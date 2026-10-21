@@ -7,6 +7,7 @@ import { AppText, Badge, Button, Card, GradientCard, ErrorState, Field, InlineMe
 import { AppearancePicker } from '@/components/settings/AppearancePicker';
 import { RemindersSettings } from '@/components/settings/RemindersSettings';
 import { useAuth } from '@/lib/auth';
+import { config } from '@/lib/config';
 import { useCoachStatus, useEntitlements, useLegal, useMe, useUpdateSettings } from '@/lib/queries';
 import { deviceTimeZone } from '@/lib/timezone';
 import { openPaywall, STATE_LABEL, statusLine } from '@/lib/pro';
@@ -287,12 +288,17 @@ function AdsAndAnalytics({ me }: { me: Me }) {
   );
 }
 
-/** Only the documents the operator has published; nothing invented. */
+/** The documents the operator points to, else FORM's own public pages on its server (/terms, /privacy, /delete-account). */
 function LegalLinks() {
   const legal = useLegal();
+  const own = (path: string) => (config.apiUrl ? `${config.apiUrl}${path}` : null);
+  const terms = legal.data?.termsUrl ?? own('/terms');
+  const privacy = legal.data?.privacyUrl ?? own('/privacy');
+  const deletion = own('/delete-account');
   const links = [
-    legal.data?.termsUrl ? { label: 'Terms of service', url: legal.data.termsUrl } : null,
-    legal.data?.privacyUrl ? { label: 'Privacy policy', url: legal.data.privacyUrl } : null,
+    terms ? { label: 'Terms of service', url: terms } : null,
+    privacy ? { label: 'Privacy policy', url: privacy } : null,
+    deletion ? { label: 'How to delete your account', url: deletion } : null,
   ].filter((l): l is { label: string; url: string } => l !== null);
   if (links.length === 0) return null;
   return (

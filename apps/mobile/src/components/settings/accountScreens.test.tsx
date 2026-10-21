@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 import SecurityScreen from '@/app/(tabs)/profile/security';
 import SettingsScreen from '@/app/(tabs)/profile/settings';
 import WeightScreen from '@/app/(tabs)/profile/weight';
@@ -106,5 +107,18 @@ describe('Weight: deleting an entry', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Delete entry for 2026-10-01' }));
     expect(screen.getByText(/Couldn.t delete that entry. Check your connection/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Delete entry' })).toBeTruthy();
+  });
+});
+
+describe('Settings: legal links', () => {
+  it("falls back to FORM's own public pages when no documents are configured", async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    await render(<SettingsScreen />);
+    expect(screen.getByText('Terms of service')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Privacy policy'));
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/privacy$/));
+    await fireEvent.press(screen.getByText('How to delete your account'));
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/delete-account$/));
+    open.mockRestore();
   });
 });

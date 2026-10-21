@@ -1,0 +1,213 @@
+name: Android release
+
+# Builds the signed Android App Bundle (.aab) for the Google Play Store. It is NOT a test build: it is
+# signed with the upload key kept in repository secrets, and the bundle is kept only as a private
+# workflow artifact (30 days). It is never attached to a public GitHub Release.
+# The test APK workflow (android-apk.yml) is separate and unchanged.
+#
+# Runs only when started by hand (Actions -> Android release -> Run workflow) or when a tag v* is pushed.
+# Needs these repository secrets (see docs/RELEASE.md "Play Store release"):
+#   ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  aab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # The hosted FORM API (Render). A repository variable EXPO_PUBLIC_API_URL overrides it.
+      EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://form-api-e68m.onrender.com' }}
+      # A production build: the "main" channel, no in-app diagnostics.
+      EXPO_PUBLIC_BUILD_CHANNEL: main
+    steps:
+      # Fail first, and clearly, if a signing secret is missing. Only the names are ever printed.
+      - name: Check the signing secrets exist
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=0
+          check() { if [ -z "${!1}" ]; then echo "::error title=Missing secret::Repository secret $2 is not set (Settings -> Secrets and variables -> Actions)"; missing=1; fi; }
+          check KEYSTORE_B64 ANDROID_UPLOAD_KEYSTORE_BASE64
+          check STORE_PASSWORD ANDROID_KEYSTORE_PASSWORD
+          check KEY_ALIAS ANDROID_KEY_ALIAS
+          check KEY_PASSWORD ANDROID_KEY_PASSWORD
+          [ "$missing" = 0 ] || exit 1
+          echo "All four signing secrets are present."
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/mobile/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # The runner image ships the Android SDK. Check it is there, and accept its licences up front so
+      # Gradle never stops to ask for one it needs to download.
+      - name: Check the Android SDK and accept its licences
+        run: |
+          if [ -z "$ANDROID_HOME" ] || [ ! -d "$ANDROID_HOME" ]; then
+            echo "::error title=Android SDK::ANDROID_HOME is not set or does not exist on this runner image"
+            exit 1
+          fi
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null || true
+          else
+            echo "::warning title=Android SDK::sdkmanager not found at $SDKMANAGER; relying on the image's pre-accepted licences"
+          fi
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix apps/mobile
+
+      # Play needs a larger versionCode for every upload. GITHUB_RUN_NUMBER + 1000 keeps it above the
+      # test builds' run numbers. versionName comes from the tag (v1.0.0 -> 1.0.0) or, for a manual
+      # run, from app.json. app.json is edited in this runner's workspace only (never committed).
+      - name: Set the version from the tag and run number
+        working-directory: apps/mobile
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+              echo "::error title=Version::Tag $GITHUB_REF_NAME is not of the form vMAJOR.MINOR.PATCH (for example v1.0.0)"
+              exit 1
+            fi
+          else
+            VERSION=$(node -p 'require("./app.json").expo.version')
+          fi
+          VERSION="$VERSION" node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync("app.json","utf8"));j.expo.version=process.env.VERSION;j.expo.android.versionCode=Number(process.env.GITHUB_RUN_NUMBER)+1000;fs.writeFileSync("app.json",JSON.stringify(j,null,2)+"\n");console.log("versionName =",j.expo.version,"versionCode =",j.expo.android.versionCode)'
+          echo "FORM_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Generate the native Android project
+        working-directory: apps/mobile
+        run: |
+          npx expo prebuild --platform android --no-install
+          # Give Gradle more heap than the template's 2 GB: the dex merge can run out of it on the runner
+          # (the runner has 16 GB).
+          sed -i '/^org.gradle.jvmargs=/d' android/gradle.properties
+          # The generated file has no trailing newline: start on a fresh line, or the setting would be
+          # glued onto Expo's last property and corrupt it.
+          printf '\norg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\n' >> android/gradle.properties
+          grep jvmargs android/gradle.properties
+          # The release signing block added by plugins/withReleaseSigning.js must be in the project.
+          grep -q 'FORM release signing' android/app/build.gradle
+
+      # The keystore is written outside the repository, readable by this user only. Passwords are
+      # read from the environment, never put in a command line, and never printed.
+      - name: Decode the upload keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/upload-key.keystore"
+          if ! printf '%s' "$KEYSTORE_B64" | base64 -d > "$KEYSTORE" 2>/dev/null || [ ! -s "$KEYSTORE" ]; then
+            echo "::error title=Keystore::ANDROID_UPLOAD_KEYSTORE_BASE64 is not valid base64"
+            exit 1
+          fi
+          chmod 600 "$KEYSTORE"
+          TYPE=""
+          for t in pkcs12 jks; do
+            if keytool -list -keystore "$KEYSTORE" -storetype "$t" -storepass:env STORE_PASSWORD >/dev/null 2>&1; then TYPE="$t"; break; fi
+          done
+          if [ -z "$TYPE" ]; then
+            echo "::error title=Keystore::The keystore could not be opened as PKCS12 or JKS: wrong ANDROID_KEYSTORE_PASSWORD, or the secret is not a keystore"
+            exit 1
+          fi
+          if ! keytool -list -keystore "$KEYSTORE" -storetype "$TYPE" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error title=Keystore::The keystore has no key with the alias given in ANDROID_KEY_ALIAS"
+            exit 1
+          fi
+          echo "Keystore type: $TYPE"
+          {
+            echo "FORM_KEYSTORE=$KEYSTORE"
+            echo "FORM_KEYSTORE_TYPE=$TYPE"
+          } >> "$GITHUB_ENV"
+
+      # The signing values reach Gradle as project properties through ORG_GRADLE_PROJECT_* environment
+      # variables (not -P arguments), which the withReleaseSigning plugin block reads.
+      - name: Build the release bundle
+        working-directory: apps/mobile/android
+        env:
+          ORG_GRADLE_PROJECT_FORM_UPLOAD_STORE_FILE: ${{ env.FORM_KEYSTORE }}
+          ORG_GRADLE_PROJECT_FORM_UPLOAD_STORE_TYPE: ${{ env.FORM_KEYSTORE_TYPE }}
+          ORG_GRADLE_PROJECT_FORM_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_FORM_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_FORM_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          ./gradlew bundleRelease --no-daemon --stacktrace -PreactNativeArchitectures=arm64-v8a,armeabi-v7a 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+
+      # Job logs need a GitHub sign-in to read; annotations are public. On failure, surface Gradle's
+      # own explanation as annotations. Gradle errors do not contain the signing values.
+      - name: Report why the build failed
+        if: failure()
+        run: |
+          LOG="$RUNNER_TEMP/gradle.log"
+          [ -f "$LOG" ] || exit 0
+          report() { body=$(cat); body="${body//'%'/'%25'}"; body="${body//$'\n'/'%0A'}"; echo "::error title=$1::${body:0:4000}"; }
+          grep -A 25 "What went wrong" "$LOG" | head -80 | report "Gradle: what went wrong"
+          grep -E "^e: |error:|FAILURE:|Execution failed|Could not resolve|> Task .* FAILED|OutOfMemory|Java heap space|GC overhead|defined multiple times|Duplicate class|Caused by|FAILED" "$LOG" | head -40 | report "Gradle: error lines"
+
+      # The bundle must be signed with the upload key, not the debug key. Only the public certificate
+      # fingerprints are printed.
+      - name: Verify the bundle is signed with the upload key
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          AAB=apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          [ -f "$AAB" ] || { echo "::error title=Bundle::$AAB was not produced"; exit 1; }
+          jarsigner -verify "$AAB"
+          fp() { grep -m1 -E '^[[:space:]]*SHA-?256:' | sed -E 's/^[[:space:]]*SHA-?256: *//' | tr -d ' '; }
+          EXPECTED=$(keytool -list -v -keystore "$FORM_KEYSTORE" -storetype "$FORM_KEYSTORE_TYPE" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" | fp)
+          ACTUAL=$(keytool -printcert -jarfile "$AAB" | fp)
+          echo "Upload key certificate SHA-256: $EXPECTED"
+          echo "Bundle certificate SHA-256:     $ACTUAL"
+          if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error title=Signing::The bundle is not signed with the upload key"
+            exit 1
+          fi
+          mkdir -p out
+          cp "$AAB" "out/FORM-${FORM_VERSION}-${GITHUB_RUN_NUMBER}.aab"
+          ls -la out
+
+      # Always remove the decoded keystore, even if an earlier step failed.
+      - name: Remove the decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload-key.keystore"
+
+      # A private workflow artifact only (needs repository access to download); never a public release.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: FORM-android-aab
+          path: out/*.aab
+          retention-days: 30
+          if-no-files-found: error

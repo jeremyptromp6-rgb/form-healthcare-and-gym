@@ -59,6 +59,9 @@ const envSchema = z.object({
   // Published legal documents. Unset means the app shows none — FORM never invents legal text.
   LEGAL_TERMS_URL: z.string().url().startsWith("https://").optional(),
   LEGAL_PRIVACY_URL: z.string().url().startsWith("https://").optional(),
+  // Contact address shown on the public /privacy, /delete-account and /terms pages. Optional; unset = the pages
+  // point to the developer contact on the store listing instead. Blank counts as unset (dashboards leave blanks).
+  SUPPORT_EMAIL: z.preprocess((v) => (typeof v === "string" ? v.trim() || undefined : v), z.string().email().max(254).optional()),
   // Set by scripts/start.mjs (not by hand) when the database is being replicated to R2 by Litestream.
   FORM_BACKUP: z.enum(["litestream", "off"]).default("off"),
 });
@@ -88,6 +91,8 @@ export interface AppConfig {
     globalPerDay: number;
   };
   legal: { termsUrl: string | null; privacyUrl: string | null };
+  /** Contact email on the public legal pages (SUPPORT_EMAIL); absent or null means none is configured. */
+  supportEmail?: string | null;
   billing: {
     provider: "none" | "development";
     products: { monthly: string; annual: string };
@@ -157,6 +162,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rateLimitPerMinute: e.RATE_LIMIT_PER_MINUTE,
     foodRecognition: { provider: e.FOOD_RECOGNITION_PROVIDER, model: e.FOOD_RECOGNITION_MODEL, geminiModel: e.GEMINI_FOOD_MODEL, effort: e.FOOD_RECOGNITION_EFFORT, scansPerHour: e.FOOD_SCANS_PER_HOUR, timeoutMs: e.FOOD_RECOGNITION_TIMEOUT_MS, globalPerDay: e.FOOD_SCANS_GLOBAL_PER_DAY },
     legal: { termsUrl: e.LEGAL_TERMS_URL ?? null, privacyUrl: e.LEGAL_PRIVACY_URL ?? null },
+    supportEmail: e.SUPPORT_EMAIL ?? null,
     billing: {
       provider: e.BILLING_PROVIDER,
       products: { monthly: e.BILLING_PRODUCT_MONTHLY, annual: e.BILLING_PRODUCT_ANNUAL },
