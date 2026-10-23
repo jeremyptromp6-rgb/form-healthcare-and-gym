@@ -79,9 +79,9 @@ export function useBillingCatalog() {
  * rather than pretending.
  */
 export function purchaseSupport(catalog: BillingCatalog | undefined): { available: true; environment: 'development' } | { available: false; reason: string } {
-  if (!catalog?.provider.configured) return { available: false, reason: "FORM Pro is coming soon. It isn't on sale yet, and nothing will be charged." };
+  if (!catalog?.provider.configured) return { available: false, reason: 'Pricing is shown here when Pro launches. Nothing is charged today.' };
   if (catalog.provider.environment === 'development') return { available: true, environment: 'development' };
-  return { available: false, reason: "In-app purchases aren't connected in this build yet. Nothing will be charged." };
+  return { available: false, reason: "In-app purchases aren't connected in this build yet. Nothing is charged today." };
 }
 
 function useAfterBillingChange() {

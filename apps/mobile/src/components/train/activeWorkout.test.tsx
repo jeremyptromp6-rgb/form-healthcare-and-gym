@@ -225,7 +225,8 @@ describe('ActiveWorkoutView as one logger', () => {
   it('deletes a logged set of the focused exercise and shows its verified badge', async () => {
     const s = session({ exercises: [ex({ loggedSets: [logged(12, 12, 'set-a', { verifiedReps: 10, formScore: 92 })] }), ex({ exerciseId: 'push_up', name: 'Push-Up' })] });
     const p = await renderView(s);
-    expect(screen.getByText('10 verified · Great form')).toBeTruthy();
+    expect(screen.getByText('10 verified · form Great')).toBeTruthy();
+    expect(screen.getByText('Camera: 10 verified · avg form 92')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Delete set 1' }));
     expect(p.onDeleteSet).toHaveBeenCalledWith('set-a');
   });

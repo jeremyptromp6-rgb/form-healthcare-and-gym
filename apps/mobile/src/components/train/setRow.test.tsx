@@ -156,6 +156,13 @@ describe('SetRow', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
+  it('a camera set the server could not verify says so and why, in place of a verified count', async () => {
+    await render(<SetRow {...base} state="done" kg="22.5" reps="10" verified={{ label: 'Not verified', tone: 'warning', note: "Camera time didn't match the workout. Your reps are kept as logged." }} />);
+    expect(screen.getByText('Not verified')).toBeTruthy();
+    expect(screen.getByText("Camera time didn't match the workout. Your reps are kept as logged.")).toBeTruthy();
+    expect(screen.queryByText(/ verified ·/)).toBeNull();
+  });
+
   it('shows a queued row as plain text with no inputs or buttons', async () => {
     await render(<SetRow {...base} kg="20" reps="8–12" />);
     expect(screen.getByText('8–12')).toBeTruthy();

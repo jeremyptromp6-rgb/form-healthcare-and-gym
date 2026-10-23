@@ -26,7 +26,7 @@ export interface ProWelcomeViewProps {
  * icon, a text button, the back button and a tap outside the card all just close it.
  */
 export function ProWelcomeView({ catalog, onSeePlans, onClose }: ProWelcomeViewProps) {
-  // The six headline benefits; the plans screen shows the rest and the Free comparison.
+  // The five headline benefits; the plans screen shows the rest and the Free comparison.
   const { headline: features, also } = splitFeatures(catalog.features);
   const plans = catalog.products.filter((p) => p.price);
   const savings = annualSavingsPercent(catalog.products);

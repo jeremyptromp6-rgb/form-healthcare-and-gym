@@ -44,7 +44,8 @@ export interface SetRowProps {
    */
   onEdit?: (values: { kg: number | null; reps: number | null; warmup?: boolean }, done: (error?: string | null) => void) => void;
   onDelete?: () => void;
-  verified?: { label: string; tone?: 'primary' | 'warning' } | null;
+  /** What the camera verified ("8 verified · form Good · ROM 92%"), or "Not verified" with the reason in `note`. */
+  verified?: { label: string; tone?: 'primary' | 'warning'; note?: string } | null;
   /** Camera-verified reps on this set: editing the reps below this lowers it (the server's rule), and the editor says so. */
   verifiedReps?: number;
   busy?: boolean;
@@ -345,7 +346,14 @@ export function SetRow({
       </View>
       {done && (verified || onDelete || editing) ? (
         <View style={styles.extra}>
-          <View style={{ flex: 1, alignItems: 'flex-start' }}>{verified ? <Badge label={verified.label} tone={verified.tone ?? 'primary'} icon="camera-outline" /> : null}</View>
+          <View style={{ flex: 1, alignItems: 'flex-start', gap: 2 }}>
+            {verified ? <Badge label={verified.label} tone={verified.tone ?? 'primary'} icon="camera-outline" /> : null}
+            {verified?.note ? (
+              <AppText variant="label" color={colors.textMuted}>
+                {verified.note}
+              </AppText>
+            ) : null}
+          </View>
           {editing ? <IconButton icon="close" label={`Cancel editing set ${rowId}`} onPress={cancelEdit} /> : null}
           {onDelete ? <IconButton icon="trash-outline" label={`Delete set ${rowId}`} onPress={onDelete} /> : null}
         </View>

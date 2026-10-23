@@ -11,16 +11,16 @@
  */
 
 export const PREMIUM_FEATURE_IDS = [
-  // The headline benefits, in the order the paywall shows them.
+  // The five headline benefits, in the order the paywall shows them.
+  "ADAPTIVE_TRAINING",
+  "ADVANCED_FORM_ANALYSIS",
+  "AI_COACH_ADVANCED",
+  "MEAL_PLANNER_ADVANCED",
+  "ADVANCED_PROGRESS",
+  // Also included.
   "FOOD_SCANNER_PREMIUM",
   "STREAK_SHIELD",
   "WEAK_MUSCLE_PLANS",
-  "ADVANCED_PROGRESS",
-  "MEAL_PLANNER_ADVANCED",
-  // Also included.
-  "AI_COACH_ADVANCED",
-  "ADAPTIVE_TRAINING",
-  "ADVANCED_FORM_ANALYSIS",
   "ADVANCED_ROM_ANALYSIS",
   "WEEKLY_AI_REPORT",
   "ADVANCED_BODY_QUEST",
@@ -43,15 +43,16 @@ export interface PremiumFeature {
   unlisted?: boolean;
 }
 
+// Same order as PREMIUM_FEATURE_IDS: the five headline benefits first, then "Also included".
 export const PREMIUM_FEATURES: readonly PremiumFeature[] = [
-  { id: "FOOD_SCANNER_PREMIUM", title: "Unlimited AI food scans", pro: "Scan every meal: unlimited AI photo scans with labels on your food and a meal summary.", free: "3 AI scans a day. Search, barcode and weighing are always unlimited.", headline: true },
-  { id: "STREAK_SHIELD", title: "Streak Shield", pro: "2 streak freezes every month: a missed day won't break your streak.", free: "Your streak resets after a missed training day (planned rest days are always safe).", headline: true },
-  { id: "WEAK_MUSCLE_PLANS", title: "Weak-muscle plans", pro: "Your plans automatically focus on your lowest-ranked muscles until they catch up.", free: "Plans follow the focus you choose.", headline: true },
-  { id: "ADVANCED_PROGRESS", title: "Full progress history", pro: "90-day analysis, form and range-of-motion history, a weekly progress report and Body Quest insights.", free: "7- and 30-day progress for strength, consistency, nutrition, weight and XP.", headline: true },
-  { id: "MEAL_PLANNER_ADVANCED", title: "Week meal plans & grocery lists", pro: "Week-long plans, a plan for the rest of today from what you have left, and your saved recipes first.", free: "One-day meal plans built around your targets and allergies.", headline: true },
-  { id: "AI_COACH_ADVANCED", title: "Advanced AI Coach", pro: "More coaching every day, with your form, range-of-motion and record trends in every answer.", free: "Daily coaching tips and a few coach messages a day." },
-  { id: "ADAPTIVE_TRAINING", title: "Adaptive training", pro: "Workouts that progress only when your reps, form, range of motion and consistency earn it.", free: "Workouts that progress from your reps and range of motion." },
-  { id: "ADVANCED_FORM_ANALYSIS", title: "Form intelligence", pro: "Form history per exercise, technique trends and how your form held up as the weight went up.", free: "Form feedback on every camera-verified set." },
+  { id: "ADAPTIVE_TRAINING", title: "Adaptive training", pro: "Workouts that progress only when your reps, form, range of motion and consistency earn it.", free: "Workouts that progress from your reps and range of motion.", headline: true },
+  { id: "ADVANCED_FORM_ANALYSIS", title: "Form & range-of-motion history", pro: "Form and range-of-motion history per exercise, technique trends and how your form held up as the weight went up.", free: "Form feedback and range of motion on every camera-verified set.", headline: true },
+  { id: "AI_COACH_ADVANCED", title: "Advanced AI Coach", pro: "Far more coaching each day (within fair-use limits), with your form, range-of-motion and record trends in every answer.", free: "Daily coaching tips and a few coach messages a day.", headline: true },
+  { id: "MEAL_PLANNER_ADVANCED", title: "Personalized meal plans", pro: "Week-long plans and grocery lists, a plan for the rest of today from what you have left, and your saved recipes first.", free: "One-day meal plans built around your targets and allergies.", headline: true },
+  { id: "ADVANCED_PROGRESS", title: "Deeper analytics & weekly reports", pro: "90-day analysis, a weekly progress report from your real training and food, and Body Quest insights.", free: "7- and 30-day progress for strength, consistency, nutrition, weight and XP. Reports you already have stay yours.", headline: true },
+  { id: "FOOD_SCANNER_PREMIUM", title: "Unlimited AI food scans", pro: "Scan every meal: unlimited AI photo scans with labels on your food and a meal summary.", free: "3 AI scans a day. Search, barcode and weighing are always unlimited." },
+  { id: "STREAK_SHIELD", title: "Streak Shield", pro: "2 streak freezes every month: a missed day won't break your streak.", free: "Your streak resets after a missed training day (planned rest days are always safe)." },
+  { id: "WEAK_MUSCLE_PLANS", title: "Weak-muscle plans", pro: "Your plans automatically focus on your lowest-ranked muscles until they catch up.", free: "Plans follow the focus you choose." },
   { id: "ADVANCED_ROM_ANALYSIS", title: "Range-of-motion history", pro: "Range of motion over time for every tracked exercise.", free: "Range of motion on every camera-verified set." },
   { id: "WEEKLY_AI_REPORT", title: "Weekly progress report", pro: "A report every week from your real training, food, records, XP and Body Quest, with a coach note.", free: "Reports you already have stay yours." },
   { id: "ADVANCED_BODY_QUEST", title: "Body Quest insights", pro: "How each stat has moved week by week and exactly what moves it next.", free: "Your stage, stats and next goal." },

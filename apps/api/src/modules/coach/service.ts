@@ -378,7 +378,7 @@ async function chatTurn(ctx: AppContext, userId: string, clock: UserClock, body:
   const existing = db.prepare("SELECT response FROM coach_messages WHERE user_id = ? AND client_message_id = ? AND role = 'coach'").get(userId, body.clientMessageId) as { response: string } | undefined;
   if (existing) return { duplicate: true, response: JSON.parse(existing.response) as CoachResponse };
   if (!can(ctx, userId, "AI_COACH_ADVANCED") && coachChatsToday(db, userId, clock.today) >= ctx.config.freeLimits.coachChatPerDay) {
-    throw proRequired("AI_COACH_ADVANCED", `You've used today's ${ctx.config.freeLimits.coachChatPerDay} coach messages. Your daily tips keep coming — or chat as much as you like with FORM Pro.`);
+    throw proRequired("AI_COACH_ADVANCED", `You've used today's ${ctx.config.freeLimits.coachChatPerDay} coach messages. Your daily tips keep coming — or get far more coaching each day, within fair-use limits, with FORM Pro.`);
   }
 
   const now = ctx.now();

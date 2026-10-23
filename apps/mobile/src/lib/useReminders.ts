@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { router, type Href } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useAuth } from './auth';
 import { useHome, useXpEvents } from './queries';
 import { cancelAllReminders, configureReminders, getReminderPermission, loadReminderPrefs, requestReminderPermission, routeForReminder, saveReminderPrefs, subscribeReminderPrefs, syncReminders, weekXpFrom, type ReminderContext, type ReminderPermission, type ReminderPrefs } from './reminders';
@@ -44,6 +44,8 @@ export function useReminderPermission(): { permission: ReminderPermission | null
 }
 
 let lastHandledTap: string | null = null;
+// Notification taps don't exist on web (the call throws there); the platform never changes at runtime, so the hook order is stable.
+const useLastResponse: () => Notifications.NotificationResponse | null | undefined = Platform.OS === 'web' ? () => null : Notifications.useLastNotificationResponse;
 
 /**
  * Mounted once at the root. When signed in it keeps the phone's reminders matching the user's
@@ -58,7 +60,7 @@ export function useReminders(ready: boolean): void {
   const xp = useXpEvents();
   const { prefs } = useReminderPrefs();
   const [foregrounds, setForegrounds] = useState(0);
-  const lastResponse = Notifications.useLastNotificationResponse();
+  const lastResponse = useLastResponse();
 
   useEffect(() => {
     configureReminders();

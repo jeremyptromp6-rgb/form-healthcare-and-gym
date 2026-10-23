@@ -9,6 +9,16 @@ import { formWord } from '@/lib/workoutSession';
 import { a11y, colors, MAX_CONTENT_WIDTH, palettes, radius, space } from '@/theme/tokens';
 import { hudToneColor, type HudTone } from './skeletonTone';
 
+/** One logged set on the "This exercise" strip: what the camera verified, or that it did not. */
+export interface ExerciseStripSet {
+  number: number;
+  /** "8 verified · form Good · ROM 92%", "Not verified", or "10 reps logged by hand". */
+  summary: string;
+  /** Why a camera set did not count. */
+  note?: string;
+  warn?: boolean;
+}
+
 export interface LiveCameraViewProps {
   /** Names what the framing check needs in view, for the tracking pill. */
   exerciseId: string;
@@ -33,8 +43,13 @@ export interface LiveCameraViewProps {
   /** Workout mode: save this set with its trace (the server re-verifies it). */
   onLogSet?: () => void;
   logging?: boolean;
-  /** Result of the last save: the server's verified count is the one that counts. */
+  /** A problem with the last save or pause (the result of a good save is shown in `exerciseSets` instead). */
   logMessage?: { tone: 'success' | 'danger' | 'info'; text: string } | null;
+  /**
+   * The sets already logged for this exercise this session, as the server verified them (the last one is the
+   * result of the set just saved). Workout mode only; omitted in practice mode.
+   */
+  exerciseSets?: ExerciseStripSet[];
   /** Practice mode: start counting again. */
   onResetCount?: () => void;
   onAction: (action: CameraAction) => void;
@@ -220,9 +235,11 @@ export function LiveCameraView(p: LiveCameraViewProps) {
                 <AppText variant={compact ? 'stat' : 'number'} color={colors.primary}>
                   {verified}
                 </AppText>
-                <AppText variant={compact ? 'label' : 'caption'} color={colors.textFaint}>
-                  {rep ? 'Full range only' : 'Not counting yet'}
-                </AppText>
+                {rep ? null : (
+                  <AppText variant={compact ? 'label' : 'caption'} color={colors.textFaint}>
+                    Not counting yet
+                  </AppText>
+                )}
               </View>
               <View style={{ flex: 1, gap: 2 }} accessible accessibilityLabel={`Form: ${form ?? 'after your first rep'}${q?.averageFormScore != null ? `, average ${formWord(q.averageFormScore).toLowerCase()}` : ''}`}>
                 <AppText variant="label" color={colors.textMuted}>
@@ -253,6 +270,36 @@ export function LiveCameraView(p: LiveCameraViewProps) {
               <AppText variant="caption" color={colors.textMuted}>
                 {`${q.verifiedReps} verified ${q.verifiedReps === 1 ? 'rep' : 'reps'} · ${q.perfectReps} perfect · average range ${q.averageRomPercent}%`}
               </AppText>
+            ) : null}
+
+            {p.setLabel ? (
+              <View style={styles.strip} testID="exercise-strip">
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <AppText variant="overline" color={colors.textMuted}>
+                    This exercise
+                  </AppText>
+                  <AppText variant="label" color={colors.primary}>
+                    {`On ${p.setLabel.charAt(0).toLowerCase()}${p.setLabel.slice(1)}`}
+                  </AppText>
+                </Row>
+                {(p.exerciseSets ?? []).map((s, i, all) => (
+                  <View key={s.number} accessibilityLiveRegion={i === all.length - 1 ? 'polite' : undefined} style={{ gap: 2 }}>
+                    <AppText variant="caption" color={s.warn ? colors.warning : colors.text}>
+                      {`Set ${s.number} · ${s.summary}`}
+                    </AppText>
+                    {s.note ? (
+                      <AppText variant="label" color={colors.textMuted}>
+                        {s.note}
+                      </AppText>
+                    ) : null}
+                  </View>
+                ))}
+                {(p.exerciseSets ?? []).length === 0 ? (
+                  <AppText variant="caption" color={colors.textFaint}>
+                    Your verified sets show up here.
+                  </AppText>
+                ) : null}
+              </View>
             ) : null}
           </ScrollView>
 
@@ -344,6 +391,7 @@ const styles = StyleSheet.create({
   panel: { paddingHorizontal: space.lg },
   panelScroll: { flexGrow: 0, flexShrink: 1 },
   feedback: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingRight: space.md, paddingLeft: space.sm, borderRadius: radius.lg, borderWidth: 1, overflow: 'hidden', backgroundColor: colors.card },
+  strip: { gap: space.xs, padding: space.md, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.hairline, backgroundColor: colors.card },
   feedbackCompact: { paddingLeft: space.md, gap: space.sm },
   accent: { width: 4, alignSelf: 'stretch', borderRadius: radius.pill },
 });

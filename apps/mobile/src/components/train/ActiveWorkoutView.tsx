@@ -7,6 +7,7 @@ import { ExerciseArt } from '@/components/art/ExerciseArt';
 import { AppText, Button, Divider, ExerciseRow, Field, IconButton, InlineMessage, Row, StatStrip } from '@/components/ui';
 import { barKgOf, useBarWeight } from '@/lib/barWeight';
 import type { SessionExercise, WorkoutSession } from '@/lib/types';
+import { exerciseEvidence, setBadge } from '@/lib/setEvidence';
 import { formatVolume, loadFromDisplay, loadStep, loadToDisplay, loadUnit, lbToKg, snapLoadKg, useUnits, type Units } from '@/lib/units';
 import {
   sessionTotals,
@@ -15,10 +16,8 @@ import {
   formatClock,
   formatPrevious,
   formatTarget,
-  formWord,
   nextSetDefaults,
   restRemaining,
-  verificationNote,
   workingSets,
 } from '@/lib/workoutSession';
 import { colors, MAX_CONTENT_WIDTH, radius, space } from '@/theme/tokens';
@@ -355,6 +354,8 @@ function FocusedHeader({
   const setNumber = workingSets(exercise).length + 1;
   const target = formatTarget(exercise, units);
   const previous = formatPrevious(exercise, units);
+  // What the camera has verified on this exercise so far (only when it saw a set; never a placeholder).
+  const seen = exerciseEvidence(exercise.loggedSets);
   return (
     <>
       <View style={styles.art}>
@@ -375,6 +376,11 @@ function FocusedHeader({
         {exercise.note ? (
           <AppText variant="caption" color={colors.textMuted}>
             {exercise.note}
+          </AppText>
+        ) : null}
+        {seen && seen.verified > 0 ? (
+          <AppText variant="caption" color={colors.primary}>
+            {`Camera: ${seen.verified} verified${seen.avgForm !== null ? ` · avg form ${seen.avgForm}` : ''}`}
           </AppText>
         ) : null}
         {p.onOpenCamera && exercise.cameraVerifiable ? (
@@ -529,13 +535,7 @@ function SetTable({
               }
               onDelete={deleteLabelled ? () => onDeleteSet(s.id) : undefined}
               verifiedReps={s.verifiedReps}
-              verified={
-                s.verifiedReps > 0
-                  ? { label: `${s.verifiedReps} verified${s.formScore !== null ? ` · ${formWord(s.formScore)}` : ''}` }
-                  : verificationNote(s.verificationStatus)
-                    ? { label: verificationNote(s.verificationStatus)!, tone: 'warning' }
-                    : null
-              }
+              verified={isWarmup ? null : setBadge(s)}
             />
           );
         }

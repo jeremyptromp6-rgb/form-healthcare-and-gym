@@ -41,6 +41,8 @@ export default function WorkoutScreen() {
           adNext={ad.adReady}
           coachNote={coachNote.data?.insight ?? null}
           onCoachAction={(route) => router.replace(route as Href)}
+          // An exercise page opens on top (the summary stays behind it); the next-step buttons leave after the same short ad as Done.
+          onNavigate={(route) => (route.startsWith('/train/exercise/') ? router.push(route as Href) : ad.finish(() => router.replace(route as Href)))}
         />
       </Shell>
     );

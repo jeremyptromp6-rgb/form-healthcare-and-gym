@@ -4,16 +4,17 @@ import { HomeView, type HomeRoute } from '@/components/home/HomeView';
 import { ProWelcomeHost } from '@/components/pro/ProWelcome';
 import { ErrorState, Screen, StateView } from '@/components/ui';
 import { uuid } from '@/lib/dates';
-import { useAddWater, useCoachInsight, useHome, useRefetchOnFocus, useUndoWater } from '@/lib/queries';
+import { useActiveSession, useAddWater, useCoachInsight, useHome, useRefetchOnFocus, useTodayWorkout, useUndoWater } from '@/lib/queries';
 import { useSteps } from '@/lib/useSteps';
 
-const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak' | '/progress/rank'> = {
+const ROUTES: Record<HomeRoute, '/train' | '/eat' | '/progress' | '/profile' | '/progress/streak' | '/progress/rank' | '/workout'> = {
   train: '/train',
   eat: '/eat',
   progress: '/progress',
   profile: '/profile',
   streak: '/progress/streak',
   rank: '/progress/rank',
+  workout: '/workout',
 };
 
 /** Home container: fetches the view model, wires actions and navigation. Rendering lives in HomeView. */
@@ -26,6 +27,11 @@ export default function Home() {
   const coach = useCoachInsight('home', coachOn);
   useRefetchOnFocus(home.refetch);
   const steps = useSteps();
+  // Today's workout and any open session feed the one primary card; if either fails, Home falls back to the server's suggestion.
+  const todayWorkout = useTodayWorkout();
+  const activeSession = useActiveSession();
+  const open = activeSession.data ?? todayWorkout.data?.activeSession ?? null;
+  const openSession = open && (open.status === 'active' || open.status === 'paused') ? { status: open.status } : null;
 
   if (!home.data) {
     return (
@@ -56,6 +62,8 @@ export default function Home() {
         onOpenCoach={() => router.push('/coach' as Href)}
         onOpenRoute={(route) => router.push(route as Href)}
         steps={steps}
+        plan={todayWorkout.data?.plan ?? null}
+        openSession={openSession}
       />
       {/* The one-time FORM Pro welcome, once Home is up and nothing else (a celebration, a workout) has the floor. */}
       <ProWelcomeHost />

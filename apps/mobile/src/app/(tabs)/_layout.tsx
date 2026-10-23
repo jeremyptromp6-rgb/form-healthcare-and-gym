@@ -4,7 +4,7 @@ import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CelebrationHost } from '@/components/recognition/Celebrations';
 import { stateIcon, type IconName } from '@/components/ui';
-import { InTabsContext, TAB_BAR, tabBarBottomPadding } from '@/components/ui/tabBar';
+import { InTabsContext, tabBarBottomPadding, tabBarHeight } from '@/components/ui/tabBar';
 import { breakpoints, colors, edgeLight, elevation, fonts } from '@/theme/tokens';
 
 // One name per tab: the icon rule (outline at rest, filled when active) comes from `stateIcon`.
@@ -35,6 +35,8 @@ export default function TabLayout() {
         screenOptions={{
           headerShown: false,
           tabBarPosition: wide ? 'left' : 'bottom',
+          // With the keyboard up the bar steps aside, so a form keeps all the room above the keys.
+          tabBarHideOnKeyboard: !wide,
           tabBarVariant: wide ? 'material' : 'uikit',
           tabBarLabelPosition: wide ? 'beside-icon' : 'below-icon',
           tabBarActiveTintColor: ACTIVE,
@@ -47,7 +49,7 @@ export default function TabLayout() {
                 borderTopWidth: StyleSheet.hairlineWidth,
                 borderTopColor: colors.border,
                 ...edgeLight,
-                height: TAB_BAR.height + bottom,
+                height: tabBarHeight(insets.bottom),
                 paddingTop: 6,
                 paddingBottom: bottom,
                 paddingHorizontal: 6,

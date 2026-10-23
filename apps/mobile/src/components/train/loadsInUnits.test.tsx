@@ -273,7 +273,8 @@ describe('ActiveWorkoutView editing a logged set', () => {
   it("says a camera set the server didn't trust is not verified, never as a verified count", async () => {
     const { s } = withSet({ verificationStatus: 'trace_exceeds_time', verifiedReps: 0 });
     await renderView(s);
-    expect(screen.getByText("Not verified — camera time didn't match the workout")).toBeTruthy();
+    expect(screen.getByText('Not verified')).toBeTruthy();
+    expect(screen.getByText("Camera time didn't match the workout. Your reps are kept as logged.")).toBeTruthy();
     expect(screen.queryByText(/0 verified/)).toBeNull();
   });
 });
@@ -372,7 +373,7 @@ describe('WorkoutSummaryView in display units', () => {
     const sets = [{ ...s.sets[0]!, verificationStatus: 'trace_exceeds_time' }];
     await render(<WorkoutSummaryView summary={{ ...s, sets }} units="metric" />);
     expect(screen.getByText(/Not verified — camera time didn't match the workout/)).toBeTruthy();
-    expect(screen.queryByText(/ verified$/)).toBeNull();
+    expect(screen.queryByText(/\b0 verified/)).toBeNull();
   });
 
   it('adds no note for a normally verified set', async () => {

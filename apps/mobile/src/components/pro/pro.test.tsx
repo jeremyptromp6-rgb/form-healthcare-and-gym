@@ -78,7 +78,7 @@ describe('paywall', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Restore purchases' }));
     expect(p.onRestore).toHaveBeenCalled();
     expect(screen.getByText(/Development store — sandbox purchases/)).toBeTruthy();
-    expect(screen.getByText(/you keep Pro until the end of the period you paid for/)).toBeTruthy();
+    expect(screen.getByText(/Cancel any time in Google Play › Subscriptions\. You keep Pro until the end of the period you paid for — everything you logged stays yours/)).toBeTruthy();
   });
 
   it('leads with the headline benefits as a Free-vs-Pro comparison, and lists the rest under Also included', async () => {
@@ -89,7 +89,7 @@ describe('paywall', () => {
       { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.' },
     ];
     await renderPaywall({ catalog: c });
-    expect(screen.getByText('What you get with Pro')).toBeTruthy();
+    expect(screen.getByText('Free vs Pro')).toBeTruthy();
     expect(screen.getByText('Pro: Scan every meal.')).toBeTruthy();
     expect(screen.getByText('Free: 3 AI scans a day.')).toBeTruthy();
     expect(screen.getByText('Also included')).toBeTruthy();
@@ -103,6 +103,38 @@ describe('paywall', () => {
     await renderPaywall({ catalog: withTrial });
     expect(screen.getByRole('button', { name: 'Start 7-day free trial' })).toBeTruthy();
     expect(screen.getByText(/After the free trial, \$28\.99\/year/)).toBeTruthy();
+    // Trial, price, renewal and cancellation all come from the provider's data and say so plainly.
+    expect(screen.getByText('Yearly · $28.99/year')).toBeTruthy();
+    expect(screen.getByText(/7-day free trial, then \$28\.99\/year/)).toBeTruthy();
+    expect(screen.getByText(/Renews every year until you cancel\. Cancel any time in Google Play › Subscriptions\./)).toBeTruthy();
+  });
+
+  it('shows no plan and no price when the provider sends none, and says nothing is charged', async () => {
+    const none = catalog({ provider: { configured: false, name: 'Billing', environment: null }, products: [] });
+    await renderPaywall({ catalog: none, support: purchaseSupport(none) });
+    expect(screen.getByText('Pricing is shown here when Pro launches. Nothing is charged today.')).toBeTruthy();
+    expect(screen.queryByText(/\$\d/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Subscribe|Start .* trial/ })).toBeNull();
+    expect(screen.getByText('Your plan')).toBeTruthy();
+    expect(screen.getByText('Free plan')).toBeTruthy();
+  });
+
+  it('never shows a plan the provider has not priced', async () => {
+    const c = catalog();
+    c.products = c.products.map((x) => (x.plan === 'monthly' ? { ...x, price: null } : x));
+    await renderPaywall({ catalog: c });
+    expect(screen.queryByText(/Monthly ·/)).toBeNull();
+    expect(screen.getByText('Yearly · $28.99/year')).toBeTruthy();
+  });
+
+  it('leads with the five headline benefits in order, before everything under Also included', async () => {
+    const f = (id: string, headline?: boolean) => ({ id: id as never, title: id, pro: `pro ${id}`, free: `free ${id}`, ...(headline ? { headline } : {}) });
+    const c = catalog();
+    c.features = [f('ADAPTIVE_TRAINING', true), f('ADVANCED_FORM_ANALYSIS', true), f('AI_COACH_ADVANCED', true), f('MEAL_PLANNER_ADVANCED', true), f('ADVANCED_PROGRESS', true), f('STREAK_SHIELD')];
+    await renderPaywall({ catalog: c });
+    const order = ['ADAPTIVE_TRAINING', 'ADVANCED_FORM_ANALYSIS', 'AI_COACH_ADVANCED', 'MEAL_PLANNER_ADVANCED', 'ADVANCED_PROGRESS', 'Also included', 'STREAK_SHIELD'];
+    const shown = screen.getAllByText(new RegExp(`^(${order.join('|')})$`)).map((n) => n.props.children);
+    expect(shown).toEqual(order);
   });
 
   it("never pretends a purchase is possible when it isn't", async () => {
@@ -113,8 +145,8 @@ describe('paywall', () => {
     expect(screen.queryByRole('button', { name: /Subscribe/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Restore purchases' })).toBeNull();
     expect(screen.getByText('Coming soon')).toBeTruthy();
-    expect(screen.getByText('What FORM Pro will include')).toBeTruthy();
-    expect(screen.getByText(/FORM Pro is coming soon\. It isn't on sale yet, and nothing will be charged/)).toBeTruthy();
+    expect(screen.getByText('Free vs Pro: what FORM Pro will add')).toBeTruthy();
+    expect(screen.getByText('Pricing is shown here when Pro launches. Nothing is charged today.')).toBeTruthy();
     expect(screen.queryByText(/\bads?\b/i)).toBeNull();
     // A real store provider without a store client in this build is unavailable too — honestly.
     expect(purchaseSupport(catalog({ provider: { configured: true, name: 'App Store', environment: 'production' } }))).toEqual({ available: false, reason: expect.stringContaining("aren't connected in this build") });

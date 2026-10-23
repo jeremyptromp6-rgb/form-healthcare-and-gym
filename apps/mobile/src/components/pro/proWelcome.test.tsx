@@ -1,5 +1,7 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { resetProWelcomeMemory } from '@/lib/proWelcome';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react-native';
+import type { ReactElement } from 'react';
+import { PRO_OFFER_AFTER_WORKOUTS, resetProWelcomeMemory, trainedRecently } from '@/lib/proWelcome';
 import type { BillingCatalog } from '@/lib/types';
 import { planLine, ProWelcomeHost } from './ProWelcome';
 
@@ -18,7 +20,7 @@ const mockCatalog: BillingCatalog = {
   features: [
     { id: 'STREAK_SHIELD', title: 'Streak Shield', pro: '2 streak freezes every month.', free: 'Your streak resets after a missed day.', headline: true },
     { id: 'ADAPTIVE_TRAINING', title: 'Adaptive training', pro: 'Progress when earned.', free: 'Rule-based progression.', headline: true },
-    { id: 'WEEKLY_AI_REPORT', title: 'Weekly progress report', pro: 'A report every week.', free: 'Reports you have stay yours.' },
+    { id: 'FOOD_SCANNER_PREMIUM', title: 'Unlimited AI food scans', pro: 'Scan every meal.', free: '3 AI scans a day.' },
   ],
   manageUrl: null,
   legal: { termsUrl: null, privacyUrl: null },
@@ -29,6 +31,9 @@ let mockOnboarded = true;
 let mockCelebrations: unknown[] = [];
 let mockSession: unknown = null;
 let mockCatalogData: BillingCatalog | undefined = mockCatalog;
+let mockWorkoutCount = 3;
+let mockLatestDate = new Date().toISOString().slice(0, 10);
+const mockWorkoutsCall = jest.fn();
 
 jest.mock('expo-router', () => ({ useIsFocused: () => true, router: { push: jest.fn() } }));
 jest.mock('expo-secure-store', () => ({
@@ -39,12 +44,21 @@ jest.mock('@/lib/pro', () => ({ STATE_LABEL: {}, statusLine: () => null, openPay
   // Mirrors lib/pro.purchaseSupport (the real module pulls in the whole navigation stack).
   purchaseSupport: (c?: BillingCatalog) => (c?.provider.configured && c.provider.environment === 'development' ? { available: true } : { available: false, reason: 'coming soon' }),
 }));
+jest.mock('@/lib/auth', () => ({ useAuth: () => ({ token: 't', authed: (fn: (t: string) => unknown) => fn('t') }) }));
+jest.mock('@/lib/api', () => ({ api: { workouts: () => { mockWorkoutsCall(); return Promise.resolve({ workouts: Array.from({ length: mockWorkoutCount }, (_, i) => ({ id: `w${i}`, localDate: mockLatestDate })) }); } } }));
 jest.mock('@/lib/queries', () => ({
+  qk: { workouts: ['workouts'] },
   useMe: () => ({ data: { user: { id: 'u1' }, onboarding: { completed: mockOnboarded } } }),
   useEntitlements: () => ({ data: { tier: mockTier } }),
   useCelebrations: () => ({ isError: false, isSuccess: true, data: { celebrations: mockCelebrations } }),
   useActiveSession: () => ({ isSuccess: true, data: mockSession }),
 }));
+
+// A fresh query cache per render, so the workout count is read again each time.
+const render = (ui: ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+};
 
 const flush = () => act(async () => void (await Promise.resolve()));
 
@@ -57,6 +71,7 @@ beforeEach(() => {
   mockCelebrations = [];
   mockSession = null;
   mockCatalogData = mockCatalog;
+  mockWorkoutCount = 3;
 });
 
 describe('FORM Pro welcome', () => {
@@ -139,6 +154,42 @@ describe('FORM Pro welcome', () => {
     await flush();
     expect(screen.queryByText('Welcome to FORM')).toBeNull();
     expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it('waits until the user has finished three workouts, and does not even ask before everything else is in order', async () => {
+    expect(PRO_OFFER_AFTER_WORKOUTS).toBe(3);
+    mockWorkoutCount = 2;
+    await render(<ProWelcomeHost />);
+    await flush();
+    await flush();
+    expect(screen.queryByText('Welcome to FORM')).toBeNull();
+    expect(mockSet).not.toHaveBeenCalled(); // not marked as seen, so it can still come later
+    expect(mockWorkoutsCall).toHaveBeenCalled();
+
+    mockWorkoutsCall.mockClear();
+    mockOnboarded = false;
+    await render(<ProWelcomeHost />);
+    await flush();
+    await flush();
+    expect(mockWorkoutsCall).not.toHaveBeenCalled(); // only queried when otherwise eligible
+    mockOnboarded = true;
+
+    mockWorkoutCount = 3;
+    await render(<ProWelcomeHost />);
+    expect(await screen.findByText('Welcome to FORM')).toBeTruthy();
+  });
+
+  it('stays away from someone just coming back after a break', async () => {
+    mockLatestDate = '2020-01-01';
+    await render(<ProWelcomeHost />);
+    await flush();
+    await flush();
+    expect(screen.queryByText('Welcome to FORM')).toBeNull();
+    expect(mockSet).not.toHaveBeenCalled();
+    const now = new Date('2026-10-23T09:00:00');
+    expect(trainedRecently('2026-10-17', now)).toBe(true);
+    expect(trainedRecently('2026-10-02', now)).toBe(false);
+    expect(trainedRecently(undefined, now)).toBe(false);
   });
 
   it('words each plan from the store price', () => {

@@ -26,6 +26,8 @@ jest.mock('@/lib/queries', () => ({
   useUndoWater: () => ({ mutate: jest.fn(), isPending: false }),
   useCoachInsight: () => ({ data: undefined, isPending: false, isError: true, fetchStatus: 'idle', refetch: mockCoachRefetch }),
   useRefetchOnFocus: () => undefined,
+  useTodayWorkout: () => ({ data: undefined, isError: true }),
+  useActiveSession: () => ({ data: null }),
 }));
 
 beforeEach(() => {

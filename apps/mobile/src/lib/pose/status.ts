@@ -78,6 +78,11 @@ export interface CameraScreenModel {
 
 const MANUAL = 'You can still log your sets manually.';
 
+/** "your 3 verified reps are kept" — said whenever the camera stops seeing you, so a dropout never feels like lost work. */
+const keptReps = (n: number) => `your ${n} verified ${n === 1 ? 'rep is' : 'reps are'} kept`;
+/** Framing problems where the person is gone or partly gone (not "too close", "too far" or "low light", which keep their own copy). */
+const LOST_ISSUES = new Set(['no_person', 'left_frame', 'occluded', 'partial_body']);
+
 const STANCE_HINT = 'Turn side-on — stand so the camera sees your side, not your front.';
 
 const UNAVAILABLE: Record<Extract<CameraStatus, { kind: 'unavailable' }>['reason'], { title: string; message: string; retry: boolean }> = {
@@ -166,19 +171,28 @@ export function cameraScreenModel(camera: CameraStatus, pose: PoseStatus, readou
     };
   }
   if (pose.kind === 'unsupported') return { overlay: null, feedback: { message: `${pose.message} ${MANUAL}`, tone: 'info' } };
-  if (paused) return { overlay: null, feedback: { message: 'Paused — resume when you’re ready.', tone: 'info' } };
-  if (camera.kind === 'interrupted') return { overlay: null, feedback: { message: 'Waiting for the camera to come back…', tone: 'adjust' } };
+  // Reps already verified in this set stay counted through a pause, a dropout and a lost track.
+  const kept = readout?.rep?.verifiedReps ?? 0;
+  if (paused) return { overlay: null, feedback: { message: kept > 0 ? `Paused — resume when you’re ready; ${keptReps(kept)}.` : 'Paused — resume when you’re ready.', tone: 'info' } };
+  if (camera.kind === 'interrupted') return { overlay: null, feedback: { message: kept > 0 ? `Waiting for the camera to come back — ${keptReps(kept)}.` : 'Waiting for the camera to come back…', tone: 'adjust' } };
   if (pose.kind !== 'ready') return { overlay: loadingOverlay(pose), feedback: null };
   if (getReady === 'ready') return { overlay: null, feedback: { message: 'Ready — start when you like.', tone: 'ready' } };
   if (getReady !== null) return { overlay: null, feedback: { headline: 'GET INTO POSITION', message: 'Side-on, whole body in view. Counting starts in a moment.', tone: 'info' } };
   if (!readout) return { overlay: null, feedback: { message: 'Looking for you…', tone: 'info' } };
   // Priority: can't see you properly > set is full > facing the camera > the latest rep cue > where you are in the movement.
-  if (!readout.framing.trackable) return { overlay: null, feedback: { message: readout.framing.message, tone: 'adjust' } };
+  // Nothing counts while you can't be tracked; if you were mid-set, the reps so far are kept and it says so.
+  if (!readout.framing.trackable) {
+    const lost = kept > 0 && !!readout.framing.issue && LOST_ISSUES.has(readout.framing.issue);
+    return { overlay: null, feedback: { message: lost ? `Lost you — ${keptReps(kept)}. ${readout.framing.message}` : readout.framing.message, tone: 'adjust' } };
+  }
   if (readout.traceFull) return { overlay: null, feedback: { message: 'This set is as long as one set can be — log it to keep counting.', tone: 'adjust' } };
   if (readout.stance === 'front-on') return { overlay: null, feedback: { message: STANCE_HINT, tone: 'adjust' } };
   const cue = readout.rep?.feedback;
   if (cue) return { overlay: null, feedback: { headline: cue.headline, message: cue.message, tone: cue.tone === 'good' ? 'ready' : 'adjust' } };
   if (readout.rep?.phase === 'unknown') return { overlay: null, feedback: { message: readout.rep.phaseLabel, tone: 'info' } };
+  // Once the rep cue has faded: say honestly what did not count.
+  const partial = readout.rep?.quality?.rejectedReps?.insufficient_rom ?? 0;
+  if (partial > 0) return { overlay: null, feedback: { message: `${partial} ${partial === 1 ? "rep didn't" : "reps didn't"} reach full range and weren't counted.`, tone: 'adjust' } };
   return { overlay: null, feedback: { message: readout.framing.message, tone: 'ready' } };
 }
 

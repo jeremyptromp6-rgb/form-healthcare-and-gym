@@ -136,7 +136,7 @@ function dailyCoaching(ctx: CoachContext, goal: keyof typeof GOAL_FOCUS, n: (k: 
   const daysLeft = n("training.daysLeftThisWeek") ?? 7;
   if (remaining > 0 && remaining >= daysLeft) {
     return {
-      message: "{{training.remainingThisWeek}} sessions left this week and {{training.daysLeftThisWeek}} days to do them — today is a good day to train. Keep it {{profile.experience}}-friendly and focused on {{profile.goal}}.",
+      message: "{{training.remainingThisWeek}} sessions left this week and {{training.daysLeftThisWeek}} days to do them — today is a good day to train. Keep it {{profile.experience}}-friendly.",
       category: "consistency",
       priority: "high",
       evidence: [ev("training.remainingThisWeek", "Sessions left this week"), ev("training.daysLeftThisWeek", "Days left this week")],

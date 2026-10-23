@@ -1,12 +1,26 @@
+import { useQuery } from '@tanstack/react-query';
 import { useIsFocused } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
+import { api, type ApiError } from './api';
+import { useAuth } from './auth';
 import { purchaseSupport, useBillingCatalog } from './pro';
-import { useActiveSession, useCelebrations, useEntitlements, useMe } from './queries';
-import type { BillingCatalog } from './types';
+import { qk, useActiveSession, useCelebrations, useEntitlements, useMe } from './queries';
+import type { BillingCatalog, WorkoutSummary } from './types';
+
+/** The offer waits until the user has finished this many workouts: they get to see what Free gives them first. */
+export const PRO_OFFER_AFTER_WORKOUTS = 3;
+/** The offer waits until the user is back in a rhythm: their latest workout is at most this many days old. */
+export const PRO_OFFER_RECENT_DAYS = 7;
+
+export function trainedRecently(latestLocalDate: string | undefined, now: Date): boolean {
+  if (!latestLocalDate) return false;
+  const days = (now.getTime() - new Date(`${latestLocalDate}T12:00:00`).getTime()) / 86_400_000;
+  return days <= PRO_OFFER_RECENT_DAYS;
+}
 
 /**
- * The FORM Pro welcome: shown once, the first time a free user reaches Home after onboarding.
+ * The FORM Pro welcome: shown once, the first time a free user is on Home after finishing their third workout.
  * "Once" is per account on this device — a flag in the secure store, written the moment the sheet
  * appears, so closing the app mid-sheet never brings it back.
  */
@@ -40,8 +54,9 @@ export function resetProWelcomeMemory(): void {
 
 /**
  * Whether the welcome should show now, and how to dismiss it. It waits for everything else that
- * may take over Home: the account must have finished onboarding and be on the free plan, Home must
- * be the screen in front, no workout may be open, and no celebration may be waiting. If prices
+ * may take over Home: the account must have finished onboarding and at least PRO_OFFER_AFTER_WORKOUTS
+ * workouts, be on the free plan, Home must be the screen in front, no workout may be open, and no
+ * celebration may be waiting. The workout count is only fetched once everything else is in order. If prices
  * can't be loaded it stays away (and tries again next time) rather than show a plan with no price.
  * It also stays away while Pro can't be bought (no store connected: "coming soon"), so it never
  * offers plans that don't exist.
@@ -58,6 +73,7 @@ export function useProWelcome(): { visible: boolean; catalog: BillingCatalog | n
   const [seen, setSeen] = useState<boolean | null>(null);
   const [shown, setShown] = useState(false);
   const [closed, setClosed] = useState(false);
+  const { authed, token } = useAuth();
 
   useEffect(() => {
     if (!userId) return;
@@ -68,7 +84,7 @@ export function useProWelcome(): { visible: boolean; catalog: BillingCatalog | n
     };
   }, [userId]);
 
-  const eligible =
+  const ready =
     !!userId &&
     seen === false &&
     !closed &&
@@ -83,6 +99,12 @@ export function useProWelcome(): { visible: boolean; catalog: BillingCatalog | n
     // Never over a workout: wait until we know there isn't one open.
     session.isSuccess &&
     session.data === null;
+
+  // Same query (and cache) as the workout history; only asked once the offer could otherwise show.
+  const workouts = useQuery<{ workouts: WorkoutSummary[] }, ApiError>({ queryKey: qk.workouts, queryFn: () => authed(api.workouts), enabled: !!token && ready });
+  // Only for someone training now: never the first thing a returning user sees after a break.
+  const list = workouts.data?.workouts ?? [];
+  const eligible = ready && list.length >= PRO_OFFER_AFTER_WORKOUTS && trainedRecently(list[0]?.localDate, new Date());
 
   // Latch: once it is on screen it stays until the user closes it, and the flag is written right away.
   if (eligible && !shown) setShown(true);

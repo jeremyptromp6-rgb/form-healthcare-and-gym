@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, elevation, glow, scheme } from '@/theme/tokens';
 import { Button, ChipGroup, ErrorState, ICON_BUBBLE, IconBubble, ListRow, Screen, Segmented, StateView, stateIcon } from './index';
-import { InTabsContext, TAB_BAR, tabBarBottomPadding } from './tabBar';
+import { InTabsContext, TAB_BAR, tabBarBottomPadding, tabBarHeight } from './tabBar';
 
 // @testing-library/react-native v14: render and events are async.
 describe('design system', () => {
@@ -198,5 +198,12 @@ describe('screen layout and the tab bar', () => {
   it('the docked bar always keeps its labels clear of the system bar', () => {
     expect(tabBarBottomPadding(0)).toBe(TAB_BAR.minBottomPadding);
     expect(tabBarBottomPadding(48)).toBe(48);
+  });
+
+  it('the docked bar is exactly its content plus the system inset, so the screens above it end where it starts', () => {
+    expect(tabBarHeight(0)).toBe(TAB_BAR.height + TAB_BAR.minBottomPadding);
+    expect(tabBarHeight(34)).toBe(TAB_BAR.height + 34);
+    // Inside the tabs, Screen adds no inset of its own: the bar already owns it.
+    expect(tabBarHeight(34) - TAB_BAR.height).toBe(tabBarBottomPadding(34));
   });
 });

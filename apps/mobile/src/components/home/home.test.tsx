@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 import { accuracyLine, dailySummary, formatLitres, fuelLine, updatedAgo } from '@/lib/homeFormat';
-import type { HomeViewModel } from '@/lib/types';
+import type { HomeViewModel, PlannedExercise, WorkoutPlan } from '@/lib/types';
 import type { StepsCardState } from '@/lib/useSteps';
 import { HomeView } from './HomeView';
 
@@ -57,9 +57,14 @@ function vm(overrides: Partial<HomeViewModel> = {}): HomeViewModel {
   };
 }
 
-async function renderHome(v: HomeViewModel, props: Partial<Parameters<typeof HomeView>[0]> = {}) {
+const ex = (over: Partial<PlannedExercise> = {}): PlannedExercise => ({ exerciseId: 'squat', name: 'Squat', sets: 3, targetReps: { min: 8, max: 10 }, targetLoadKg: 60, restSeconds: 90, progression: 'repeat', note: null, cameraVerifiable: true, ...over });
+const plan = (exercises: PlannedExercise[] = [ex(), ex({ exerciseId: 'row', name: 'Row' })]): WorkoutPlan => ({ generator: { id: 'g', version: 1 }, date: '2026-09-27', title: 'Lower body day', focus: 'lower', exercises, estimatedMinutes: 45, notes: [] });
+
+/** Everything past the primary card and the insight lives behind "More from today"; most tests want it open. */
+async function renderHome(v: HomeViewModel, props: Partial<Parameters<typeof HomeView>[0]> = {}, expand = true) {
   const handlers = { onNavigate: jest.fn(), onAddWater: jest.fn(), onUndoWater: jest.fn() };
   await render(<HomeView vm={v} now={NOW} {...handlers} {...props} />);
+  if (expand) await fireEvent.press(screen.getByRole('button', { name: 'More from today' }));
   return handlers;
 }
 
@@ -237,9 +242,10 @@ describe('HomeView', () => {
     expect(screen.queryByText('Coach')).toBeNull();
   });
 
-  it("says so when the coach couldn't load, without blocking Home", async () => {
+  it("doesn't dwell on a coach that couldn't load: the insight falls back to one plain data line, and Home carries on", async () => {
     await renderHome(vm({ coach: { mode: 'real_ai', provider: 'Claude' } }), { coach: { response: null, loading: false, failed: true } });
-    expect(screen.getByText(/The coach couldn't load right now/)).toBeTruthy();
+    expect(screen.queryByText(/The coach couldn't load/)).toBeNull();
+    expect(screen.getByText(/82 g of protein to go today/)).toBeTruthy();
     expect(screen.getByText('Level 2 · Rookie')).toBeTruthy();
   });
 
@@ -247,6 +253,122 @@ describe('HomeView', () => {
     await renderHome(vm({ today: { ...vm().today!, suggestion: { kind: 'recover', title: 'Rest and recover', reason: 'You reported serious pain recently.' } } }));
     expect(screen.getByText('Rest and recover')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Start workout' })).toBeNull();
+  });
+});
+
+describe('Home primary card: what should I do today?', () => {
+  it('names the workout, its length and focus, a real reason, and offers Start workout', async () => {
+    const { onNavigate } = await renderHome(vm(), { plan: plan([ex({ progression: 'increase_load' }), ex({ exerciseId: 'row', name: 'Row' })]) }, false);
+    expect(screen.getByText('Lower body day')).toBeTruthy();
+    expect(screen.getByText('~45 min · 2 exercises · Lower body')).toBeTruthy();
+    expect(screen.getByText('For getting lean · session 2 of 4 this week · 1 lift is ready to progress.')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Start workout|Resume workout/ })).toHaveLength(1);
+    await fireEvent.press(screen.getByRole('button', { name: 'Start workout' }));
+    expect(onNavigate).toHaveBeenLastCalledWith('train');
+  });
+
+  it('becomes Resume workout while a session is open, and routes to the workout', async () => {
+    const { onNavigate } = await renderHome(vm(), { plan: plan(), openSession: { status: 'active' } }, false);
+    expect(screen.queryByRole('button', { name: 'Start workout' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Resume workout' }));
+    expect(onNavigate).toHaveBeenLastCalledWith('workout');
+  });
+
+  it('says a paused workout is paused', async () => {
+    await renderHome(vm(), { plan: plan(), openSession: { status: 'paused' } }, false);
+    expect(screen.getByText(/Your workout is paused/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Resume workout' })).toBeTruthy();
+  });
+
+  it('falls back to the server suggestion when the plan did not load', async () => {
+    await renderHome(vm(), { plan: null }, false);
+    expect(screen.getByText('Train today')).toBeTruthy();
+    expect(screen.getByText('1 of 4 planned sessions done this week.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start workout' })).toBeTruthy();
+  });
+
+  it('rest day: states it plainly and keeps training optional', async () => {
+    const { onNavigate } = await renderHome(vm({ today: { ...vm().today!, suggestion: { kind: 'rest_suggested', title: 'Rest day', reason: "You've trained 4 days this week." } } }), { plan: plan() }, false);
+    expect(screen.getByText('Rest day')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Start workout' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Train anyway' }));
+    expect(onNavigate).toHaveBeenLastCalledWith('train');
+  });
+
+  it('recovery: no training button, and the reason is the one insight', async () => {
+    await renderHome(vm({ today: { ...vm().today!, suggestion: { kind: 'recover', title: 'Rest and recover', reason: 'You reported serious pain recently.' } } }), { plan: plan() }, false);
+    expect(screen.getByText('Rest and recover')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /workout|Train anyway/ })).toBeNull();
+    expect(screen.getAllByText('You reported serious pain recently.')).toHaveLength(1);
+  });
+
+  it('done for today: celebrates without another button', async () => {
+    await renderHome(vm({ today: { ...vm().today!, trainedToday: true, suggestion: { kind: 'done_today', title: 'Workout done', reason: 'Nicely done today.' } } }), { plan: plan() }, false);
+    expect(screen.getByText('Workout done')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Start workout|Resume workout|Train anyway/ })).toBeNull();
+  });
+
+  it('a new user sees Start workout, then the first steps right under it, with the stats behind More', async () => {
+    await renderHome(vm({ state: 'new', firstSteps: [{ key: 'workout', done: false }, { key: 'meal', done: false }, { key: 'water', done: false }] }), { plan: plan() }, false);
+    const text = JSON.stringify(screen.toJSON());
+    expect(text.indexOf('Lower body day')).toBeGreaterThan(-1);
+    expect(text.indexOf('Lower body day')).toBeLessThan(text.indexOf('Start here'));
+    expect(text.indexOf('Start here')).toBeLessThan(text.indexOf('More from today'));
+    expect(screen.queryByText("Today's fuel")).toBeNull();
+  });
+});
+
+describe('Home insight and the More disclosure', () => {
+  const tip = {
+    topic: 'home' as const,
+    message: 'Sleep is where the gains land. Aim for a steady bedtime.',
+    category: 'recovery' as const,
+    priority: 'normal' as const,
+    evidence: [],
+    actions: [],
+    confidence: 'high' as const,
+    generatedAt: '2026-09-27T11:58:00Z',
+    provider: { type: 'deterministic_fallback' as const, name: 'FORM rules' },
+    degraded: null,
+  };
+  const coachOn = vm({ coach: { mode: 'deterministic_fallback', provider: 'FORM rules' } });
+
+  it('shows exactly one insight: a held lift beats the coach tip, and names the exercise', async () => {
+    await renderHome(coachOn, { plan: plan([ex({ progression: 'hold_for_form', note: null })]), coach: { response: tip, loading: false, failed: false } }, false);
+    expect(screen.getByText(/Squat: keep the weight where it is and make every rep clean/)).toBeTruthy();
+    expect(screen.queryByText("Today's tip")).toBeNull();
+    expect(screen.queryByText(/protein to go/)).toBeNull();
+  });
+
+  it('shows the coach tip when nothing outranks it, and no data line next to it', async () => {
+    await renderHome(coachOn, { plan: plan(), coach: { response: tip, loading: false, failed: false } }, false);
+    expect(screen.getByText("Today's tip")).toBeTruthy();
+    expect(screen.queryByText(/protein to go/)).toBeNull();
+  });
+
+  it('shows nothing extra while the coach tip is on its way', async () => {
+    await renderHome(coachOn, { plan: plan(), coach: { response: null, loading: true, failed: false } }, false);
+    expect(screen.queryByText(/protein to go/)).toBeNull();
+    expect(screen.queryByText('Worth knowing')).toBeNull();
+  });
+
+  it('keeps the stats wall closed until More from today is opened, with a one-line summary', async () => {
+    await renderHome(vm(), { plan: plan() }, false);
+    const more = screen.getByRole('button', { name: 'More from today' });
+    expect(more.props.accessibilityState).toMatchObject({ expanded: false });
+    expect(screen.getByText(/640 of 2,200 kcal/)).toBeTruthy();
+    expect(screen.queryByText("Today's fuel")).toBeNull();
+    expect(screen.queryByLabelText(/^Protein today/)).toBeNull();
+    await fireEvent.press(more);
+    expect(screen.getByText("Today's fuel")).toBeTruthy();
+    expect(screen.getByLabelText(/^Protein today/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More from today' }).props.accessibilityState).toMatchObject({ expanded: true });
+  });
+
+  it('keeps the refresh-failed banner and the returning welcome outside the disclosure', async () => {
+    await renderHome(vm({ state: 'returning', daysSinceLastActivity: 6 }), { refreshFailed: true, plan: plan() }, false);
+    expect(screen.getByText(/Couldn't refresh/)).toBeTruthy();
+    expect(screen.getByText(/Welcome back — it's been 6 days/)).toBeTruthy();
   });
 });
 

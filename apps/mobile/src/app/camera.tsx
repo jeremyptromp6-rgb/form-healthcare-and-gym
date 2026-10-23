@@ -3,7 +3,7 @@ import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LiveCameraView } from '@/components/camera/LiveCameraView';
+import { LiveCameraView, type ExerciseStripSet } from '@/components/camera/LiveCameraView';
 import { PoseCameraFeed } from '@/components/camera/PoseCameraFeed';
 import { StateView } from '@/components/ui';
 import { useReducedMotion } from '@/lib/a11y';
@@ -15,11 +15,19 @@ import { uuid } from '@/lib/dates';
 import { useScreenAwake } from '@/lib/keepAwake';
 import { useActiveSession, useLogSet, useSessionAction } from '@/lib/queries';
 import { useUnits } from '@/lib/units';
-import { formatTarget, nextSetDefaults, verificationNote } from '@/lib/workoutSession';
+import { setBadge } from '@/lib/setEvidence';
+import { formatTarget, nextSetDefaults, workingSets } from '@/lib/workoutSession';
 import { colors } from '@/theme/tokens';
 
 /** How far ahead (ms) the native body outline is drawn, in builds that collect feed numbers. */
 const OVERLAY_LEAD_MS = 60;
+
+/** A logged set on the strip: what the camera verified, or that it did not; a typed-in set says so and shows no camera numbers. */
+function stripSet(s: Parameters<typeof setBadge>[0], number: number): ExerciseStripSet {
+  const badge = setBadge(s);
+  if (!badge) return { number, summary: `${s.reps} ${s.reps === 1 ? 'rep' : 'reps'} logged by hand` };
+  return { number, summary: badge.label, note: badge.note, warn: badge.tone === 'warning' };
+}
 
 /**
  * Live camera for one exercise. Inside a workout it shows the current set, pauses the workout with
@@ -137,18 +145,12 @@ export default function CameraScreen() {
         trace: session.trace(),
       },
       {
-        onSuccess: ({ set }) => {
+        onSuccess: () => {
           setPendingSetId(null);
           session.startSet();
           setReadout(null);
-          const form = set.formScore !== null ? `, form ${set.formScore}` : '';
-          const differs = set.verifiedReps !== live ? " (the server's check is final)" : '';
-          const untrusted = verificationNote(set.verificationStatus);
-          setLogMessage(
-            untrusted
-              ? { tone: 'info', text: `Set saved — ${untrusted}. Your reps are kept as unverified.` }
-              : { tone: 'success', text: `Set saved — ${set.verifiedReps} verified rep${set.verifiedReps === 1 ? '' : 's'}${form}${differs}.` },
-          );
+          // The saved set is the new last line of the "This exercise" strip, with what the server verified
+          // (its count is final) and, when it did not count, why; a stale error from before is cleared above.
         },
         onError: (e) =>
           setLogMessage({ tone: 'danger', text: e.kind === 'network' ? 'Not saved — no connection. Your reps are kept; try again.' : e.message }),
@@ -158,7 +160,8 @@ export default function CameraScreen() {
 
   // Main builds subscribe to nothing and pass nothing extra.
   const feedDiagnostics = config.diagnostics ? { onDiag, leadMs: OVERLAY_LEAD_MS } : {};
-  const setNumber = inWorkout ? inWorkout.loggedSets.length + 1 : null;
+  const setNumber = inWorkout ? workingSets(inWorkout).length + 1 : null;
+  const exerciseSets = inWorkout ? workingSets(inWorkout).map((s, i) => stripSet(s, i + 1)) : undefined;
   return (
     <LiveCameraView
       exerciseId={exerciseId}
@@ -181,6 +184,7 @@ export default function CameraScreen() {
       onLogSet={inWorkout ? onLogSet : undefined}
       logging={logSet.isPending}
       logMessage={logMessage}
+      exerciseSets={exerciseSets}
       onResetCount={
         inWorkout
           ? undefined

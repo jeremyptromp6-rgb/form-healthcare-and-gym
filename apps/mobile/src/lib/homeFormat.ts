@@ -1,4 +1,4 @@
-import type { HomeViewModel } from './types';
+import type { HomeViewModel, PrimaryGoal, WorkoutPlan } from './types';
 
 /** Presentation helpers for Home. No business rules here — only wording and formatting of server values. */
 
@@ -62,4 +62,31 @@ export function updatedAgo(iso: string, now: Date = new Date()): string {
 
 export function shortDate(localDate: string): string {
   return new Date(`${localDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const FOCUS_LABEL: Record<WorkoutPlan['focus'], string> = { full_body: 'Full body', upper: 'Upper body', lower: 'Lower body' };
+
+/** "~45 min · 5 exercises · Full body", from the plan's own numbers. */
+export function planMeta(plan: WorkoutPlan): string {
+  const n = plan.exercises.length;
+  return `~${plan.estimatedMinutes} min · ${n} ${n === 1 ? 'exercise' : 'exercises'} · ${FOCUS_LABEL[plan.focus]}`;
+}
+
+const GOAL_PHRASE: Record<PrimaryGoal, string> = {
+  build_muscle: 'building muscle',
+  get_stronger: 'getting stronger',
+  lose_fat: 'losing fat',
+  get_lean: 'getting lean',
+  improve_fitness: 'improving your fitness',
+  improve_health: 'improving your health',
+};
+
+/** One reason line for today's workout, only from the user's goal, their week and the plan's progression flags. */
+export function planReason(goal: PrimaryGoal | null, workoutsThisWeek: number, plannedDaysPerWeek: number | null, plan: WorkoutPlan): string {
+  const parts: string[] = [];
+  if (goal) parts.push(`For ${GOAL_PHRASE[goal]}`);
+  if (plannedDaysPerWeek) parts.push(`session ${Math.min(workoutsThisWeek + 1, plannedDaysPerWeek)} of ${plannedDaysPerWeek} this week`);
+  const up = plan.exercises.filter((e) => e.progression === 'increase_load' || e.progression === 'increase_reps').length;
+  if (up > 0) parts.push(`${up} ${up === 1 ? 'lift is' : 'lifts are'} ready to progress`);
+  return parts.length ? `${parts.join(' · ')}.` : 'Your plan for today.';
 }

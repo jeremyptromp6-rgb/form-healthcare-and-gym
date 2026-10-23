@@ -21,6 +21,19 @@ describe("premium feature registry", () => {
     for (const f of PREMIUM_FEATURES) expect([f.title, f.pro, f.free].every((x) => x.length > 0)).toBe(true);
     expect(FREE_LIMITS.foodScansPerDay).toBeGreaterThan(0); // Free scanning exists
   });
+
+  it("leads with exactly five headline benefits, in the order the paywall shows them", () => {
+    const headline = PREMIUM_FEATURES.filter((f) => f.headline).map((f) => f.id);
+    expect(headline).toEqual(["ADAPTIVE_TRAINING", "ADVANCED_FORM_ANALYSIS", "AI_COACH_ADVANCED", "MEAL_PLANNER_ADVANCED", "ADVANCED_PROGRESS"]);
+    expect(PREMIUM_FEATURES.slice(0, 5).map((f) => f.id)).toEqual(headline);
+  });
+
+  it("never overclaims: coaching is not unlimited, and every feature says what Free keeps", () => {
+    const coach = PREMIUM_FEATURES.find((f) => f.id === "AI_COACH_ADVANCED")!;
+    expect(coach.pro).not.toMatch(/unlimited|as much as you like/i);
+    expect(coach.pro).toMatch(/fair-use/i);
+    for (const f of PREMIUM_FEATURES) expect(f.free.length).toBeGreaterThan(10);
+  });
 });
 
 describe("subscription state machine", () => {

@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
-import { Animated, Easing, View } from 'react-native';
+import { Animated, Easing, Pressable, View } from 'react-native';
 import { BodyMap } from '@/components/art/BodyMap';
 import { setsPerMuscle } from '@/lib/muscles';
 import { ExerciseThumb } from '@/components/art/ExerciseArt';
@@ -10,6 +10,7 @@ import { useReducedMotion } from '@/lib/a11y';
 import { CoachCard } from '@/components/coach/CoachViews';
 import type { CoachResponse, WorkoutSummaryDetail } from '@/lib/types';
 import { formatLoad, formatVolume, useUnits, type Units } from '@/lib/units';
+import { exerciseEvidence, hasCameraEvidence, nextTime, rejectionReasons, whatWeSaw } from '@/lib/setEvidence';
 import { verificationNote } from '@/lib/workoutSession';
 import { imagery } from '@/theme/imagery';
 import { colors, space } from '@/theme/tokens';
@@ -60,6 +61,19 @@ function Arrive({ children, delay = 0 }: { children: React.ReactNode; delay?: nu
 
 export { setsPerMuscle };
 
+/** An exercise's thumbnail and name; with `link` it also shows it opens the exercise page. */
+function ExerciseHead({ name, exerciseId, link = false }: { name: string; exerciseId: string; link?: boolean }) {
+  return (
+    <Row gap={space.md}>
+      <ExerciseThumb exerciseId={exerciseId} size={40} />
+      <AppText variant="bodyStrong" style={{ flex: 1 }}>
+        {name}
+      </AppText>
+      {link ? <Ionicons name="chevron-forward" size={16} color={colors.textFaint} /> : null}
+    </Row>
+  );
+}
+
 /** Workout summary — used right after completion and for history entries. */
 export function WorkoutSummaryView({
   summary,
@@ -67,6 +81,7 @@ export function WorkoutSummaryView({
   title = 'Workout complete',
   coachNote,
   onCoachAction,
+  onNavigate,
   adNext = false,
   units: unitsProp,
 }: {
@@ -76,6 +91,8 @@ export function WorkoutSummaryView({
   /** The coach on this session (validated server-side; may be a labelled rule-based tip). */
   coachNote?: CoachResponse | null;
   onCoachAction?: (route: string) => void;
+  /** Where the next-step buttons and exercise rows go ("/train", "/progress/analytics", "/train/exercise/<id>"). Without it they are not shown. */
+  onNavigate?: (route: string) => void;
   /** Free tier: a short ad is ready to follow Done. Said up front so it is never a surprise. */
   adNext?: boolean;
   /** Display units for loads (stored in kg). Defaults to the user's setting. */
@@ -90,6 +107,11 @@ export function WorkoutSummaryView({
   // A beaten record is a PR worth celebrating; a first value is a baseline to beat next time.
   // Manual sets earn less XP: said once, right after the workout (history rows show the badges only).
   const manualSets = summary.sets.some((s) => !s.warmup && s.mode === 'manual');
+  // What the camera verified. Only sets it had a say in count; typed-in and timed sets never get form or range numbers.
+  const working = summary.sets.filter((s) => !s.warmup);
+  const cameraSets = working.filter(hasCameraEvidence);
+  const evidence = exerciseEvidence(summary.sets);
+  const notCounted = [...new Set(cameraSets.flatMap((s) => rejectionReasons(s.quality)))];
   const awarded = summary.prs.filter((p) => p.status === 'awarded' && p.previous != null);
   const baselines = summary.prs.filter((p) => p.status === 'awarded' && p.previous == null && p.exerciseId !== '*');
 
@@ -162,17 +184,42 @@ export function WorkoutSummaryView({
         </Card>
       ) : null}
 
-      <StatStrip
-        items={[
-          { label: 'Verified reps', value: String(totals.verifiedReps), tint: colors.water },
-          ...(totals.averageFormScore !== null
-            ? [
-                { label: 'Average form', value: String(totals.averageFormScore) },
-                { label: 'Perfect reps', value: String(totals.perfectReps), tint: colors.success },
-              ]
-            : []),
-        ]}
-      />
+      {evidence ? (
+        <Card style={{ gap: space.md }}>
+          <Row gap={space.sm}>
+            <Ionicons name="videocam" size={18} color={colors.primary} />
+            <AppText variant="heading" header>
+              What the camera verified
+            </AppText>
+          </Row>
+          <StatStrip
+            items={[
+              { label: 'Verified reps', value: String(totals.verifiedReps), ...(evidence.attemptedKnown && evidence.attempted > totals.verifiedReps ? { unit: `of ${evidence.attempted}` } : {}), tint: colors.water },
+              ...((totals.averageFormScore ?? evidence.avgForm) !== null
+                ? [
+                    { label: 'Average form', value: String(totals.averageFormScore ?? evidence.avgForm) },
+                    { label: 'Perfect reps', value: String(totals.perfectReps), tint: colors.success },
+                  ]
+                : []),
+              ...(evidence.avgRom !== null ? [{ label: 'Average range', value: `${evidence.avgRom}%` }] : []),
+            ]}
+          />
+          {totals.verifiedReps === 0 ? (
+            <AppText variant="caption" color={colors.textMuted}>
+              {`The camera didn't verify any reps this time${notCounted.length ? ` (${notCounted.join('; ')})` : ''}. Your reps are kept as logged and earn XP as logged sets.`}
+            </AppText>
+          ) : notCounted.length > 0 ? (
+            <AppText variant="caption" color={colors.textMuted}>
+              {`Not counted: ${notCounted.join('; ')}.`}
+            </AppText>
+          ) : null}
+          {cameraSets.length < working.length ? (
+            <AppText variant="caption" color={colors.textFaint}>
+              {`The camera tracked ${cameraSets.length} of ${working.length} sets. The others were logged by hand and are not scored for form or range.`}
+            </AppText>
+          ) : null}
+        </Card>
+      ) : null}
 
       {muscles.length ? (
         <Card style={{ gap: space.lg }}>
@@ -196,12 +243,32 @@ export function WorkoutSummaryView({
       <Card style={{ gap: space.lg }}>
         {[...byExercise.entries()].map(([name, sets]) => (
           <View key={name} style={{ gap: space.sm }}>
-            <Row gap={space.md}>
-              <ExerciseThumb exerciseId={sets[0]!.exerciseId} size={40} />
-              <AppText variant="bodyStrong" style={{ flex: 1 }}>
-                {name}
-              </AppText>
-            </Row>
+            {onNavigate ? (
+              <Pressable accessibilityRole="link" accessibilityLabel={`${name}, open exercise`} onPress={() => onNavigate(`/train/exercise/${sets[0]!.exerciseId}`)}>
+                <ExerciseHead name={name} exerciseId={sets[0]!.exerciseId} link />
+              </Pressable>
+            ) : (
+              <ExerciseHead name={name} exerciseId={sets[0]!.exerciseId} />
+            )}
+            {(() => {
+              const seen = exerciseEvidence(sets);
+              const saw = seen ? whatWeSaw(seen) : null;
+              const next = seen ? nextTime(seen) : null;
+              return saw || next ? (
+                <View style={{ gap: 2 }}>
+                  {saw ? (
+                    <AppText variant="caption" color={colors.text}>
+                      {`What we saw: ${saw}.`}
+                    </AppText>
+                  ) : null}
+                  {next ? (
+                    <AppText variant="caption" color={colors.primary}>
+                      {`Next time: ${next}`}
+                    </AppText>
+                  ) : null}
+                </View>
+              ) : null;
+            })()}
             {sets.map((s, i) => {
               // Warm-ups are listed but not numbered: the working sets count 1, 2, 3.
               const label = s.warmup ? 'Warm-up' : `Set ${sets.slice(0, i).filter((x) => !x.warmup).length + 1}`;
@@ -245,6 +312,13 @@ export function WorkoutSummaryView({
       ) : null}
 
       {coachNote ? <CoachCard response={coachNote} title="Coach on this session" onAction={onCoachAction} /> : null}
+
+      {onNavigate ? (
+        <View style={{ gap: space.sm }}>
+          <Button label="See your next workout" icon="barbell-outline" variant="secondary" onPress={() => onNavigate('/train')} />
+          <Button label="Your progress" icon="stats-chart-outline" variant="secondary" onPress={() => onNavigate('/progress/analytics')} />
+        </View>
+      ) : null}
 
       {onDone ? (
         <View style={{ gap: space.sm }}>

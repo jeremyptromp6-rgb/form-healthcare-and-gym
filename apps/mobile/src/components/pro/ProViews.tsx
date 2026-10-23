@@ -77,13 +77,16 @@ const SIMULATIONS: { event: string; label: string }[] = [
 ];
 
 /** How many benefits lead the list when the server does not say which are the headline ones. */
-const HEADLINE_FALLBACK = 6;
+const HEADLINE_FALLBACK = 5;
 
-/** The headline benefits first (the server flags them; older servers lead with the first six), then the rest. */
+// Already named inside a headline benefit (form & ROM history; analytics & weekly reports): listing them again reads as padding.
+const COVERED_BY_HEADLINE = new Set<string>(['ADVANCED_ROM_ANALYSIS', 'WEEKLY_AI_REPORT', 'ADVANCED_BODY_QUEST']);
+
+/** The headline benefits first (the server flags them; older servers lead with the first five), then the rest. */
 export function splitFeatures(features: PremiumFeature[]): { headline: PremiumFeature[]; also: PremiumFeature[] } {
   const flagged = features.filter((f) => f.headline);
   const headline = flagged.length ? flagged : features.slice(0, HEADLINE_FALLBACK);
-  return { headline, also: features.filter((f) => !headline.includes(f)) };
+  return { headline, also: features.filter((f) => !headline.includes(f) && (!flagged.length || !COVERED_BY_HEADLINE.has(f.id))) };
 }
 
 function FeatureRow({ f, highlighted, compare }: { f: PremiumFeature; highlighted: boolean; compare?: boolean }) {
@@ -108,12 +111,15 @@ export function PaywallView(p: PaywallViewProps) {
   const pro = e.tier === 'pro';
   // The feature that brought the user here leads; then the headline benefits; the rest are "Also included".
   const { headline, also } = splitFeatures(catalog.features);
-  const lead = [...headline, ...also].find((f) => f.id === p.feature) ?? null;
+  const lead = catalog.features.find((f) => f.id === p.feature) ?? null;
   const headlineRows = headline.filter((f) => f !== lead);
   const alsoRows = also.filter((f) => f !== lead);
-  const products = catalog.products;
+  // Only plans the provider has priced: a plan with no price is never shown.
+  const products = catalog.products.filter((x) => x.price);
   const selected = products.find((x) => x.plan === p.plan) ?? products[0] ?? null;
   const savings = annualSavingsPercent(products);
+  // The price line: ties the plan and its price to the provider, nothing typed in here.
+  const priceOf = (x: BillingProduct) => `${x.price!.display}${perPeriod(x)}`;
   const dev = catalog.provider.environment === 'development';
   const status = statusLine(e);
   const legal = catalog.legal;
@@ -143,25 +149,28 @@ export function PaywallView(p: PaywallViewProps) {
         </InlineMessage>
       ) : null}
 
-      {pro || e.state === 'PRO_BILLING_ISSUE' || e.state === 'PRO_EXPIRED' ? (
-        <Card variant="raised" style={{ gap: space.sm }}>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <AppText variant="heading">Your plan</AppText>
-            <Badge label={STATE_LABEL[e.state]} tone={pro ? 'primary' : 'warning'} />
-          </Row>
-          {status ? <AppText variant="body">{status}</AppText> : null}
-          {pro && catalog.manageUrl ? <Button label="Manage subscription" variant="secondary" icon="open-outline" onPress={() => Linking.openURL(catalog.manageUrl!).catch(() => undefined)} /> : null}
-          {pro && !catalog.manageUrl && !dev ? (
-            <AppText variant="caption" color={colors.textMuted}>
-              Manage or cancel it in the store you subscribed with.
-            </AppText>
-          ) : null}
-        </Card>
-      ) : null}
+      <Card variant="raised" style={{ gap: space.sm }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <AppText variant="heading">Your plan</AppText>
+          <Badge label={STATE_LABEL[e.state]} tone={pro ? 'primary' : e.state === 'FREE' ? 'neutral' : 'warning'} />
+        </Row>
+        {!pro ? (
+          <AppText variant="body" color={colors.textMuted}>
+            Free is a full way to train: camera-verified sets, workout and meal logging, daily coach tips and 30 days of progress. Pro adds the five things below.
+          </AppText>
+        ) : null}
+        {status ? <AppText variant="body">{status}</AppText> : null}
+        {pro && catalog.manageUrl ? <Button label="Manage subscription" variant="secondary" icon="open-outline" onPress={() => Linking.openURL(catalog.manageUrl!).catch(() => undefined)} /> : null}
+        {pro && !catalog.manageUrl && !dev ? (
+          <AppText variant="caption" color={colors.textMuted}>
+            Manage or cancel it in Google Play › Subscriptions.
+          </AppText>
+        ) : null}
+      </Card>
 
       <View style={{ gap: space.xs }} accessibilityRole="list">
         <AppText variant="label" color={colors.textMuted}>
-          {comingSoon ? 'What FORM Pro will include' : 'What you get with Pro'}
+          {comingSoon ? 'Free vs Pro: what FORM Pro will add' : 'Free vs Pro'}
         </AppText>
         {lead ? <FeatureRow f={lead} highlighted compare={headline.includes(lead)} /> : null}
         {headlineRows.map((f) => (
@@ -184,8 +193,8 @@ export function PaywallView(p: PaywallViewProps) {
               {products.map((x) => (
                 <ChoiceCard
                   key={x.id}
-                  title={`${x.plan === 'annual' ? 'Yearly' : 'Monthly'} · ${x.price!.display}${perPeriod(x)}`}
-                  description={[x.trialDays ? `${x.trialDays}-day free trial` : null, x.plan === 'annual' && savings ? `Save ${savings}% vs monthly` : null].filter(Boolean).join(' · ') || undefined}
+                  title={`${x.plan === 'annual' ? 'Yearly' : 'Monthly'} · ${priceOf(x)}`}
+                  description={[x.trialDays ? `${x.trialDays}-day free trial, then ${priceOf(x)}` : null, x.plan === 'annual' && savings ? `Save ${savings}% vs monthly` : null].filter(Boolean).join(' · ') || undefined}
                   selected={selected?.id === x.id}
                   onPress={() => p.onPlan(x.plan)}
                 />
@@ -194,7 +203,7 @@ export function PaywallView(p: PaywallViewProps) {
           ) : null}
           {p.support.available && selected ? (
             <Button
-              label={selected.trialDays ? `Start ${selected.trialDays}-day free trial` : `Subscribe · ${selected.price!.display}${perPeriod(selected)}`}
+              label={selected.trialDays ? `Start ${selected.trialDays}-day free trial` : `Subscribe · ${priceOf(selected)}`}
               onPress={() => p.onPurchase(selected.id)}
               loading={p.busy === 'purchase'}
               disabled={p.busy !== null}
@@ -206,7 +215,7 @@ export function PaywallView(p: PaywallViewProps) {
           )}
           {selected ? (
             <AppText variant="caption" color={colors.textFaint}>
-              {selected.trialDays ? `After the free trial, ${selected.price!.display}${perPeriod(selected)}. ` : ''}Renews automatically until you cancel in your store account. Cancel any time — you keep Pro until the end of the period you paid for, and everything you logged stays yours.
+              {selected.trialDays ? `After the free trial, ${priceOf(selected)}. ` : ''}{`Renews every ${selected.plan === 'annual' ? 'year' : 'month'} until you cancel. Cancel any time in Google Play › Subscriptions. You keep Pro until the end of the period you paid for — everything you logged stays yours.`}
             </AppText>
           ) : null}
         </View>

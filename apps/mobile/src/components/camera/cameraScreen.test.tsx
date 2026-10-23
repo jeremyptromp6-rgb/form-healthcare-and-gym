@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import CameraScreen from '@/app/camera';
 import { READY_HOLD_MS } from '@/lib/pose/useGetReady';
-import type { SessionExercise, WorkoutSession } from '@/lib/types';
+import type { SessionExercise, SessionSet, WorkoutSession } from '@/lib/types';
 
 // The camera route: the set it logs uses the load from the workout screen (A2-04), practice mode never
 // logs (A2-22), and a failed pause or resume is shown (A2-11). The feed is the only thing stubbed.
@@ -148,21 +148,27 @@ describe('camera screen inside a workout', () => {
     expect(body().loadKg).toBe(0);
   });
 
-  it("tells the user honestly when the server didn't trust the camera time, and doesn't call it verified", async () => {
-    mockLogMutate.mockImplementation((_b: unknown, o: Opts) =>
-      o.onSuccess?.({ set: { verifiedReps: 0, formScore: null, verificationStatus: 'trace_exceeds_time' }, session: mockSession }),
-    );
-    await renderCamera();
-    await fireEvent.press(logSetButton());
-    expect(screen.getByText("Set saved — Not verified — camera time didn't match the workout. Your reps are kept as unverified.")).toBeTruthy();
-    expect(screen.queryByText(/0 verified reps\./)).toBeNull();
+  const savedSet = (over: Partial<SessionSet> = {}): SessionSet => ({
+    id: 's1', clientSetId: 'c1', exerciseId: 'bicep_curl', setIndex: 0, targetReps: 12, targetLoadKg: 12, reps: 10, loadKg: 12, verifiedReps: 0, verificationStatus: 'verified',
+    romPercent: null, formScore: null, quality: null, mode: 'camera', createdAt: '2026-09-28T10:00:00Z', ...over,
   });
 
-  it('still reports verified reps for a normal save', async () => {
-    mockLogMutate.mockImplementation((_b: unknown, o: Opts) => o.onSuccess?.({ set: { verifiedReps: 0, formScore: null, verificationStatus: 'verified' }, session: mockSession }));
+  it("says plainly when the server didn't trust the camera time, and doesn't call it verified", async () => {
+    mockSession = makeSession({ exercises: [curl({ loggedSets: [savedSet({ verificationStatus: 'trace_exceeds_time' })] })] });
     await renderCamera();
-    await fireEvent.press(logSetButton());
-    expect(screen.getByText('Set saved — 0 verified reps.')).toBeTruthy();
+    expect(screen.getByText('Set 1 · Not verified')).toBeTruthy();
+    expect(screen.getByText("Camera time didn't match the workout. Your reps are kept as logged.")).toBeTruthy();
+    expect(screen.queryByText(/0 verified/)).toBeNull();
+  });
+
+  it('shows what the camera verified for each earlier set, and a typed-in set without camera numbers', async () => {
+    mockSession = makeSession({
+      exercises: [curl({ loggedSets: [savedSet({ verifiedReps: 8, formScore: 82, romPercent: 95, quality: { attemptedReps: 9, verifiedReps: 8, rejectedReps: {}, incomplete: false, averageFormScore: 82, averageRomPercent: 95, perfectReps: 5, topIssue: null } }), savedSet({ id: 's2', setIndex: 1, mode: 'manual', reps: 10 })] })],
+    });
+    await renderCamera();
+    expect(screen.getByText('Set 1 · 8 verified · form Good · ROM 95%')).toBeTruthy();
+    expect(screen.getByText('Set 2 · 10 reps logged by hand')).toBeTruthy();
+    expect(screen.getByText('On set 3 of 3')).toBeTruthy();
   });
 
   it('shows why pausing the workout failed instead of doing nothing', async () => {

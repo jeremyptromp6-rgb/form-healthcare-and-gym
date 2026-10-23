@@ -152,6 +152,35 @@ describe('cameraScreenModel', () => {
     expect(cameraScreenModel(LIVE, READY, { ...readout(null, 150, fresh), traceFull: true }, false).feedback!.message).toMatch(/log it to keep counting/);
   });
 
+  it('lost tracking after reps: says the verified reps are kept, and nothing else counts', () => {
+    const three = { ...repState([88]), verifiedReps: 3 };
+    const lost = cameraScreenModel(LIVE, READY, readout('no_person', null, three), false).feedback!;
+    expect(lost).toMatchObject({ tone: 'adjust' });
+    expect(lost.message).toMatch(/^Lost you — your 3 verified reps are kept. /);
+    expect(lost.message).toContain(FRAMING_MESSAGES.no_person);
+    expect(cameraScreenModel(LIVE, READY, readout('no_person', null, { ...three, verifiedReps: 1 }), false).feedback!.message).toMatch(/^Lost you — your 1 verified rep is kept./);
+    // Nothing verified yet: just the framing guidance. Other framing problems keep their own copy.
+    expect(cameraScreenModel(LIVE, READY, readout('no_person'), false).feedback!.message).toBe(FRAMING_MESSAGES.no_person);
+    expect(cameraScreenModel(LIVE, READY, readout('low_light', null, three), false).feedback!.message).toBe(FRAMING_MESSAGES.low_light);
+  });
+
+  it('partial reps are named as not counted once the rep cue has faded', () => {
+    const base = repState([88]);
+    const partial = (n: number): LiveRepState => ({ ...base, feedback: null, quality: { ...base.quality, rejectedReps: { insufficient_rom: n } } });
+    expect(cameraScreenModel(LIVE, READY, readout(null, 172, partial(2)), false).feedback).toEqual({ message: "2 reps didn't reach full range and weren't counted.", tone: 'adjust' });
+    expect(cameraScreenModel(LIVE, READY, readout(null, 172, partial(1)), false).feedback!.message).toBe("1 rep didn't reach full range and weren't counted.");
+    // A live rep cue still wins while it is up.
+    expect(cameraScreenModel(LIVE, READY, readout(null, 172, { ...partial(1), feedback: repState([130]).feedback }), false).feedback).toMatchObject({ headline: 'REP NOT VERIFIED' });
+  });
+
+  it('interrupted and paused keep their wording and say the reps are kept', () => {
+    const two = { ...repState([88]), verifiedReps: 2 };
+    expect(cameraScreenModel({ kind: 'interrupted' }, READY, readout(null, 172, two), false).feedback!.message).toBe('Waiting for the camera to come back — your 2 verified reps are kept.');
+    expect(cameraScreenModel(LIVE, READY, readout(null, 172, two), true).feedback!.message).toBe('Paused — resume when you’re ready; your 2 verified reps are kept.');
+    expect(cameraScreenModel({ kind: 'interrupted' }, READY, null, false).feedback!.message).toBe('Waiting for the camera to come back…');
+    expect(cameraScreenModel(LIVE, READY, readout(null), true).feedback!.message).toBe('Paused — resume when you’re ready.');
+  });
+
   it('framing guidance comes straight from the domain assessment', () => {
     expect(cameraScreenModel(LIVE, READY, readout('too_close'), false).feedback).toEqual({ message: 'Move farther away so your full body is visible.', tone: 'adjust' });
     expect(cameraScreenModel(LIVE, READY, readout('multiple_people'), false).feedback!.message).toBe(FRAMING_MESSAGES.multiple_people);

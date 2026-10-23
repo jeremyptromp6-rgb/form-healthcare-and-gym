@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { BodyMap } from '@/components/art/BodyMap';
 import { Buddy } from '@/components/art/Buddy';
@@ -8,17 +8,18 @@ import { setsPerMuscle } from '@/lib/muscles';
 import { RankEmblem as RankBadge } from '@/components/art/RankEmblem';
 import { AppText, Badge, Button, Card, Divider, ExerciseList, FuelSummary, heroInk, ICON_BUBBLE, IconBubble, InlineMessage, PhotoHero, ProgressBar, ProgressRing, Row, Screen, SectionAction, SectionHeader, StateView, StatStrip, WaterLine, type IconName } from '@/components/ui';
 import { levelLine, RankEmblem } from '@/components/progress/ProgressionViews';
-import { CoachCard } from '@/components/coach/CoachViews';
 import { BodyQuestSummaryCard } from '@/components/recognition/RecognitionViews';
-import { accuracyLine, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
+import { accuracyLine, dailySummary, formatLitres, fuelLine, GREETING, shortDate, updatedAgo } from '@/lib/homeFormat';
+import { pickHomeInsight } from '@/lib/homeInsight';
 import { heroPhoto } from '@/lib/heroPhotos';
 import { rankLabel, stepProgress } from '@/lib/prestige';
 import type { StepsCardState } from '@/lib/useSteps';
-import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress } from '@/lib/types';
+import type { CoachResponse, HomeSection, HomeViewModel, QuestProgress, WorkoutPlan } from '@/lib/types';
 import { formatLoad, useUnits, type Units } from '@/lib/units';
 import { colors, radius, space } from '@/theme/tokens';
+import { InsightCard, MoreToggle, TodayCard, type OpenSession } from './HomeToday';
 
-export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak' | 'rank';
+export type HomeRoute = 'train' | 'eat' | 'progress' | 'profile' | 'streak' | 'rank' | 'workout';
 
 export interface HomeViewProps {
   vm: HomeViewModel;
@@ -42,6 +43,10 @@ export interface HomeViewProps {
   onOpenRoute?: (route: string) => void;
   /** Today's steps from Health Connect (Android). Hidden unless the device can offer them. */
   steps?: StepsCardState;
+  /** Today's generated workout. Absent while loading or when it failed: Home then uses the server's suggestion. */
+  plan?: WorkoutPlan | null;
+  /** A workout that is open right now (active or paused): the primary action becomes Resume. */
+  openSession?: OpenSession | null;
 }
 
 const SECTION_LABEL: Record<HomeSection, string> = {
@@ -55,11 +60,21 @@ const SECTION_LABEL: Record<HomeSection, string> = {
 };
 
 /**
- * Home answers one question first: what should I do today? A greeting, the day's plan with one
- * clear action, three numbers that matter, then everything else, quieter. A pure view over the
+ * Home answers one question first: what should I do today? A short photo greeting, one card with
+ * the day's workout and one clear action, at most one insight, then everything else behind "More from
+ * today". A pure view over the
  * server's Home view model — every number comes from `vm`, every action routes somewhere real.
  */
-export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute, units, steps }: HomeViewProps) {
+export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, waterError, refreshing, onRefresh, refreshFailed, footer, now, coach, onOpenCoach, onOpenRoute, units, steps, plan, openSession }: HomeViewProps) {
+  const [more, setMore] = useState(false);
+  const insight = pickHomeInsight({
+    today: vm.today,
+    plan,
+    nutrition: vm.nutrition,
+    streak: vm.progression?.streak.current ?? null,
+    coach: vm.coach.mode !== 'unavailable' ? (coach?.response ?? null) : null,
+    coachPending: vm.coach.mode !== 'unavailable' && !!coach?.loading,
+  });
   const failed = (s: HomeSection) => vm.errors.includes(s);
   const date = new Date(`${vm.date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -69,7 +84,7 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
       refreshing={refreshing}
       onRefresh={onRefresh}
       hero={
-        <PhotoHero source={heroPhoto('home')} minHeight={vm.today ? 440 : 300}>
+        <PhotoHero source={heroPhoto('home')} minHeight={240}>
           <Row style={styles.greeting}>
             <View style={{ flex: 1, gap: 4 }}>
               <AppText variant="label" color={heroInk.muted}>
@@ -96,13 +111,14 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
               </Pressable>
             </Row>
           ) : null}
-          {vm.today ? <TodayFocus today={vm.today} onNavigate={onNavigate} /> : null}
         </PhotoHero>
       }>
-      {vm.nutrition || vm.water || vm.progression ? <StatTiles vm={vm} onNavigate={onNavigate} /> : null}
-
-      {steps && steps.status !== 'unavailable' && steps.status !== 'checking' ? <StepsCard steps={steps} /> : null}
-
+      {/* 1 · What to do today: one card, one action. Without a plan or a suggestion, say so. */}
+      {openSession || vm.today || plan ? (
+        <TodayCard today={vm.today} plan={plan} goal={vm.greeting.primaryGoal} openSession={openSession} onNavigate={onNavigate} />
+      ) : failed('today') ? (
+        <SectionError name="today" />
+      ) : null}
 
       {refreshFailed ? (
         <InlineMessage tone="warning" icon="cloud-offline-outline">
@@ -118,67 +134,61 @@ export function HomeView({ vm, onNavigate, onAddWater, onUndoWater, waterBusy, w
         </InlineMessage>
       ) : null}
 
-      {/* 3 · The one thing to do today lives in the photo header above. */}
-      {!vm.today && failed('today') ? <SectionError name="today" /> : null}
+      {/* 2 · At most one insight: recovery, a form hold, the coach's tip, or one plain data line. */}
+      <InsightCard insight={insight} onNavigate={onNavigate} onOpenCoach={onOpenCoach} onOpenRoute={onOpenRoute} />
 
-      {/* 4 · Nutrition: calories, macros and water together. */}
-      <View style={{ gap: space.md }}>
-        <SectionHeader title="Today's fuel" action={<SectionAction label="Log food" onPress={() => onNavigate('eat')} />} />
-        {vm.nutrition ? (
-          <Fuel n={vm.nutrition} onNavigate={onNavigate}>
-            {vm.water ? <Water w={vm.water} onAdd={onAddWater} onUndo={onUndoWater} busy={waterBusy} error={waterError} /> : null}
-          </Fuel>
-        ) : (
-          <SectionError name="nutrition" />
-        )}
+      {/* 3 · Everything else, one tap away. */}
+      <View style={{ gap: space.lg }}>
+        <MoreToggle open={more} summary={dailySummary(vm).join(' · ')} onToggle={() => setMore((m) => !m)} />
+        {more ? (
+          <View style={{ gap: space.lg }}>
+            {vm.nutrition || vm.water || vm.progression ? <StatTiles vm={vm} onNavigate={onNavigate} /> : null}
+
+            {steps && steps.status !== 'unavailable' && steps.status !== 'checking' ? <StepsCard steps={steps} /> : null}
+
+            <View style={{ gap: space.md }}>
+              <SectionHeader title="Today's fuel" action={<SectionAction label="Log food" onPress={() => onNavigate('eat')} />} />
+              {vm.nutrition ? (
+                <Fuel n={vm.nutrition} onNavigate={onNavigate}>
+                  {vm.water ? <Water w={vm.water} onAdd={onAddWater} onUndo={onUndoWater} busy={waterBusy} error={waterError} /> : null}
+                </Fuel>
+              ) : (
+                <SectionError name="nutrition" />
+              )}
+            </View>
+            {vm.nutrition && !vm.water ? <SectionError name="water" /> : null}
+
+            {vm.today?.lastWorkout ? <LastSession last={vm.today.lastWorkout} units={units} /> : null}
+
+            <View style={{ gap: space.md }}>
+              <SectionHeader title="Today's goals" />
+              {vm.quests ? <Quests daily={vm.quests.daily} weekly={vm.quests.weekly} /> : <SectionError name="quests" />}
+            </View>
+
+            <View style={{ gap: space.md }}>
+              <SectionHeader title="Your level" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
+              {vm.progression ? <Level p={vm.progression} onOpenRank={() => onNavigate('rank')} /> : <SectionError name="progression" />}
+            </View>
+
+            {vm.errors.includes('recognition') ? (
+              <SectionError name="recognition" />
+            ) : vm.bodyQuest.available && vm.achievements.available ? (
+              <View style={{ gap: space.md }}>
+                <SectionHeader title="Milestones" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
+                <Milestones vm={vm} onOpen={() => onNavigate('progress')} />
+              </View>
+            ) : (
+              <Card variant="plain" style={{ gap: space.xs }}>
+                <AppText variant="bodyStrong">Coming to FORM</AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {[!vm.bodyQuest.available && 'Body Quest', !vm.achievements.available && 'Achievements'].filter(Boolean).join(' and ')} aren&apos;t available yet.
+                  Everything you log now will count toward them.
+                </AppText>
+              </Card>
+            )}
+          </View>
+        ) : null}
       </View>
-      {vm.nutrition && !vm.water ? <SectionError name="water" /> : null}
-
-      {/* 5 · The coach's read on the day. */}
-      {vm.coach.mode !== 'unavailable' && coach ? (
-        <View style={{ gap: space.md }}>
-          <SectionHeader title="Coach" action={onOpenCoach ? <SectionAction label="Ask the coach" onPress={onOpenCoach} /> : undefined} />
-          {coach.response ? (
-            <CoachCard response={coach.response} title="Today's tip" onAction={onOpenRoute} />
-          ) : coach.loading ? (
-            <StateView kind="loading" compact />
-          ) : coach.failed ? (
-            <InlineMessage tone="info" flat>
-              {"The coach couldn't load right now. Pull down to try again."}
-            </InlineMessage>
-          ) : null}
-        </View>
-      ) : null}
-
-      {/* Then the longer view: the last session, goals, level and milestones. */}
-      {vm.today?.lastWorkout ? <LastSession last={vm.today.lastWorkout} units={units} /> : null}
-
-      <View style={{ gap: space.md }}>
-        <SectionHeader title="Today's goals" />
-        {vm.quests ? <Quests daily={vm.quests.daily} weekly={vm.quests.weekly} /> : <SectionError name="quests" />}
-      </View>
-
-      <View style={{ gap: space.md }}>
-        <SectionHeader title="Your level" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
-        {vm.progression ? <Level p={vm.progression} onOpenRank={() => onNavigate('rank')} /> : <SectionError name="progression" />}
-      </View>
-
-      {vm.errors.includes('recognition') ? (
-        <SectionError name="recognition" />
-      ) : vm.bodyQuest.available && vm.achievements.available ? (
-        <View style={{ gap: space.md }}>
-          <SectionHeader title="Milestones" action={<SectionAction label="View all" onPress={() => onNavigate('progress')} />} />
-          <Milestones vm={vm} onOpen={() => onNavigate('progress')} />
-        </View>
-      ) : (
-        <Card variant="plain" style={{ gap: space.xs }}>
-          <AppText variant="bodyStrong">Coming to FORM</AppText>
-          <AppText variant="caption" color={colors.textMuted}>
-            {[!vm.bodyQuest.available && 'Body Quest', !vm.achievements.available && 'Achievements'].filter(Boolean).join(' and ')} aren&apos;t available yet.
-            Everything you log now will count toward them.
-          </AppText>
-        </Card>
-      )}
 
       <AppText variant="caption" color={colors.textFaint} style={{ textAlign: 'center' }}>
         Updated {updatedAgo(vm.generatedAt, now)}
@@ -313,29 +323,6 @@ function LastSession({ last, units: unitsProp }: { last: NonNullable<NonNullable
         </ExerciseList>
       </View>
     </Card>
-  );
-}
-
-/** The day's focus, on the photo: what to do today, why, the week so far and one clear action. */
-function TodayFocus({ today, onNavigate }: { today: NonNullable<HomeViewModel['today']>; onNavigate: HomeViewProps['onNavigate'] }) {
-  const s = today.suggestion;
-  const train = s.kind === 'train';
-  return (
-    <View style={{ gap: space.sm, paddingTop: space.md }}>
-      <AppText variant="overline" color={s.kind === 'recover' ? heroInk.warning : heroInk.primary}>
-        Today
-      </AppText>
-      <AppText variant="display" header color={heroInk.text}>
-        {s.title}
-      </AppText>
-      <AppText variant="body" color={heroInk.muted}>
-        {s.reason}
-      </AppText>
-      {today.plannedDaysPerWeek ? <WeekDots done={today.workoutsThisWeek} planned={today.plannedDaysPerWeek} /> : null}
-      {s.kind === 'train' || s.kind === 'rest_suggested' ? (
-        <Button label={train ? 'Start workout' : 'Train anyway'} iconRight={train ? 'arrow-forward' : undefined} variant={train ? 'primary' : 'secondary'} onPress={() => onNavigate('train')} style={{ marginTop: space.sm }} />
-      ) : null}
-    </View>
   );
 }
 
@@ -491,17 +478,6 @@ function StepsCard({ steps }: { steps: StepsCardState }) {
           </>
         )}
       </Card>
-    </View>
-  );
-}
-
-/** One dot per planned session this week, filled as they're done. */
-function WeekDots({ done, planned }: { done: number; planned: number }) {
-  return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }} accessible accessibilityLabel={`${done} of ${planned} sessions this week`}>
-      {Array.from({ length: Math.max(planned, done) }, (_, i) => (
-        <View key={i} style={[styles.dot, i < done && { backgroundColor: colors.primary }]} />
-      ))}
     </View>
   );
 }
@@ -679,7 +655,6 @@ function Level({ p, onOpenRank }: { p: NonNullable<HomeViewModel['progression']>
 
 const styles = StyleSheet.create({
   greeting: { paddingTop: space.sm, paddingBottom: space.xs, alignItems: 'flex-end' },
-  dot: { width: 28, height: 6, borderRadius: 3, backgroundColor: `${heroInk.muted}4D` },
   avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: `${heroInk.text}1F`, alignItems: 'center', justifyContent: 'center' },
   tile: { flex: 1, minWidth: 0, gap: 4, padding: space.md, borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.md, minHeight: 36, borderRadius: radius.pill },

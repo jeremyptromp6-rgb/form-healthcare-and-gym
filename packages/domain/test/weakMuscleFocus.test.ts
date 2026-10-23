@@ -25,7 +25,7 @@ describe("weakMuscleFocus", () => {
 
 describe("Pro lineup", () => {
   it("leads with the five headline benefits in order (no ads benefit while FORM ships without ads)", () => {
-    expect(PREMIUM_FEATURES.filter((f) => f.headline).map((f) => f.id)).toEqual(["FOOD_SCANNER_PREMIUM", "STREAK_SHIELD", "WEAK_MUSCLE_PLANS", "ADVANCED_PROGRESS", "MEAL_PLANNER_ADVANCED"]);
+    expect(PREMIUM_FEATURES.filter((f) => f.headline).map((f) => f.id)).toEqual(["ADAPTIVE_TRAINING", "ADVANCED_FORM_ANALYSIS", "AI_COACH_ADVANCED", "MEAL_PLANNER_ADVANCED", "ADVANCED_PROGRESS"]);
     expect(PREMIUM_FEATURES.slice(0, 5).every((f) => f.headline)).toBe(true);
     expect(PREMIUM_FEATURES.find((f) => f.id === "AD_FREE")).toMatchObject({ unlisted: true });
   });

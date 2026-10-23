@@ -98,14 +98,14 @@ function ProCard({ e }: { e: Entitlements }) {
         <Badge label={STATE_LABEL[e.state]} tone={pro ? 'primary' : e.state === 'PRO_BILLING_ISSUE' ? 'warning' : 'neutral'} />
       </Row>
       <AppText variant="body" color={colors.textMuted}>
-        {status ?? 'Adaptive training, form intelligence, weekly reports, advanced planning and progress.'}
+        {status ?? 'Free is a full way to train. Pro adds adaptive training, form and range-of-motion history, a deeper AI coach, personalized meal plans and weekly reports.'}
       </AppText>
       {e.environment === 'development' ? (
         <AppText variant="caption" color={colors.warning}>
           Development store purchase — no real payment.
         </AppText>
       ) : null}
-      <Button label={pro ? 'Manage FORM Pro' : 'See FORM Pro'} variant={pro ? 'secondary' : 'primary'} onPress={() => openPaywall()} />
+      <Button label={pro ? 'Manage FORM Pro' : 'See FORM Pro'} variant="secondary" onPress={() => openPaywall()} />
     </GradientCard>
   );
 }
